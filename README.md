@@ -40,13 +40,13 @@ pnpm dev
 
 `pnpm dev` launches the Tauri shell with Vite HMR on port `1420`.
 
-### Browser-only UI preview
+### Frontend-only Vite (no mail engine)
 
 ```bash
 pnpm desktop:dev
 ```
 
-Opens the React UI with demo messages (no IMAP).
+Serves the React shell without Tauri IPC. Account/mail APIs require `pnpm dev`.
 
 ## Workspace layout
 

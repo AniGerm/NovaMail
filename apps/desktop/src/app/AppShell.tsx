@@ -8,7 +8,7 @@ import { Composer } from "@/features/composer/Composer";
 import { MessageList } from "@/features/mail/MessageList";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
-import { api, demoMessages } from "@/shared/api/client";
+import { api, isDesktopShell } from "@/shared/api/client";
 import type { AppError, MessageDetailDto } from "@/shared/api/types";
 import { useUiStore } from "@/shared/store/uiStore";
 
@@ -30,88 +30,56 @@ export function AppShell() {
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
-  const [demoMode, setDemoMode] = useState(false);
+  const desktop = isDesktopShell();
 
   const accountsQuery = useQuery({
     queryKey: ["accounts"],
-    queryFn: async () => {
-      try {
-        return await api.accountsList();
-      } catch (error) {
-        if ((error as AppError).code === "not_tauri") {
-          setDemoMode(true);
-          return [];
-        }
-        throw error;
-      }
-    },
+    enabled: desktop,
+    queryFn: () => api.accountsList(),
   });
 
   const messagesQuery = useQuery({
     queryKey: ["messages", "unified", searchQuery],
-    queryFn: async () => {
-      if (demoMode) {
-        const filtered = demoMessages.messages.filter((message) => {
-          if (!searchQuery.trim()) return true;
-          const q = searchQuery.toLowerCase();
-          return (
-            message.subject.toLowerCase().includes(q) ||
-            message.snippet.toLowerCase().includes(q) ||
-            message.from.email.toLowerCase().includes(q)
-          );
-        });
-        return { messages: filtered, total: filtered.length };
-      }
-      return api.messagesList({
+    enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
+    queryFn: () =>
+      api.messagesList({
         unified: true,
         limit: 200,
         offset: 0,
         query: searchQuery || null,
         mailboxId: null,
         accountId: null,
-      });
-    },
+      }),
   });
 
   const messageQuery = useQuery({
     queryKey: ["message", selectedMessageId],
-    enabled: Boolean(selectedMessageId),
-    queryFn: async () => {
-      if (demoMode) {
-        const summary = demoMessages.messages.find((m) => m.id === selectedMessageId);
-        if (!summary) throw { code: "not_found", message: "Missing demo message" };
-        return {
-          summary,
-          bodyText: `${summary.snippet}\n\nThis is demo content shown outside the Tauri shell.`,
-          bodyHtml: null,
-          messageId: `<${summary.id}@demo>`,
-          inReplyTo: null,
-          references: [],
-        } satisfies MessageDetailDto;
-      }
-      return api.messagesGet(selectedMessageId!);
-    },
+    enabled: desktop && Boolean(selectedMessageId),
+    queryFn: () => api.messagesGet(selectedMessageId!),
   });
 
   useEffect(() => {
+    if (!desktop) return;
     let unlisten: (() => void) | undefined;
-    api.onSyncProgress((event) => {
-      if (event.error) {
-        setSyncStatus(`Sync error in ${event.mailboxName}: ${event.error}`);
-        return;
-      }
-      setSyncStatus(
-        event.done
-          ? `Synced ${event.mailboxName}`
-          : `Syncing ${event.mailboxName}… ${event.fetched}`,
-      );
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    api
+      .onSyncProgress((event) => {
+        if (event.error) {
+          setSyncStatus(`Sync error in ${event.mailboxName}: ${event.error}`);
+          return;
+        }
+        setSyncStatus(
+          event.done
+            ? `Synced ${event.mailboxName}`
+            : `Syncing ${event.mailboxName}… ${event.fetched}`,
+        );
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
     return () => {
       unlisten?.();
     };
-  }, [setSyncStatus]);
+  }, [desktop, setSyncStatus]);
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -121,8 +89,8 @@ export function AppShell() {
   }, [queryClient]);
 
   const handleSync = useCallback(async () => {
-    if (demoMode) {
-      setSyncStatus("Demo mode — open via Tauri to sync real mail");
+    if (!desktop) {
+      setSyncStatus("Start NovaMail with pnpm dev to sync mail");
       return;
     }
     setSyncStatus("Starting sync…");
@@ -134,11 +102,10 @@ export function AppShell() {
     } catch (error) {
       setSyncStatus((error as AppError).message);
     }
-  }, [demoMode, refresh, setSyncStatus]);
+  }, [desktop, refresh, setSyncStatus]);
 
   const handleToggleStar = useCallback(async () => {
-    if (!messageQuery.data) return;
-    if (demoMode) return;
+    if (!messageQuery.data || !desktop) return;
     await api.messagesSetFlags({
       messageId: messageQuery.data.summary.id,
       starred: !messageQuery.data.summary.starred,
@@ -147,7 +114,7 @@ export function AppShell() {
       queryKey: ["message", messageQuery.data.summary.id],
     });
     await queryClient.invalidateQueries({ queryKey: ["messages"] });
-  }, [demoMode, messageQuery.data, queryClient]);
+  }, [desktop, messageQuery.data, queryClient]);
 
   const themeDark =
     theme === "dark" ||
@@ -181,6 +148,15 @@ export function AppShell() {
   const messages = messagesQuery.data?.messages ?? [];
   const accounts = accountsQuery.data ?? [];
 
+  if (!desktop) {
+    return (
+      <EmptyState
+        title="NovaMail"
+        description="The mail engine runs inside the Tauri desktop shell. Start it with pnpm dev from the repository root."
+      />
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-[var(--nova-border)] px-4 py-3">
@@ -194,11 +170,6 @@ export function AppShell() {
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-xl"
         />
-        {demoMode ? (
-          <span className="text-xs text-[var(--nova-ink-muted)]">
-            Browser preview · demo data
-          </span>
-        ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -215,7 +186,7 @@ export function AppShell() {
           onToggleTheme={() => setTheme(themeDark ? "light" : "dark")}
         />
 
-        {accounts.length === 0 && !demoMode ? (
+        {accounts.length === 0 ? (
           <EmptyState
             title="Welcome to NovaMail"
             description="Add your first account to sync a unified inbox across Gmail, Microsoft 365, Yahoo, Proton Bridge, or any IMAP server."

@@ -64,54 +64,6 @@ export const api = {
   },
 };
 
-/** Demo data used when the UI is opened in a plain browser for design work. */
-export const demoMessages: ListMessagesResponse = {
-  total: 3,
-  messages: [
-    {
-      id: "demo-1",
-      accountId: "acc-1",
-      mailboxId: "mb-1",
-      threadId: "th-1",
-      subject: "Welcome to NovaMail",
-      from: { name: "NovaMail", email: "hello@novamail.app" },
-      to: [{ email: "you@example.com" }],
-      date: Math.floor(Date.now() / 1000) - 3600,
-      snippet: "A modern open-source mail client for Ubuntu.",
-      unread: true,
-      starred: false,
-      hasAttachments: false,
-      accountEmail: "you@example.com",
-    },
-    {
-      id: "demo-2",
-      accountId: "acc-1",
-      mailboxId: "mb-1",
-      threadId: "th-2",
-      subject: "Quarterly planning notes",
-      from: { name: "Alex Rivera", email: "alex@company.com" },
-      to: [{ email: "you@example.com" }],
-      date: Math.floor(Date.now() / 1000) - 7200,
-      snippet: "Here are the talking points for Monday.",
-      unread: true,
-      starred: true,
-      hasAttachments: true,
-      accountEmail: "you@example.com",
-    },
-    {
-      id: "demo-3",
-      accountId: "acc-2",
-      mailboxId: "mb-2",
-      threadId: "th-3",
-      subject: "Your receipt from Bookstore",
-      from: { name: "Bookstore", email: "orders@bookstore.example" },
-      to: [{ email: "personal@example.com" }],
-      date: Math.floor(Date.now() / 1000) - 86400,
-      snippet: "Thanks for your purchase.",
-      unread: false,
-      starred: false,
-      hasAttachments: false,
-      accountEmail: "personal@example.com",
-    },
-  ],
-};
+export function isDesktopShell(): boolean {
+  return isTauri();
+}
