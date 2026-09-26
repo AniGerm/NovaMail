@@ -6,16 +6,26 @@
 
 mod account;
 mod ai;
+mod attachments;
+mod contacts;
 mod error;
+mod labels;
 mod mail;
 mod oauth;
+mod rules_dto;
 mod search;
+mod signatures;
 mod sync;
 
 pub use account::*;
 pub use ai::*;
+pub use attachments::*;
+pub use contacts::*;
 pub use error::*;
+pub use labels::*;
 pub use mail::*;
 pub use oauth::*;
+pub use rules_dto::*;
 pub use search::*;
+pub use signatures::*;
 pub use sync::*;

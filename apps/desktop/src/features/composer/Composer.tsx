@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
-import type { AccountDto, AppError, MessageDetailDto } from "@/shared/api/types";
+import type {
+  AccountDto,
+  AppError,
+  MessageDetailDto,
+  OutgoingAttachment,
+} from "@/shared/api/types";
 
 interface ComposerProps {
   open: boolean;
@@ -27,6 +32,7 @@ export function Composer({
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<OutgoingAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,10 +45,42 @@ export function Composer({
         (replyTo ? `Re: ${replyTo.summary.subject}` : ""),
     );
     setBody(initialBody);
+    setAttachments([]);
     setError(null);
+
+    if (!replyTo && !initialBody && accounts[0]?.id) {
+      api
+        .signaturesList(accounts[0].id)
+        .then((sigs) => {
+          const def = sigs.find((s) => s.isDefault) ?? sigs[0];
+          if (def && !initialBody) {
+            setBody((current) => (current ? current : `\n\n${def.bodyText}`));
+          }
+        })
+        .catch(() => undefined);
+    }
   }, [open, replyTo, initialBody, initialSubject, accounts]);
 
   if (!open) return null;
+
+  async function handleFiles(files: FileList | null) {
+    if (!files) return;
+    const next: OutgoingAttachment[] = [];
+    for (const file of Array.from(files)) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 1) {
+        binary += String.fromCharCode(bytes[i]!);
+      }
+      next.push({
+        filename: file.name,
+        mime: file.type || "application/octet-stream",
+        dataBase64: btoa(binary),
+      });
+    }
+    setAttachments((prev) => [...prev, ...next]);
+  }
 
   async function handleSend(event: React.FormEvent) {
     event.preventDefault();
@@ -69,10 +107,12 @@ export function Composer({
         references: replyTo
           ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
           : [],
+        attachments,
       });
       onSent();
       onClose();
       setBody("");
+      setAttachments([]);
     } catch (err) {
       setError((err as AppError).message || "Send failed");
     } finally {
@@ -138,6 +178,36 @@ export function Composer({
               onChange={(e) => setBody(e.target.value)}
               className="min-h-[220px] resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2"
             />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Attachments</span>
+            <input
+              type="file"
+              multiple
+              onChange={(e) => {
+                void handleFiles(e.target.files);
+              }}
+            />
+            {attachments.length > 0 ? (
+              <ul className="mt-1 space-y-1 text-[var(--nova-ink-muted)]">
+                {attachments.map((file) => (
+                  <li key={`${file.filename}-${file.dataBase64.length}`}>
+                    {file.filename}
+                    <button
+                      type="button"
+                      className="ml-2 text-[var(--nova-accent)]"
+                      onClick={() =>
+                        setAttachments((prev) =>
+                          prev.filter((item) => item !== file),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </label>
           {error ? (
             <p className="text-sm text-[var(--nova-danger)]" role="alert">

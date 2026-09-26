@@ -209,6 +209,15 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
             </label>
           ) : null}
 
+          {provider === "icloud" ? (
+            <p className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 py-2 text-sm text-[var(--nova-ink)]">
+              iCloud requires an{" "}
+              <strong>app-specific password</strong> from appleid.apple.com
+              (Sign-In and Security → App-Specific Passwords). Use your full
+              iCloud email as the username.
+            </p>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1 text-sm">
               <span>IMAP host</span>

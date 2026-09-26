@@ -46,6 +46,8 @@ pub struct MessageDetailDto {
     pub message_id: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
+    #[serde(default)]
+    pub attachments: Vec<crate::AttachmentDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +94,8 @@ pub struct SendMessageRequest {
     pub body_html: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
+    #[serde(default)]
+    pub attachments: Vec<crate::OutgoingAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,4 +1,6 @@
-use lettre::message::{Mailbox, MultiPart, SinglePart};
+use base64::Engine;
+use lettre::message::header::ContentType;
+use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -44,19 +46,30 @@ impl SmtpClient {
             builder = builder.references(request.references.join(" "));
         }
 
-        let email = if let Some(html) = &request.body_html {
-            builder
-                .multipart(
-                    MultiPart::alternative()
-                        .singlepart(SinglePart::plain(request.body_text.clone()))
-                        .singlepart(SinglePart::html(html.clone())),
-                )
-                .map_err(|e| MailError::Smtp(e.to_string()))?
-        } else {
-            builder
+        let body_part = if let Some(html) = &request.body_html {
+            MultiPart::alternative()
                 .singlepart(SinglePart::plain(request.body_text.clone()))
-                .map_err(|e| MailError::Smtp(e.to_string()))?
+                .singlepart(SinglePart::html(html.clone()))
+        } else {
+            MultiPart::mixed().singlepart(SinglePart::plain(request.body_text.clone()))
         };
+
+        let mut mixed = MultiPart::mixed().multipart(body_part);
+        for attachment in &request.attachments {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(attachment.data_base64.as_bytes())
+                .map_err(|e| MailError::Smtp(format!("invalid attachment encoding: {e}")))?;
+            let content_type = ContentType::parse(&attachment.mime)
+                .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
+            let body = Body::new(bytes);
+            mixed = mixed.singlepart(
+                Attachment::new(attachment.filename.clone()).body(body, content_type),
+            );
+        }
+
+        let email = builder
+            .multipart(mixed)
+            .map_err(|e| MailError::Smtp(e.to_string()))?;
 
         let transport = build_transport(account, credentials)?;
         transport

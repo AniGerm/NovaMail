@@ -23,6 +23,7 @@ pub fn run() {
             let scheduler = SyncScheduler::new(
                 state.app.db().clone(),
                 state.app.secrets().clone(),
+                state.app.paths.blobs_dir.clone(),
                 Duration::from_secs(300),
             );
             let handle = app.handle().clone();
@@ -51,7 +52,29 @@ pub fn run() {
             commands::ai_summarize_message,
             commands::ai_suggest_reply,
             commands::messages_archive,
+            commands::messages_delete,
             commands::messages_forward_draft,
+            commands::attachments_list,
+            commands::attachments_open_path,
+            commands::contacts_list,
+            commands::contacts_upsert,
+            commands::contacts_delete,
+            commands::carddav_start,
+            commands::carddav_stop,
+            commands::carddav_status,
+            commands::ldap_search,
+            commands::labels_list,
+            commands::labels_upsert,
+            commands::labels_delete,
+            commands::messages_set_labels,
+            commands::messages_list_labels,
+            commands::rules_list,
+            commands::rules_upsert,
+            commands::rules_delete,
+            commands::signatures_list,
+            commands::signatures_upsert,
+            commands::signatures_delete,
+            commands::pop3_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");

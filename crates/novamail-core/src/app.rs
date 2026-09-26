@@ -4,20 +4,25 @@ use novamail_ai::{
     AiProvider, NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest,
     SummarizeRequest,
 };
+use novamail_contacts::{search_ldap, CardDavServer};
 use novamail_crypto::{AccountCredentials, OAuthTokens, SecretStore};
 use novamail_db::{AccountRecord, Database};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, ListMessagesRequest,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
+    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
     ListMessagesResponse, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
-    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, SearchRequest, SearchResponse,
-    SendMessageRequest, SetFlagsRequest, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
+    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
+    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
-use novamail_mail::{OAuthConfig, SmtpClient, SyncEngine};
+use novamail_mail::{OAuthConfig, Pop3Client, SmtpClient, SyncEngine};
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
 use uuid::Uuid;
 
+use crate::contacts_store::DbContactStore;
 use crate::paths::AppPaths;
 use crate::sanitize::sanitize_html;
 use crate::{CoreError, CoreResult};
@@ -27,6 +32,7 @@ pub struct AppState {
     pub db: Database,
     pub secrets: SecretStore,
     ai: Arc<dyn AiProvider>,
+    carddav: CardDavServer,
 }
 
 impl AppState {
@@ -35,11 +41,14 @@ impl AppState {
         let db = Database::open(&paths.db_path)?;
         // Memory fallback keeps headless CI / missing Secret Service usable.
         let secrets = SecretStore::with_memory_fallback(true);
+        let store = DbContactStore::new(db.clone());
+        let carddav = CardDavServer::new(store);
         Ok(Self {
             paths,
             db,
             secrets,
             ai: Self::select_ai_provider(),
+            carddav,
         })
     }
 
@@ -200,7 +209,11 @@ impl AppState {
     where
         F: FnMut(SyncProgressEvent) + Send,
     {
-        let engine = SyncEngine::new(self.db.clone(), self.secrets.clone());
+        let engine = SyncEngine::new(
+            self.db.clone(),
+            self.secrets.clone(),
+            &self.paths.blobs_dir,
+        );
         let account_ids = if let Some(id) = request.account_id {
             vec![id]
         } else {
@@ -297,7 +310,175 @@ impl AppState {
             body_html: None,
             in_reply_to: None,
             references: vec![],
+            attachments: Vec::new(),
         })
+    }
+
+    pub fn delete_message(&self, message_id: Uuid) -> CoreResult<()> {
+        let detail = self.get_message(message_id)?;
+        for attachment in detail.attachments {
+            let _ = std::fs::remove_file(attachment.path);
+        }
+        self.db.delete_message(message_id)?;
+        Ok(())
+    }
+
+    pub fn open_attachment_path(&self, attachment_id: Uuid) -> CoreResult<String> {
+        let attachment = self.db.get_attachment(attachment_id)?;
+        Ok(attachment.path)
+    }
+
+    pub fn list_contacts(&self, query: Option<String>) -> CoreResult<Vec<ContactDto>> {
+        Ok(self.db.list_contacts(query.as_deref())?)
+    }
+
+    pub fn upsert_contact(&self, request: UpsertContactRequest) -> CoreResult<ContactDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let record = novamail_db::models::ContactRecord {
+            id,
+            display_name: request.display_name,
+            emails: request.emails,
+            phones: request.phones,
+            notes: request.notes,
+            updated_at: chrono::Utc::now().timestamp(),
+        };
+        self.db.upsert_contact(&record)?;
+        Ok(self.db.get_contact(id)?)
+    }
+
+    pub fn delete_contact(&self, contact_id: Uuid) -> CoreResult<()> {
+        self.db.delete_contact(contact_id)?;
+        Ok(())
+    }
+
+    pub async fn start_carddav(&self) -> CoreResult<CardDavServerStatus> {
+        Ok(self.carddav.start().await?)
+    }
+
+    pub fn stop_carddav(&self) -> CoreResult<CardDavServerStatus> {
+        Ok(self.carddav.stop())
+    }
+
+    pub fn carddav_status(&self) -> CardDavServerStatus {
+        self.carddav.status()
+    }
+
+    pub async fn ldap_search(&self, request: LdapSearchRequest) -> CoreResult<Vec<ContactDto>> {
+        Ok(search_ldap(&request).await?)
+    }
+
+    pub fn list_attachments(&self, message_id: Uuid) -> CoreResult<Vec<AttachmentDto>> {
+        Ok(self.db.list_attachments(message_id)?)
+    }
+
+    pub fn upsert_label(&self, request: UpsertLabelRequest) -> CoreResult<LabelDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let account_id = request.account_id;
+        let record = novamail_db::models::LabelRecord {
+            id,
+            account_id,
+            name: request.name,
+            color: request.color,
+        };
+        self.db.upsert_label(&record)?;
+        Ok(self
+            .db
+            .list_labels(Some(account_id))?
+            .into_iter()
+            .find(|l| l.id == id)
+            .ok_or_else(|| CoreError::Message("label missing after upsert".into()))?)
+    }
+
+    pub fn list_labels(&self, account_id: Option<Uuid>) -> CoreResult<Vec<LabelDto>> {
+        Ok(self.db.list_labels(account_id)?)
+    }
+
+    pub fn delete_label(&self, label_id: Uuid) -> CoreResult<()> {
+        self.db.delete_label(label_id)?;
+        Ok(())
+    }
+
+    pub fn set_message_labels(&self, request: SetMessageLabelsRequest) -> CoreResult<()> {
+        self.db
+            .set_message_labels(request.message_id, &request.label_ids)?;
+        Ok(())
+    }
+
+    pub fn list_message_labels(&self, message_id: Uuid) -> CoreResult<Vec<LabelDto>> {
+        Ok(self.db.list_message_labels(message_id)?)
+    }
+
+    pub fn upsert_rule(&self, request: UpsertRuleRequest) -> CoreResult<RuleDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let record = novamail_db::models::RuleRecord {
+            id,
+            account_id: request.account_id,
+            name: request.name,
+            enabled: request.enabled,
+            predicate_json: request.predicate_json,
+            action_json: request.action_json,
+        };
+        self.db.upsert_rule(&record)?;
+        Ok(self
+            .db
+            .list_rules()?
+            .into_iter()
+            .find(|r| r.id == id)
+            .ok_or_else(|| CoreError::Message("rule missing after upsert".into()))?)
+    }
+
+    pub fn list_rules(&self) -> CoreResult<Vec<RuleDto>> {
+        Ok(self.db.list_rules()?)
+    }
+
+    pub fn delete_rule(&self, rule_id: Uuid) -> CoreResult<()> {
+        self.db.delete_rule(rule_id)?;
+        Ok(())
+    }
+
+    pub fn upsert_signature(&self, request: UpsertSignatureRequest) -> CoreResult<SignatureDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let account_id = request.account_id;
+        let record = novamail_db::models::SignatureRecord {
+            id,
+            account_id,
+            name: request.name,
+            body_text: request.body_text,
+            is_default: request.is_default,
+        };
+        self.db.upsert_signature(&record)?;
+        Ok(self
+            .db
+            .list_signatures(account_id)?
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| CoreError::Message("signature missing after upsert".into()))?)
+    }
+
+    pub fn list_signatures(&self, account_id: Option<Uuid>) -> CoreResult<Vec<SignatureDto>> {
+        Ok(self.db.list_signatures(account_id)?)
+    }
+
+    pub fn delete_signature(&self, signature_id: Uuid) -> CoreResult<()> {
+        self.db.delete_signature(signature_id)?;
+        Ok(())
+    }
+
+    /// Test POP3 connectivity and return the number of messages on the server.
+    pub async fn pop3_test(
+        &self,
+        host: String,
+        port: u16,
+        use_tls: bool,
+        user: String,
+        password: String,
+    ) -> CoreResult<u32> {
+        let mut client = Pop3Client::connect(&host, port, use_tls).await?;
+        client.login(&user, &password).await?;
+        let listed = client.list().await?;
+        let count = listed.len() as u32;
+        client.quit().await?;
+        Ok(count)
     }
 
     pub fn db(&self) -> &Database {
@@ -401,9 +582,27 @@ impl AppState {
     }
 
     fn load_rule_definitions(&self) -> CoreResult<Vec<RuleDefinition>> {
-        // Rules rows are read once the rules repository UI persists them (P2).
-        // The evaluate path is wired so sync can call `apply_rules_for_message`.
-        Ok(Vec::<RuleDefinition>::new())
+        let mut out = Vec::new();
+        for rule in self.db.list_rules()? {
+            if !rule.enabled {
+                continue;
+            }
+            let predicate = serde_json::from_str(&rule.predicate_json).map_err(|e| {
+                CoreError::Message(format!("invalid rule predicate {}: {e}", rule.id))
+            })?;
+            let actions = serde_json::from_str(&rule.action_json).map_err(|e| {
+                CoreError::Message(format!("invalid rule actions {}: {e}", rule.id))
+            })?;
+            out.push(RuleDefinition {
+                id: rule.id,
+                account_id: rule.account_id,
+                name: rule.name,
+                enabled: rule.enabled,
+                predicate,
+                actions,
+            });
+        }
+        Ok(out)
     }
 
     pub async fn prioritize_message(&self, message_id: Uuid) -> CoreResult<(f32, String, String)> {

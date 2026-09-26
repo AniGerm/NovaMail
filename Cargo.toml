@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/desktop/src-tauri",
   "crates/novamail-ai",
+  "crates/novamail-contacts",
   "crates/novamail-core",
   "crates/novamail-crypto",
   "crates/novamail-db",
@@ -23,6 +24,7 @@ authors = ["NovaMail Contributors"]
 
 [workspace.dependencies]
 novamail-ai = { path = "crates/novamail-ai" }
+novamail-contacts = { path = "crates/novamail-contacts" }
 novamail-core = { path = "crates/novamail-core" }
 novamail-crypto = { path = "crates/novamail-crypto" }
 novamail-db = { path = "crates/novamail-db" }

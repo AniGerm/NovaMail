@@ -80,3 +80,50 @@ impl MessageRecord {
         self.flags & FLAG_STARRED != 0
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentRecord {
+    pub id: Uuid,
+    pub message_id: Uuid,
+    pub filename: String,
+    pub mime: String,
+    pub size: u64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContactRecord {
+    pub id: Uuid,
+    pub display_name: String,
+    pub emails: Vec<String>,
+    pub phones: Vec<String>,
+    pub notes: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelRecord {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleRecord {
+    pub id: Uuid,
+    pub account_id: Option<Uuid>,
+    pub name: String,
+    pub enabled: bool,
+    pub predicate_json: String,
+    pub action_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignatureRecord {
+    pub id: Uuid,
+    pub account_id: Option<Uuid>,
+    pub name: String,
+    pub body_text: String,
+    pub is_default: bool,
+}

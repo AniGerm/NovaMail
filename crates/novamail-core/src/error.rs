@@ -15,6 +15,8 @@ pub enum CoreError {
     Search(#[from] novamail_search::SearchError),
     #[error(transparent)]
     Ai(#[from] novamail_ai::AiError),
+    #[error(transparent)]
+    Contacts(#[from] novamail_contacts::ContactsError),
     #[error("{0}")]
     Message(String),
 }
@@ -29,6 +31,7 @@ impl From<CoreError> for AppError {
             CoreError::Search(_) => "search",
             CoreError::Ai(novamail_ai::AiError::Unavailable(_)) => "ai_unavailable",
             CoreError::Ai(_) => "ai",
+            CoreError::Contacts(_) => "contacts",
             CoreError::Db(_) => "db",
             CoreError::Message(_) => "app",
         };

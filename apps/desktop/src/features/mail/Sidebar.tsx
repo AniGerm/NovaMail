@@ -1,4 +1,13 @@
-import { Inbox, PenSquare, RefreshCw, Settings2, Moon, Sun } from "lucide-react";
+import {
+  Inbox,
+  PenSquare,
+  RefreshCw,
+  Settings2,
+  Moon,
+  Sun,
+  BookUser,
+  Zap,
+} from "lucide-react";
 import { Badge, Button, IconButton } from "@novamail/ui";
 
 import type { AccountDto } from "@/shared/api/types";
@@ -12,6 +21,8 @@ interface SidebarProps {
   onAddAccount: () => void;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenContacts: () => void;
+  onOpenTriage: () => void;
 }
 
 export function Sidebar({
@@ -23,6 +34,8 @@ export function Sidebar({
   onAddAccount,
   onToggleTheme,
   onOpenSettings,
+  onOpenContacts,
+  onOpenTriage,
 }: SidebarProps) {
   return (
     <aside
@@ -57,6 +70,22 @@ export function Sidebar({
         >
           <Inbox size={18} />
           Unified Inbox
+        </button>
+        <button
+          type="button"
+          className="flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          onClick={onOpenTriage}
+        >
+          <Zap size={18} />
+          Quick Sort
+        </button>
+        <button
+          type="button"
+          className="flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          onClick={onOpenContacts}
+        >
+          <BookUser size={18} />
+          Contacts
         </button>
 
         <div className="mt-6 px-2">

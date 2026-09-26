@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Reply, Star, Forward, Sparkles } from "lucide-react";
+import { open as openPath } from "@tauri-apps/plugin-shell";
+import { Reply, Star, Forward, Sparkles, Paperclip } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
@@ -46,6 +47,7 @@ export function ReadingPane({
     current.bodyText?.trim() ||
     stripHtml(current.bodyHtml ?? "") ||
     current.summary.snippet;
+  const attachments = current.attachments ?? [];
 
   async function handleSummarize() {
     setAiBusy(true);
@@ -72,6 +74,15 @@ export function ReadingPane({
       setAiError((error as AppError).message || "Suggest reply failed");
     } finally {
       setAiBusy(false);
+    }
+  }
+
+  async function handleOpenAttachment(id: string) {
+    try {
+      const path = await api.attachmentsOpenPath(id);
+      await openPath(path);
+    } catch (error) {
+      setAiError((error as AppError).message || "Could not open attachment");
     }
   }
 
@@ -138,6 +149,32 @@ export function ReadingPane({
             Suggest reply
           </Button>
         </div>
+        {attachments.length > 0 ? (
+          <div className="mt-4">
+            <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+              <Paperclip size={14} />
+              Attachments
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <li key={attachment.id}>
+                  <button
+                    type="button"
+                    className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => {
+                      void handleOpenAttachment(attachment.id);
+                    }}
+                  >
+                    {attachment.filename}{" "}
+                    <span className="text-[var(--nova-ink-muted)]">
+                      ({formatBytes(attachment.size)})
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {aiError ? (
           <p className="mt-3 text-sm text-[var(--nova-danger)]" role="alert">
             {aiError}
@@ -156,7 +193,6 @@ export function ReadingPane({
         {current.bodyHtml ? (
           <div
             className="prose mx-auto max-w-[720px] text-[15px] leading-7 text-[var(--nova-ink)]"
-            // HTML is sanitized in novamail-core before IPC.
             dangerouslySetInnerHTML={{ __html: current.bodyHtml }}
           />
         ) : (
@@ -176,4 +212,10 @@ function stripHtml(html: string): string {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

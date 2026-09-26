@@ -16,6 +16,7 @@ pub enum MailProvider {
     Microsoft365,
     Yahoo,
     ProtonBridge,
+    Icloud,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,6 +133,18 @@ impl ProviderPreset {
                 smtp_host: "127.0.0.1".into(),
                 smtp_port: 1025,
                 smtp_tls: false,
+                auth_type: AuthType::Password,
+                oauth_authorize_url: None,
+            },
+            Self {
+                provider: MailProvider::Icloud,
+                label: "iCloud Mail".into(),
+                imap_host: "imap.mail.me.com".into(),
+                imap_port: 993,
+                imap_tls: true,
+                smtp_host: "smtp.mail.me.com".into(),
+                smtp_port: 587,
+                smtp_tls: true,
                 auth_type: AuthType::Password,
                 oauth_authorize_url: None,
             },

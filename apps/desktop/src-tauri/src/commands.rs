@@ -1,9 +1,12 @@
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, ListMessagesRequest,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
+    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
     ListMessagesResponse, MailProvider, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
-    OAuthExchangeResponse, ProviderPreset, SearchRequest, SearchResponse, SendMessageRequest,
-    SetFlagsRequest, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    OAuthExchangeResponse, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
+    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
+    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -181,9 +184,180 @@ pub fn messages_archive(
 }
 
 #[tauri::command]
+pub fn messages_delete(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_message(message_id).map_err(map_err)
+}
+
+#[tauri::command]
 pub fn messages_forward_draft(
     state: State<'_, DesktopState>,
     message_id: Uuid,
 ) -> Result<SendMessageRequest, AppError> {
     state.app.build_forward_draft(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn attachments_list(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<Vec<AttachmentDto>, AppError> {
+    state.app.list_attachments(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn attachments_open_path(
+    state: State<'_, DesktopState>,
+    attachment_id: Uuid,
+) -> Result<String, AppError> {
+    state
+        .app
+        .open_attachment_path(attachment_id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_list(
+    state: State<'_, DesktopState>,
+    query: Option<String>,
+) -> Result<Vec<ContactDto>, AppError> {
+    state.app.list_contacts(query).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertContactRequest,
+) -> Result<ContactDto, AppError> {
+    state.app.upsert_contact(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_delete(
+    state: State<'_, DesktopState>,
+    contact_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_contact(contact_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn carddav_start(
+    state: State<'_, DesktopState>,
+) -> Result<CardDavServerStatus, AppError> {
+    state.app.start_carddav().await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn carddav_stop(state: State<'_, DesktopState>) -> Result<CardDavServerStatus, AppError> {
+    state.app.stop_carddav().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn carddav_status(state: State<'_, DesktopState>) -> Result<CardDavServerStatus, AppError> {
+    Ok(state.app.carddav_status())
+}
+
+#[tauri::command]
+pub async fn ldap_search(
+    state: State<'_, DesktopState>,
+    request: LdapSearchRequest,
+) -> Result<Vec<ContactDto>, AppError> {
+    state.app.ldap_search(request).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn labels_list(
+    state: State<'_, DesktopState>,
+    account_id: Option<Uuid>,
+) -> Result<Vec<LabelDto>, AppError> {
+    state.app.list_labels(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn labels_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertLabelRequest,
+) -> Result<LabelDto, AppError> {
+    state.app.upsert_label(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn labels_delete(state: State<'_, DesktopState>, label_id: Uuid) -> Result<(), AppError> {
+    state.app.delete_label(label_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_set_labels(
+    state: State<'_, DesktopState>,
+    request: SetMessageLabelsRequest,
+) -> Result<(), AppError> {
+    state.app.set_message_labels(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_list_labels(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<Vec<LabelDto>, AppError> {
+    state.app.list_message_labels(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn rules_list(state: State<'_, DesktopState>) -> Result<Vec<RuleDto>, AppError> {
+    state.app.list_rules().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn rules_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertRuleRequest,
+) -> Result<RuleDto, AppError> {
+    state.app.upsert_rule(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn rules_delete(state: State<'_, DesktopState>, rule_id: Uuid) -> Result<(), AppError> {
+    state.app.delete_rule(rule_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn signatures_list(
+    state: State<'_, DesktopState>,
+    account_id: Option<Uuid>,
+) -> Result<Vec<SignatureDto>, AppError> {
+    state.app.list_signatures(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn signatures_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertSignatureRequest,
+) -> Result<SignatureDto, AppError> {
+    state.app.upsert_signature(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn signatures_delete(
+    state: State<'_, DesktopState>,
+    signature_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_signature(signature_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn pop3_test(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: u16,
+    use_tls: bool,
+    user: String,
+    password: String,
+) -> Result<u32, AppError> {
+    state
+        .app
+        .pop3_test(host, port, use_tls, user, password)
+        .await
+        .map_err(map_err)
 }

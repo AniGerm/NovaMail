@@ -1,5 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use novamail_crypto::{AccountCredentials, SecretStore};
-use novamail_db::models::{MailboxRecord, MessageRecord, ThreadRecord, FLAG_SEEN, FLAG_STARRED};
+use novamail_db::models::{
+    AttachmentRecord, MailboxRecord, MessageRecord, ThreadRecord, FLAG_SEEN, FLAG_STARRED,
+};
 use novamail_db::Database;
 use novamail_ipc::SyncProgressEvent;
 use uuid::Uuid;
@@ -18,11 +22,16 @@ pub struct SyncReport {
 pub struct SyncEngine {
     db: Database,
     secrets: SecretStore,
+    blobs_dir: PathBuf,
 }
 
 impl SyncEngine {
-    pub fn new(db: Database, secrets: SecretStore) -> Self {
-        Self { db, secrets }
+    pub fn new(db: Database, secrets: SecretStore, blobs_dir: impl AsRef<Path>) -> Self {
+        Self {
+            db,
+            secrets,
+            blobs_dir: blobs_dir.as_ref().to_path_buf(),
+        }
     }
 
     pub async fn sync_account<F>(
@@ -42,7 +51,6 @@ impl SyncEngine {
         let mut messages_fetched = 0u32;
 
         for (name, role) in mailboxes {
-            // MVP: sync inbox (+ sent for basic completeness)
             let should_sync = role.as_deref() == Some("inbox")
                 || role.as_deref() == Some("sent")
                 || name.eq_ignore_ascii_case("INBOX");
@@ -131,7 +139,6 @@ impl SyncEngine {
             record
         };
 
-        // Fetch the most recent window for MVP responsiveness.
         let window = 100u32;
         let from_uid = uidnext.saturating_sub(window).max(1);
         let fetched_msgs = imap.fetch_uid_range(from_uid, None).await?;
@@ -149,8 +156,9 @@ impl SyncEngine {
                 flags |= FLAG_STARRED;
             }
 
+            let local_id = Uuid::new_v4();
             let message = MessageRecord {
-                id: Uuid::new_v4(),
+                id: local_id,
                 account_id,
                 mailbox_id: mailbox.id,
                 thread_id,
@@ -171,8 +179,32 @@ impl SyncEngine {
                 raw_path: None,
             };
             self.db.insert_message(&message)?;
-            count += 1;
+            let message_id = self
+                .db
+                .find_message_id_by_uid(mailbox.id, fetched.uid)?
+                .unwrap_or(local_id);
 
+            if !parsed.attachments.is_empty() {
+                std::fs::create_dir_all(&self.blobs_dir)?;
+                let mut records = Vec::new();
+                for attachment in parsed.attachments {
+                    let id = Uuid::new_v4();
+                    let safe_name = sanitize_filename(&attachment.filename);
+                    let path = self.blobs_dir.join(format!("{id}_{safe_name}"));
+                    std::fs::write(&path, &attachment.data)?;
+                    records.push(AttachmentRecord {
+                        id,
+                        message_id,
+                        filename: attachment.filename,
+                        mime: attachment.mime,
+                        size: attachment.data.len() as u64,
+                        path: path.to_string_lossy().to_string(),
+                    });
+                }
+                self.db.replace_attachments(message_id, &records)?;
+            }
+
+            count += 1;
             if count % 10 == 0 {
                 on_progress(SyncProgressEvent {
                     account_id,
@@ -232,6 +264,24 @@ impl SyncEngine {
         let imap = LiveImap::connect(account, credentials).await?;
         imap.logout().await?;
         Ok(())
+    }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "file".into()
+    } else {
+        cleaned.chars().take(120).collect()
     }
 }
 

@@ -5,21 +5,29 @@ import type {
   AccountDto,
   AddAccountPasswordRequest,
   AppError,
+  AttachmentDto,
+  CardDavServerStatus,
+  ContactDto,
+  LabelDto,
+  LdapSearchRequest,
   ListMessagesRequest,
   ListMessagesResponse,
   MailboxDto,
   MessageDetailDto,
+  OutgoingAttachment,
   ProviderPreset,
+  RuleDto,
   SendMessageRequest,
   SetFlagsRequest,
+  SignatureDto,
   SuggestReplyMessageResponse,
   SummarizeMessageResponse,
   SyncProgressEvent,
   SyncResult,
+  UpsertContactRequest,
 } from "./types";
 
-// Re-export for consumers that need the send draft shape.
-export type { SendMessageRequest };
+export type { SendMessageRequest, OutgoingAttachment };
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -71,6 +79,8 @@ export const api = {
     call<void>("messages_set_flags", { request }),
   messagesSend: (request: SendMessageRequest) =>
     call<void>("messages_send", { request }),
+  messagesDelete: (messageId: string) =>
+    call<void>("messages_delete", { messageId }),
   mailSync: (accountId?: string | null) =>
     call<SyncResult[]>("mail_sync", { request: { accountId: accountId ?? null } }),
   aiSummarizeMessage: (messageId: string) =>
@@ -85,6 +95,58 @@ export const api = {
     call<void>("messages_archive", { messageId }),
   messagesForwardDraft: (messageId: string) =>
     call<SendMessageRequest>("messages_forward_draft", { messageId }),
+  attachmentsList: (messageId: string) =>
+    call<AttachmentDto[]>("attachments_list", { messageId }),
+  attachmentsOpenPath: (attachmentId: string) =>
+    call<string>("attachments_open_path", { attachmentId }),
+  contactsList: (query?: string | null) =>
+    call<ContactDto[]>("contacts_list", { query: query ?? null }),
+  contactsUpsert: (request: UpsertContactRequest) =>
+    call<ContactDto>("contacts_upsert", { request }),
+  contactsDelete: (contactId: string) =>
+    call<void>("contacts_delete", { contactId }),
+  carddavStart: () => call<CardDavServerStatus>("carddav_start"),
+  carddavStop: () => call<CardDavServerStatus>("carddav_stop"),
+  carddavStatus: () => call<CardDavServerStatus>("carddav_status"),
+  ldapSearch: (request: LdapSearchRequest) =>
+    call<ContactDto[]>("ldap_search", { request }),
+  labelsList: (accountId?: string | null) =>
+    call<LabelDto[]>("labels_list", { accountId: accountId ?? null }),
+  labelsUpsert: (request: {
+    id?: string | null;
+    accountId: string;
+    name: string;
+    color: string;
+  }) => call<LabelDto>("labels_upsert", { request }),
+  labelsDelete: (labelId: string) => call<void>("labels_delete", { labelId }),
+  rulesList: () => call<RuleDto[]>("rules_list"),
+  rulesUpsert: (request: {
+    id?: string | null;
+    accountId?: string | null;
+    name: string;
+    enabled: boolean;
+    predicateJson: string;
+    actionJson: string;
+  }) => call<RuleDto>("rules_upsert", { request }),
+  rulesDelete: (ruleId: string) => call<void>("rules_delete", { ruleId }),
+  signaturesList: (accountId?: string | null) =>
+    call<SignatureDto[]>("signatures_list", { accountId: accountId ?? null }),
+  signaturesUpsert: (request: {
+    id?: string | null;
+    accountId?: string | null;
+    name: string;
+    bodyText: string;
+    isDefault: boolean;
+  }) => call<SignatureDto>("signatures_upsert", { request }),
+  signaturesDelete: (signatureId: string) =>
+    call<void>("signatures_delete", { signatureId }),
+  pop3Test: (args: {
+    host: string;
+    port: number;
+    useTls: boolean;
+    user: string;
+    password: string;
+  }) => call<number>("pop3_test", args),
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),
   oauthWaitCallback: (timeoutSecs = 180) =>

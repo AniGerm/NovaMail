@@ -15,15 +15,20 @@
 - [x] HTML sanitization + AI summarize/suggest
 - [x] Deb/AppImage packaging config (`scripts/package-linux.sh`, Tauri bundle)
 - [x] CI workflow + issue templates + Code of Conduct
+- [x] Attachments: IMAP sync, open, compose attach
+- [x] iCloud preset + app-password hint
+- [x] Address book + embedded CardDAV server + LDAP import
+- [x] Quick Sort (Keep/Delete/Preview + hotkeys)
+- [x] Signatures, Labels UI, Rules UI, POP3 test
 
 ## Production phases
 
 | Phase | Fokus |
 |-------|--------|
-| P1 | Threading polish, labels/tags UI, attachments DnD, Smart Search |
-| P2 | Rules UI (engine crate ready), signatures/templates, POP3 |
+| P1 | Threading polish, attachment DnD polish, Smart Search |
+| P2 | POP3 full mailbox sync, signature HTML templates |
 | P3 | OpenPGP (Sequoia), Key Management UI |
-| P4 | Contacts + Calendar (CalDAV) |
+| P4 | Calendar (CalDAV) |
 | P5 | Plugin Runtime WASM + erste Official Plugins |
 | P6 | AI job queue + persisted insights |
 | P7 | Microsoft Graph / Exchange Vertiefung |

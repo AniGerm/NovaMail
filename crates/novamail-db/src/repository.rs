@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use crate::migrations;
 use crate::models::{
-    AccountRecord, MailboxRecord, MessageRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN,
-    FLAG_STARRED,
+    AccountRecord, AttachmentRecord, ContactRecord, LabelRecord, MailboxRecord, MessageRecord,
+    RuleRecord, SignatureRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN, FLAG_STARRED,
 };
+use novamail_ipc::{AttachmentDto, ContactDto, LabelDto, RuleDto, SignatureDto};
 use crate::{DbError, DbResult};
 
 #[derive(Clone)]
@@ -326,52 +327,57 @@ impl Database {
     }
 
     pub fn get_message(&self, id: Uuid) -> DbResult<MessageDetailDto> {
-        let conn = self.conn.lock();
-        conn.query_row(
-            r#"
-            SELECT
-              m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
-              m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
-              a.email, m.body_text, m.body_html, m.message_id, m.in_reply_to, m.references_json
-            FROM messages m
-            JOIN accounts a ON a.id = m.account_id
-            WHERE m.id = ?1
-            "#,
-            params![id.to_string()],
-            |row| {
-                let flags: i64 = row.get(9)?;
-                let from: AddressDto = serde_json::from_str(&row.get::<_, String>(5)?)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                let to: Vec<AddressDto> = serde_json::from_str(&row.get::<_, String>(6)?)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                let references: Vec<String> = serde_json::from_str(&row.get::<_, String>(16)?)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                Ok(MessageDetailDto {
-                    summary: MessageSummaryDto {
-                        id: parse_uuid(row.get::<_, String>(0)?)?,
-                        account_id: parse_uuid(row.get::<_, String>(1)?)?,
-                        mailbox_id: parse_uuid(row.get::<_, String>(2)?)?,
-                        thread_id: parse_uuid(row.get::<_, String>(3)?)?,
-                        subject: row.get(4)?,
-                        from,
-                        to,
-                        date: row.get(7)?,
-                        snippet: row.get(8)?,
-                        unread: flags & FLAG_SEEN == 0,
-                        starred: flags & FLAG_STARRED != 0,
-                        has_attachments: row.get::<_, i64>(10)? != 0,
-                        account_email: row.get(11)?,
-                    },
-                    body_text: row.get(12)?,
-                    body_html: row.get(13)?,
-                    message_id: row.get(14)?,
-                    in_reply_to: row.get(15)?,
-                    references,
-                })
-            },
-        )
-        .optional()?
-        .ok_or_else(|| DbError::NotFound(format!("message {id}")))
+        let mut detail = {
+            let conn = self.conn.lock();
+            conn.query_row(
+                r#"
+                SELECT
+                  m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
+                  m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
+                  a.email, m.body_text, m.body_html, m.message_id, m.in_reply_to, m.references_json
+                FROM messages m
+                JOIN accounts a ON a.id = m.account_id
+                WHERE m.id = ?1
+                "#,
+                params![id.to_string()],
+                |row| {
+                    let flags: i64 = row.get(9)?;
+                    let from: AddressDto = serde_json::from_str(&row.get::<_, String>(5)?)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    let to: Vec<AddressDto> = serde_json::from_str(&row.get::<_, String>(6)?)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    let references: Vec<String> = serde_json::from_str(&row.get::<_, String>(16)?)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    Ok(MessageDetailDto {
+                        summary: MessageSummaryDto {
+                            id: parse_uuid(row.get::<_, String>(0)?)?,
+                            account_id: parse_uuid(row.get::<_, String>(1)?)?,
+                            mailbox_id: parse_uuid(row.get::<_, String>(2)?)?,
+                            thread_id: parse_uuid(row.get::<_, String>(3)?)?,
+                            subject: row.get(4)?,
+                            from,
+                            to,
+                            date: row.get(7)?,
+                            snippet: row.get(8)?,
+                            unread: flags & FLAG_SEEN == 0,
+                            starred: flags & FLAG_STARRED != 0,
+                            has_attachments: row.get::<_, i64>(10)? != 0,
+                            account_email: row.get(11)?,
+                        },
+                        body_text: row.get(12)?,
+                        body_html: row.get(13)?,
+                        message_id: row.get(14)?,
+                        in_reply_to: row.get(15)?,
+                        references,
+                        attachments: Vec::new(),
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| DbError::NotFound(format!("message {id}")))?
+        };
+        detail.attachments = self.list_attachments(detail.summary.id)?;
+        Ok(detail)
     }
 
     pub fn list_messages(
@@ -570,6 +576,484 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn find_message_id_by_uid(&self, mailbox_id: Uuid, uid: u32) -> DbResult<Option<Uuid>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id FROM messages WHERE mailbox_id = ?1 AND uid = ?2",
+            params![mailbox_id.to_string(), uid as i64],
+            |row| Ok(parse_uuid(row.get::<_, String>(0)?)?),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn replace_attachments(
+        &self,
+        message_id: Uuid,
+        attachments: &[AttachmentRecord],
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM attachments WHERE message_id = ?1",
+            params![message_id.to_string()],
+        )?;
+        for attachment in attachments {
+            conn.execute(
+                r#"
+                INSERT INTO attachments (id, message_id, filename, mime, size, path)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![
+                    attachment.id.to_string(),
+                    message_id.to_string(),
+                    attachment.filename,
+                    attachment.mime,
+                    attachment.size as i64,
+                    attachment.path,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn list_attachments(&self, message_id: Uuid) -> DbResult<Vec<AttachmentDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, filename, mime, size, path FROM attachments WHERE message_id = ?1 ORDER BY filename",
+        )?;
+        let rows = stmt.query_map(params![message_id.to_string()], |row| {
+            Ok(AttachmentDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                message_id: parse_uuid(row.get::<_, String>(1)?)?,
+                filename: row.get(2)?,
+                mime: row.get(3)?,
+                size: row.get::<_, i64>(4)? as u64,
+                path: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_attachment(&self, attachment_id: Uuid) -> DbResult<AttachmentDto> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, message_id, filename, mime, size, path FROM attachments WHERE id = ?1",
+            params![attachment_id.to_string()],
+            |row| {
+                Ok(AttachmentDto {
+                    id: parse_uuid(row.get::<_, String>(0)?)?,
+                    message_id: parse_uuid(row.get::<_, String>(1)?)?,
+                    filename: row.get(2)?,
+                    mime: row.get(3)?,
+                    size: row.get::<_, i64>(4)? as u64,
+                    path: row.get(5)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or_else(|| DbError::NotFound(format!("attachment {attachment_id}")))
+    }
+
+    pub fn delete_message(&self, message_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed =
+            conn.execute("DELETE FROM messages WHERE id = ?1", params![message_id.to_string()])?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn upsert_contact(&self, contact: &ContactRecord) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let emails = serde_json::to_string(&contact.emails)?;
+        // phones stored inside notes_json extension until schema phones column exists —
+        // migration v2 contacts table has emails_json/notes only. Store phones in notes prefix.
+        let notes = serde_json::json!({
+            "phones": contact.phones,
+            "notes": contact.notes,
+        })
+        .to_string();
+        conn.execute(
+            r#"
+            INSERT INTO contacts (id, display_name, emails_json, notes, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+              display_name = excluded.display_name,
+              emails_json = excluded.emails_json,
+              notes = excluded.notes,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                contact.id.to_string(),
+                contact.display_name,
+                emails,
+                notes,
+                contact.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_contacts(&self, query: Option<&str>) -> DbResult<Vec<ContactDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, display_name, emails_json, notes, updated_at FROM contacts ORDER BY display_name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let emails: Vec<String> = serde_json::from_str(&row.get::<_, String>(2)?)
+                .unwrap_or_default();
+            let notes_raw: String = row.get(3)?;
+            let (phones, notes) = parse_contact_notes(&notes_raw);
+            Ok(ContactDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                display_name: row.get(1)?,
+                emails,
+                phones,
+                notes,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let contact = row?;
+            if let Some(q) = query {
+                let q = q.to_ascii_lowercase();
+                let hit = contact.display_name.to_ascii_lowercase().contains(&q)
+                    || contact.emails.iter().any(|e| e.to_ascii_lowercase().contains(&q))
+                    || contact.phones.iter().any(|p| p.contains(&q));
+                if !hit {
+                    continue;
+                }
+            }
+            out.push(contact);
+        }
+        Ok(out)
+    }
+
+    pub fn delete_contact(&self, contact_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed =
+            conn.execute("DELETE FROM contacts WHERE id = ?1", params![contact_id.to_string()])?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("contact {contact_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn get_contact(&self, contact_id: Uuid) -> DbResult<ContactDto> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, display_name, emails_json, notes, updated_at FROM contacts WHERE id = ?1",
+            params![contact_id.to_string()],
+            |row| {
+                let emails: Vec<String> = serde_json::from_str(&row.get::<_, String>(2)?)
+                    .unwrap_or_default();
+                let notes_raw: String = row.get(3)?;
+                let (phones, notes) = parse_contact_notes(&notes_raw);
+                Ok(ContactDto {
+                    id: parse_uuid(row.get::<_, String>(0)?)?,
+                    display_name: row.get(1)?,
+                    emails,
+                    phones,
+                    notes,
+                    updated_at: row.get(4)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or_else(|| DbError::NotFound(format!("contact {contact_id}")))
+    }
+
+    pub fn upsert_label(&self, label: &LabelRecord) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO labels (id, account_id, name, color)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              color = excluded.color
+            "#,
+            params![
+                label.id.to_string(),
+                label.account_id.to_string(),
+                label.name,
+                label.color,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_labels(&self, account_id: Option<Uuid>) -> DbResult<Vec<LabelDto>> {
+        let conn = self.conn.lock();
+        let mut out = Vec::new();
+        if let Some(account_id) = account_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, account_id, name, color FROM labels WHERE account_id = ?1 ORDER BY name",
+            )?;
+            let rows = stmt.query_map(params![account_id.to_string()], map_label_dto)?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let mut stmt =
+                conn.prepare("SELECT id, account_id, name, color FROM labels ORDER BY name")?;
+            let rows = stmt.query_map([], map_label_dto)?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn delete_label(&self, label_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed =
+            conn.execute("DELETE FROM labels WHERE id = ?1", params![label_id.to_string()])?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("label {label_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn set_message_labels(&self, message_id: Uuid, label_ids: &[Uuid]) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM message_labels WHERE message_id = ?1",
+            params![message_id.to_string()],
+        )?;
+        for label_id in label_ids {
+            conn.execute(
+                "INSERT OR IGNORE INTO message_labels (message_id, label_id) VALUES (?1, ?2)",
+                params![message_id.to_string(), label_id.to_string()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn list_message_labels(&self, message_id: Uuid) -> DbResult<Vec<LabelDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT l.id, l.account_id, l.name, l.color
+            FROM labels l
+            INNER JOIN message_labels ml ON ml.label_id = l.id
+            WHERE ml.message_id = ?1
+            ORDER BY l.name
+            "#,
+        )?;
+        let rows = stmt.query_map(params![message_id.to_string()], map_label_dto)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_rule(&self, rule: &RuleRecord) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO rules (id, account_id, name, predicate_json, action_json, enabled)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+              account_id = excluded.account_id,
+              name = excluded.name,
+              predicate_json = excluded.predicate_json,
+              action_json = excluded.action_json,
+              enabled = excluded.enabled
+            "#,
+            params![
+                rule.id.to_string(),
+                rule.account_id.map(|id| id.to_string()),
+                rule.name,
+                rule.predicate_json,
+                rule.action_json,
+                rule.enabled as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_rules(&self) -> DbResult<Vec<RuleDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, name, predicate_json, action_json, enabled FROM rules ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let account_id = row
+                .get::<_, Option<String>>(1)?
+                .map(|s| parse_uuid(s))
+                .transpose()?;
+            Ok(RuleDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                account_id,
+                name: row.get(2)?,
+                predicate_json: row.get(3)?,
+                action_json: row.get(4)?,
+                enabled: row.get::<_, i64>(5)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn delete_rule(&self, rule_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed =
+            conn.execute("DELETE FROM rules WHERE id = ?1", params![rule_id.to_string()])?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("rule {rule_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn upsert_signature(&self, signature: &SignatureRecord) -> DbResult<()> {
+        let conn = self.conn.lock();
+        if signature.is_default {
+            if let Some(account_id) = signature.account_id {
+                conn.execute(
+                    "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
+                    params![account_id.to_string()],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE signatures SET is_default = 0 WHERE account_id IS NULL",
+                    [],
+                )?;
+            }
+        }
+        conn.execute(
+            r#"
+            INSERT INTO signatures (id, account_id, name, body_text, is_default)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+              account_id = excluded.account_id,
+              name = excluded.name,
+              body_text = excluded.body_text,
+              is_default = excluded.is_default
+            "#,
+            params![
+                signature.id.to_string(),
+                signature.account_id.map(|id| id.to_string()),
+                signature.name,
+                signature.body_text,
+                signature.is_default as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_signatures(&self, account_id: Option<Uuid>) -> DbResult<Vec<SignatureDto>> {
+        let conn = self.conn.lock();
+        let mut out = Vec::new();
+        if let Some(account_id) = account_id {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, account_id, name, body_text, is_default FROM signatures
+                WHERE account_id = ?1 OR account_id IS NULL
+                ORDER BY is_default DESC, name
+                "#,
+            )?;
+            let rows = stmt.query_map(params![account_id.to_string()], map_signature_dto)?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, account_id, name, body_text, is_default FROM signatures ORDER BY name",
+            )?;
+            let rows = stmt.query_map([], map_signature_dto)?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn delete_signature(&self, signature_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "DELETE FROM signatures WHERE id = ?1",
+            params![signature_id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("signature {signature_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> DbResult<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO settings (key, value) VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            params![key, value],
+        )?;
+        Ok(())
+    }
+}
+
+fn map_label_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<LabelDto> {
+    Ok(LabelDto {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        account_id: parse_uuid(row.get::<_, String>(1)?)?,
+        name: row.get(2)?,
+        color: row.get(3)?,
+    })
+}
+
+fn map_signature_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<SignatureDto> {
+    let account_id = row
+        .get::<_, Option<String>>(1)?
+        .map(parse_uuid)
+        .transpose()?;
+    Ok(SignatureDto {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        account_id,
+        name: row.get(2)?,
+        body_text: row.get(3)?,
+        is_default: row.get::<_, i64>(4)? != 0,
+    })
+}
+
+fn parse_contact_notes(raw: &str) -> (Vec<String>, String) {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+        let phones = value
+            .get("phones")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let notes = value
+            .get("notes")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        (phones, notes)
+    } else {
+        (Vec::new(), raw.to_string())
+    }
 }
 
 fn map_mailbox_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxRecord> {
@@ -630,6 +1114,7 @@ fn provider_to_str(provider: &MailProvider) -> &'static str {
         MailProvider::Microsoft365 => "microsoft365",
         MailProvider::Yahoo => "yahoo",
         MailProvider::ProtonBridge => "protonBridge",
+        MailProvider::Icloud => "icloud",
     }
 }
 
@@ -639,6 +1124,7 @@ fn parse_provider(value: &str) -> MailProvider {
         "microsoft365" => MailProvider::Microsoft365,
         "yahoo" => MailProvider::Yahoo,
         "protonBridge" => MailProvider::ProtonBridge,
+        "icloud" => MailProvider::Icloud,
         _ => MailProvider::Generic,
     }
 }

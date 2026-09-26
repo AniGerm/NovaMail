@@ -180,6 +180,21 @@ const MIGRATIONS: &[&str] = &[
       manifest_json TEXT NOT NULL
     );
     "#,
+    // v3 — signatures + settings key/value
+    r#"
+    CREATE TABLE IF NOT EXISTS signatures (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      body_text TEXT NOT NULL DEFAULT '',
+      is_default INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -232,7 +247,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

@@ -1,7 +1,14 @@
-use mail_parser::MessageParser;
+use mail_parser::{MessageParser, MimeHeaders, PartType};
 use novamail_ipc::AddressDto;
 
 use crate::{MailError, MailResult};
+
+#[derive(Debug, Clone)]
+pub struct ParsedAttachment {
+    pub filename: String,
+    pub mime: String,
+    pub data: Vec<u8>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ParsedMail {
@@ -17,6 +24,7 @@ pub struct ParsedMail {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub has_attachments: bool,
+    pub attachments: Vec<ParsedAttachment>,
     pub seen: bool,
     pub starred: bool,
 }
@@ -76,7 +84,38 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         .unwrap_or_default();
     let snippet = snippet_source.chars().take(180).collect::<String>();
 
-    let has_attachments = message.attachment_count() > 0;
+    let mut attachments = Vec::new();
+    for (idx, part) in message.attachments().enumerate() {
+        let filename = part
+            .attachment_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("attachment-{idx}"));
+        let mime = part
+            .content_type()
+            .map(|ct| {
+                format!(
+                    "{}/{}",
+                    ct.c_type,
+                    ct.c_subtype.as_deref().unwrap_or("octet-stream")
+                )
+            })
+            .unwrap_or_else(|| "application/octet-stream".into());
+        let data = match &part.body {
+            PartType::Text(text) => text.as_bytes().to_vec(),
+            PartType::Html(text) => text.as_bytes().to_vec(),
+            PartType::Binary(bytes) | PartType::InlineBinary(bytes) => bytes.to_vec(),
+            PartType::Message(nested) => nested.raw_message().to_vec(),
+            PartType::Multipart(_) => continue,
+        };
+        if data.is_empty() {
+            continue;
+        }
+        attachments.push(ParsedAttachment {
+            filename,
+            mime,
+            data,
+        });
+    }
 
     let message_id = message.message_id().map(|s| s.to_string());
     let in_reply_to = message.in_reply_to().as_text().map(|s| s.to_string());
@@ -98,7 +137,8 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         snippet,
         body_text,
         body_html,
-        has_attachments,
+        has_attachments: !attachments.is_empty(),
+        attachments,
         seen: flags_seen,
         starred: flags_flagged,
     })

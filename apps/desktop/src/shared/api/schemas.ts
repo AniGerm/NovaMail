@@ -15,6 +15,7 @@ export const addAccountPasswordSchema = z.object({
     "microsoft365",
     "yahoo",
     "protonBridge",
+    "icloud",
   ]),
   imapHost: z.string().min(1),
   imapPort: z.number().int().min(1).max(65535),
@@ -22,6 +23,12 @@ export const addAccountPasswordSchema = z.object({
   smtpHost: z.string().min(1),
   smtpPort: z.number().int().min(1).max(65535),
   smtpTls: z.boolean(),
+});
+
+export const outgoingAttachmentSchema = z.object({
+  filename: z.string().min(1),
+  mime: z.string().min(1),
+  dataBase64: z.string().min(1),
 });
 
 export const sendMessageSchema = z.object({
@@ -34,6 +41,7 @@ export const sendMessageSchema = z.object({
   bodyHtml: z.string().nullish(),
   inReplyTo: z.string().nullish(),
   references: z.array(z.string()),
+  attachments: z.array(outgoingAttachmentSchema).default([]),
 });
 
 export type AddAccountPasswordInput = z.infer<typeof addAccountPasswordSchema>;

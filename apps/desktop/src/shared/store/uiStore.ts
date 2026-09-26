@@ -11,6 +11,8 @@ interface UiState {
   composerOpen: boolean;
   accountSetupOpen: boolean;
   settingsOpen: boolean;
+  contactsOpen: boolean;
+  triageOpen: boolean;
   commandPaletteOpen: boolean;
   searchQuery: string;
   syncStatus: string | null;
@@ -21,6 +23,8 @@ interface UiState {
   setComposerOpen: (open: boolean) => void;
   setAccountSetupOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setContactsOpen: (open: boolean) => void;
+  setTriageOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
   setSyncStatus: (status: string | null) => void;
@@ -34,6 +38,8 @@ export const useUiStore = create<UiState>((set) => ({
   composerOpen: false,
   accountSetupOpen: false,
   settingsOpen: false,
+  contactsOpen: false,
+  triageOpen: false,
   commandPaletteOpen: false,
   searchQuery: "",
   syncStatus: null,
@@ -44,6 +50,8 @@ export const useUiStore = create<UiState>((set) => ({
   setComposerOpen: (composerOpen) => set({ composerOpen }),
   setAccountSetupOpen: (accountSetupOpen) => set({ accountSetupOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setContactsOpen: (contactsOpen) => set({ contactsOpen }),
+  setTriageOpen: (triageOpen) => set({ triageOpen }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSyncStatus: (syncStatus) => set({ syncStatus }),

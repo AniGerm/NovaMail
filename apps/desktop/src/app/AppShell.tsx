@@ -5,7 +5,9 @@ import { CommandPalette, EmptyState, Input, VisuallyHidden } from "@novamail/ui"
 
 import { AccountSetup } from "@/features/accounts/AccountSetup";
 import { Composer } from "@/features/composer/Composer";
+import { ContactsDialog } from "@/features/contacts/ContactsDialog";
 import { MessageList } from "@/features/mail/MessageList";
+import { QuickTriage } from "@/features/mail/QuickTriage";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -24,6 +26,10 @@ export function AppShell() {
     setAccountSetupOpen,
     settingsOpen,
     setSettingsOpen,
+    contactsOpen,
+    setContactsOpen,
+    triageOpen,
+    setTriageOpen,
     commandPaletteOpen,
     setCommandPaletteOpen,
     searchQuery,
@@ -134,6 +140,13 @@ export function AppShell() {
     await refresh();
   }, [desktop, refresh, selectMessage, selectedMessageId]);
 
+  const handleDelete = useCallback(async () => {
+    if (!selectedMessageId || !desktop) return;
+    await api.messagesDelete(selectedMessageId);
+    selectMessage(null);
+    await refresh();
+  }, [desktop, refresh, selectMessage, selectedMessageId]);
+
   const handleForward = useCallback(async () => {
     if (!selectedMessageId || !desktop) return;
     const draft = await api.messagesForwardDraft(selectedMessageId);
@@ -184,6 +197,10 @@ export function AppShell() {
       e: () => {
         void handleArchive();
       },
+      "#": () => {
+        void handleDelete();
+      },
+      t: () => setTriageOpen(true),
       j: () => navigateList(1),
       k: () => navigateList(-1),
       "/": () => {
@@ -194,12 +211,14 @@ export function AppShell() {
     }),
     [
       handleArchive,
+      handleDelete,
       handleForward,
       messageQuery.data,
       navigateList,
       setCommandPaletteOpen,
       setComposerOpen,
       setSettingsOpen,
+      setTriageOpen,
     ],
   );
   useKeyboardShortcuts(shortcuts);
@@ -216,6 +235,17 @@ export function AppShell() {
           setComposerSubject(undefined);
           setComposerOpen(true);
         },
+      },
+      {
+        id: "triage",
+        label: "Quick Sort inbox",
+        hint: "T",
+        onSelect: () => setTriageOpen(true),
+      },
+      {
+        id: "contacts",
+        label: "Open address book",
+        onSelect: () => setContactsOpen(true),
       },
       {
         id: "sync",
@@ -245,6 +275,14 @@ export function AppShell() {
         },
       },
       {
+        id: "delete",
+        label: "Delete selected message",
+        hint: "#",
+        onSelect: () => {
+          void handleDelete();
+        },
+      },
+      {
         id: "forward",
         label: "Forward selected message",
         hint: "F",
@@ -260,12 +298,15 @@ export function AppShell() {
     ],
     [
       handleArchive,
+      handleDelete,
       handleForward,
       handleSync,
       setAccountSetupOpen,
       setComposerOpen,
+      setContactsOpen,
       setSettingsOpen,
       setTheme,
+      setTriageOpen,
       themeDark,
     ],
   );
@@ -322,12 +363,14 @@ export function AppShell() {
           onAddAccount={() => setAccountSetupOpen(true)}
           onToggleTheme={() => setTheme(themeDark ? "light" : "dark")}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenContacts={() => setContactsOpen(true)}
+          onOpenTriage={() => setTriageOpen(true)}
         />
 
         {accounts.length === 0 ? (
           <EmptyState
             title="Welcome to NovaMail"
-            description="Add your first account to sync a unified inbox across Gmail, Microsoft 365, Yahoo, Proton Bridge, or any IMAP server."
+            description="Add your first account to sync a unified inbox across Gmail, Microsoft 365, Yahoo, iCloud, Proton Bridge, or any IMAP server."
             action={
               <button
                 type="button"
@@ -395,7 +438,18 @@ export function AppShell() {
         }}
         onSent={refresh}
       />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        accounts={accounts}
+      />
+      <ContactsDialog open={contactsOpen} onClose={() => setContactsOpen(false)} />
+      <QuickTriage
+        open={triageOpen}
+        messages={messages}
+        onClose={() => setTriageOpen(false)}
+        onChanged={refresh}
+      />
       <CommandPalette
         open={commandPaletteOpen}
         items={commandItems}

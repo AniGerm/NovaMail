@@ -5,7 +5,8 @@ export type MailProvider =
   | "gmail"
   | "microsoft365"
   | "yahoo"
-  | "protonBridge";
+  | "protonBridge"
+  | "icloud";
 
 export interface AccountDto {
   id: string;
@@ -40,6 +41,21 @@ export interface AddressDto {
   email: string;
 }
 
+export interface AttachmentDto {
+  id: string;
+  messageId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  path: string;
+}
+
+export interface OutgoingAttachment {
+  filename: string;
+  mime: string;
+  dataBase64: string;
+}
+
 export interface MessageSummaryDto {
   id: string;
   accountId: string;
@@ -63,6 +79,7 @@ export interface MessageDetailDto {
   messageId?: string | null;
   inReplyTo?: string | null;
   references: string[];
+  attachments: AttachmentDto[];
 }
 
 export interface MailboxDto {
@@ -138,6 +155,7 @@ export interface SendMessageRequest {
   bodyHtml?: string | null;
   inReplyTo?: string | null;
   references: string[];
+  attachments: OutgoingAttachment[];
 }
 
 export interface SummarizeMessageResponse {
@@ -150,4 +168,60 @@ export interface SuggestReplyMessageResponse {
   messageId: string;
   suggestion: string;
   provider: string;
+}
+
+export interface ContactDto {
+  id: string;
+  displayName: string;
+  emails: string[];
+  phones: string[];
+  notes: string;
+  updatedAt: number;
+}
+
+export interface UpsertContactRequest {
+  id?: string | null;
+  displayName: string;
+  emails: string[];
+  phones: string[];
+  notes: string;
+}
+
+export interface CardDavServerStatus {
+  running: boolean;
+  listenUrl: string;
+  addressbookUrl: string;
+  contactCount: number;
+}
+
+export interface LdapSearchRequest {
+  url: string;
+  bindDn?: string | null;
+  password?: string | null;
+  baseDn: string;
+  filter: string;
+}
+
+export interface LabelDto {
+  id: string;
+  accountId: string;
+  name: string;
+  color: string;
+}
+
+export interface RuleDto {
+  id: string;
+  accountId?: string | null;
+  name: string;
+  enabled: boolean;
+  predicateJson: string;
+  actionJson: string;
+}
+
+export interface SignatureDto {
+  id: string;
+  accountId?: string | null;
+  name: string;
+  bodyText: string;
+  isDefault: boolean;
 }

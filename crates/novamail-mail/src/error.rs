@@ -8,6 +8,8 @@ pub enum MailError {
     Imap(String),
     #[error("smtp error: {0}")]
     Smtp(String),
+    #[error("pop3 error: {0}")]
+    Pop3(String),
     #[error("tls error: {0}")]
     Tls(String),
     #[error("auth error: {0}")]

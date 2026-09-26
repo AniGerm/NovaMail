@@ -8,15 +8,30 @@ NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **Rea
 
 - Multi-account IMAP / SMTP + background sync scheduler
 - Unified Inbox (archived mail filtered out)
-- Provider presets (Gmail, Microsoft 365, Yahoo, Proton Bridge, generic)
-- Password auth via OS keyring
+- Provider presets (Gmail, Microsoft 365, Yahoo, iCloud, Proton Bridge, generic)
+- Password auth via OS keyring (+ iCloud app-specific password hint)
 - OAuth2 browser sign-in (localhost callback + token exchange)
 - Full-text search (SQLite FTS5)
-- Compose / reply / forward / archive
+- Compose / reply / forward / archive / delete
+- Attachments: sync from IMAP, open locally, attach when sending
+- Address book with embedded CardDAV server (MFP/fax sync) + LDAP import
+- Quick Sort triage (Keep / Delete / Preview + hotkeys `T`, `K`, `D`, Space)
+- Signatures, labels, and rules in Settings
+- POP3 connectivity test
 - Local AI summarize + suggest reply (Ollama, offline fallback)
 - Command palette, settings (theme/density/high contrast)
-- Keyboard shortcuts (`c`, `r`, `f`, `e`, `j`/`k`, `/`, `Ctrl/Cmd+K`)
+- Keyboard shortcuts (`c`, `r`, `f`, `e`, `#`, `t`, `j`/`k`, `/`, `Ctrl/Cmd+K`)
 - HTML sanitization, CI, Linux packaging script
+
+## Screenshots
+
+![Unified inbox with attachments](docs/screenshots/inbox.png)
+
+![Quick Sort triage](docs/screenshots/quick-sort.png)
+
+![Address book + CardDAV](docs/screenshots/contacts-carddav.png)
+
+More captures: [`docs/screenshots/`](docs/screenshots/).
 
 ## Quick start
 

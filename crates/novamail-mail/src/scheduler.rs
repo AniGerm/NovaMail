@@ -2,6 +2,7 @@
 //!
 //! Runs periodic IMAP sync for all accounts without blocking the UI thread.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,15 +18,22 @@ use crate::sync::SyncEngine;
 pub struct SyncScheduler {
     db: Database,
     secrets: SecretStore,
+    blobs_dir: PathBuf,
     interval: Duration,
     running: Arc<Mutex<bool>>,
 }
 
 impl SyncScheduler {
-    pub fn new(db: Database, secrets: SecretStore, interval: Duration) -> Self {
+    pub fn new(
+        db: Database,
+        secrets: SecretStore,
+        blobs_dir: PathBuf,
+        interval: Duration,
+    ) -> Self {
         Self {
             db,
             secrets,
+            blobs_dir,
             interval,
             running: Arc::new(Mutex::new(false)),
         }
@@ -44,7 +52,11 @@ impl SyncScheduler {
                     } else {
                         *guard = true;
                         drop(guard);
-                        let engine = SyncEngine::new(self.db.clone(), self.secrets.clone());
+                        let engine = SyncEngine::new(
+                            self.db.clone(),
+                            self.secrets.clone(),
+                            &self.blobs_dir,
+                        );
                         let accounts = match self.db.list_accounts() {
                             Ok(list) => list,
                             Err(err) => {
@@ -75,7 +87,7 @@ impl SyncScheduler {
     where
         F: FnMut(SyncProgressEvent) + Send,
     {
-        let engine = SyncEngine::new(self.db.clone(), self.secrets.clone());
+        let engine = SyncEngine::new(self.db.clone(), self.secrets.clone(), &self.blobs_dir);
         let account_ids = if let Some(id) = request.account_id {
             vec![id]
         } else {
