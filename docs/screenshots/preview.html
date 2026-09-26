@@ -15,6 +15,7 @@
         --nova-bg: #f4f7fb;
         --nova-bg-accent: #e8eef6;
         --nova-surface: #ffffff;
+        --nova-surface-2: #eef3f9;
         --nova-ink: #0f172a;
         --nova-ink-muted: #475569;
         --nova-border: #cfd9e6;
@@ -71,13 +72,63 @@
       }
       .main { flex: 1; display: flex; min-width: 0; }
       .list {
-        width: 360px; border-right: 1px solid var(--nova-border);
+        width: 380px; border-right: 1px solid var(--nova-border);
         background: color-mix(in srgb, var(--nova-surface) 88%, transparent);
+        display: flex; flex-direction: column;
       }
+      .list-head {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--nova-border);
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .list-title { display: flex; justify-content: space-between; align-items: center; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .fchip {
+        border: 1px solid var(--nova-border);
+        border-radius: var(--nova-radius-sm);
+        padding: 4px 8px; font-size: 12px; font-weight: 500;
+        color: var(--nova-ink-muted); background: var(--nova-surface);
+      }
+      .fchip.on {
+        border-color: var(--nova-accent);
+        background: var(--nova-accent-soft);
+        color: var(--nova-accent);
+      }
+      .filters {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      }
+      .filters label { display: grid; gap: 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--nova-ink-muted); }
+      .filters select {
+        height: 30px; border-radius: var(--nova-radius-sm);
+        border: 1px solid var(--nova-border); background: var(--nova-surface); padding: 0 8px; font-size: 12px;
+      }
+      .view-toggle {
+        display: flex; gap: 2px; padding: 2px; border-radius: var(--nova-radius-sm);
+        background: var(--nova-surface-2);
+      }
+      .view-toggle span {
+        width: 28px; height: 28px; display: grid; place-items: center;
+        border-radius: 6px; font-size: 12px; color: var(--nova-ink-muted);
+      }
+      .view-toggle span.on { background: var(--nova-accent-soft); color: var(--nova-accent); font-weight: 700; }
       .list-item {
-        padding: 14px 16px; border-bottom: 1px solid var(--nova-border);
+        padding: 12px 14px; border-bottom: 1px solid var(--nova-border);
+      }
+      .list-item.thread {
+        background: color-mix(in srgb, var(--nova-accent-soft) 35%, transparent);
+      }
+      .list-item.child {
+        padding-left: 32px;
+        border-left: 2px solid var(--nova-accent);
+        background: color-mix(in srgb, var(--nova-surface-2) 55%, transparent);
       }
       .list-item.active { background: var(--nova-accent-soft); }
+      .row { display: flex; align-items: center; gap: 6px; }
+      .count {
+        margin-left: auto; font-size: 10px; font-weight: 600;
+        background: var(--nova-surface-2); color: var(--nova-ink-muted);
+        border-radius: 999px; padding: 2px 7px;
+      }
       .reading { flex: 1; padding: 28px 32px; }
       .h2 { font-family: var(--nova-font-display); font-size: 28px; margin: 0 0 8px; }
       .chip {
@@ -92,13 +143,55 @@
       }
       .overlay.show { display: flex; }
       .card {
-        width: min(720px, 100%);
+        width: min(980px, 100%);
         background: var(--nova-surface);
         border: 1px solid var(--nova-border);
         border-radius: var(--nova-radius-lg);
         box-shadow: var(--nova-shadow);
         padding: 20px;
       }
+      .contacts-grid {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr);
+        gap: 16px;
+        margin-top: 14px;
+        max-height: 560px;
+      }
+      .contacts-side {
+        border-right: 1px solid var(--nova-border);
+        padding-right: 12px;
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .contact-row {
+        display: flex; gap: 10px; align-items: center;
+        padding: 8px; border-radius: var(--nova-radius-sm);
+      }
+      .contact-row.active { background: var(--nova-accent-soft); }
+      .avatar {
+        width: 32px; height: 32px; border-radius: 999px;
+        background: var(--nova-accent-soft); color: var(--nova-accent);
+        display: grid; place-items: center; font-size: 12px; font-weight: 700; flex-shrink: 0;
+      }
+      .avatar.photo {
+        background:
+          linear-gradient(135deg, #1e3a5f, #5b7ea6);
+        color: #fff;
+      }
+      .panel {
+        border: 1px solid var(--nova-border);
+        border-radius: var(--nova-radius-md);
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      .form-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      }
+      .field {
+        height: 34px; border: 1px solid var(--nova-border); border-radius: var(--nova-radius-sm);
+        padding: 0 10px; background: var(--nova-surface); color: var(--nova-ink); font-size: 13px;
+        display: flex; align-items: center;
+      }
+      .field.muted { color: var(--nova-ink-muted); }
       .triage-shell {
         width: min(760px, 100%);
         overflow: hidden;
@@ -158,8 +251,9 @@
       }
       .btn.secondary .kbd { border-color: var(--nova-border); background: var(--nova-surface); color: var(--nova-ink-muted); }
       .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
-      .btn.secondary { background: var(--nova-surface-2, #eef3f9); color: var(--nova-ink); border: 1px solid var(--nova-border); padding: 0 14px; }
+      .btn.secondary { background: var(--nova-surface-2); color: var(--nova-ink); border: 1px solid var(--nova-border); padding: 0 14px; height: 36px; }
       .btn.danger { background: var(--nova-danger); }
+      .btn.sm { height: 34px; padding: 0 12px; font-size: 13px; }
       .topbar {
         position: absolute; left: 240px; right: 0; top: 0; height: 56px;
         border-bottom: 1px solid var(--nova-border);
@@ -171,7 +265,8 @@
         border: 1px solid var(--nova-border); padding: 0 12px; background: var(--nova-surface);
         color: var(--nova-ink-muted);
       }
-      .account { display: flex; justify-content: space-between; padding: 8px; font-size: 14px; }
+      .account { display: flex; justify-content: space-between; padding: 8px; font-size: 14px; border-radius: var(--nova-radius-sm); }
+      .account.active { background: var(--nova-accent-soft); color: var(--nova-accent); }
       .badge { font-size: 11px; background: var(--nova-accent-soft); color: var(--nova-accent); padding: 2px 8px; border-radius: 999px; }
     </style>
   </head>
@@ -192,7 +287,7 @@
         <div class="nav" id="nav-contacts">Kontakte</div>
         <div style="margin-top:18px">
           <p class="muted" style="margin:0 0 8px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Konten</p>
-          <div class="account"><span>Arbeit</span><span class="badge">icloud</span></div>
+          <div class="account active"><span>Arbeit</span><span class="badge">icloud</span></div>
           <div class="account"><span>Privat</span><span class="badge">gmail</span></div>
         </div>
         <div style="margin-top:auto">
@@ -201,19 +296,69 @@
       </aside>
       <div class="main">
         <div class="list">
-          <div class="list-item active">
-            <strong>Quartalsbericht Entwurf</strong>
-            <div class="muted">Alex Rivera · vor 12 Min.</div>
-            <div style="margin-top:6px;font-size:14px">PDF und Tabelle zur Freigabe angehängt…</div>
+          <div class="list-head">
+            <div class="list-title">
+              <div>
+                <strong style="font-size:14px">Posteingang</strong>
+                <div class="muted">8 Unterhaltungen</div>
+              </div>
+              <div class="view-toggle" title="Verlauf / Liste">
+                <span class="on">≡</span>
+                <span>☰</span>
+              </div>
+            </div>
+            <div class="chips">
+              <span class="fchip on">Ungelesen</span>
+              <span class="fchip">Favoriten</span>
+              <span class="fchip on">Mit Anhang</span>
+            </div>
+            <div class="filters">
+              <label>Postfach
+                <select><option>INBOX</option><option>Alle Postfächer</option></select>
+              </label>
+              <label>Konto
+                <select><option>Arbeit</option><option>Alle Konten</option></select>
+              </label>
+              <label>Sortieren
+                <select><option>Datum</option><option>Betreff</option><option>Absender</option></select>
+              </label>
+              <label>Reihenfolge
+                <select><option>Neueste zuerst</option><option>Älteste zuerst</option></select>
+              </label>
+            </div>
           </div>
-          <div class="list-item">
-            <strong>Fax-Bestätigung: +49 30…</strong>
-            <div class="muted">MFP Empfang · vor 1 Std.</div>
-            <div style="margin-top:6px;font-size:14px">Zustellbestätigung für gescanntes Dokument</div>
+          <div class="list-item thread">
+            <div class="row">
+              <span class="muted">▾</span>
+              <strong style="font-size:14px">Alex Rivera</strong>
+              <span class="count">3</span>
+              <span class="muted" style="margin-left:4px">12 Min.</span>
+            </div>
+            <div style="padding-left:18px;margin-top:4px;font-size:14px">Quartalsbericht Entwurf · <span style="color:var(--nova-accent);font-size:11px;font-weight:600">2 neu</span></div>
+            <div class="muted" style="padding-left:18px;margin-top:2px">PDF und Tabelle zur Freigabe angehängt…</div>
           </div>
-          <div class="list-item">
-            <strong>Newsletter: Woche im Design</strong>
-            <div class="muted">Inbox Weekly · Gestern</div>
+          <div class="list-item child active">
+            <div class="row">
+              <strong style="font-size:13px">Alex Rivera</strong>
+              <span class="muted" style="margin-left:auto">12 Min.</span>
+            </div>
+            <div class="muted" style="margin-top:2px;font-size:13px">PDF und Tabelle zur Freigabe angehängt… 📎</div>
+          </div>
+          <div class="list-item child">
+            <div class="row">
+              <span style="font-size:13px;font-weight:500">Alex Rivera</span>
+              <span class="muted" style="margin-left:auto">gestern</span>
+            </div>
+            <div class="muted" style="margin-top:2px;font-size:13px">Erste Fassung der Zahlen…</div>
+          </div>
+          <div class="list-item thread">
+            <div class="row">
+              <span class="muted">▸</span>
+              <strong style="font-size:14px">MFP Empfang</strong>
+              <span class="count">1</span>
+              <span class="muted" style="margin-left:4px">1 Std.</span>
+            </div>
+            <div style="padding-left:18px;margin-top:4px;font-size:14px">Fax-Bestätigung: +49 30… 📎</div>
           </div>
         </div>
         <article class="reading">
@@ -231,7 +376,7 @@
           </div>
           <p style="margin-top:28px; max-width:720px; line-height:1.7; font-size:15px">
             Hallo — anbei die Q3-Zahlen und die PDF-Zusammenfassung. Bitte im Posteingang
-            behalten, bis die Freigabe da ist. Mit der Schnellsortierung (Taste T) geht’s schneller.
+            behalten, bis die Freigabe da ist. Verläufe, Filter und Sortierung findest du links in der Liste.
           </p>
         </article>
       </div>
@@ -278,13 +423,113 @@
     </div>
 
     <div class="overlay" id="contacts">
-      <div class="card" style="max-width:560px">
-        <h2 class="h2" style="font-size:22px">Adressbuch</h2>
-        <p class="muted">Lokale Kontakte mit eingebettetem CardDAV für MFP/Fax-Sync und optionalem LDAP-Import.</p>
-        <p style="margin-top:16px"><strong>CardDAV-Server</strong></p>
-        <p class="muted">Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte</p>
-        <p style="margin-top:16px"><strong>Faxraum</strong></p>
-        <p class="muted">fax@buero.local · +49 30 123456</p>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
+          <div>
+            <h2 class="h2" style="font-size:22px;margin:0">Adressbuch</h2>
+            <p class="muted" style="margin-top:6px;max-width:640px">
+              Kontakte mit Foto, Fax, Adresse und eigenen Feldern — lokal pflegen, per LDAP synchronisieren
+              und über CardDAV an andere Geräte ausliefern.
+            </p>
+          </div>
+          <span class="muted" style="font-size:18px">×</span>
+        </div>
+
+        <div class="contacts-grid">
+          <aside class="contacts-side">
+            <div style="display:flex;gap:8px">
+              <div class="field muted" style="flex:1">Fuzzy-Suche… fax</div>
+              <button class="btn secondary sm">+</button>
+            </div>
+            <div class="contact-row active">
+              <div class="avatar photo">F</div>
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:13px">Faxraum EG</div>
+                <div class="muted" style="truncate">Büro · +49 30 123456</div>
+              </div>
+            </div>
+            <div class="contact-row">
+              <div class="avatar">A</div>
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:13px">Alex Rivera</div>
+                <div class="muted">Nova GmbH</div>
+              </div>
+            </div>
+            <div class="contact-row">
+              <div class="avatar">M</div>
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:13px">MFP Empfang</div>
+                <div class="muted">mfp@buero.local</div>
+              </div>
+            </div>
+          </aside>
+
+          <div style="overflow:auto;padding-right:4px">
+            <div class="panel">
+              <strong>CardDAV-Server</strong>
+              <p class="muted" style="margin:6px 0">
+                Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte
+              </p>
+              <p class="muted" style="margin:0 0 8px">
+                Andere Geräte (Drucker, Fax, Smartphones) verbinden sich mit der CardDAV-URL.
+              </p>
+              <button class="btn secondary sm">CardDAV stoppen</button>
+            </div>
+
+            <div class="panel">
+              <strong>LDAP-Synchronisation</strong>
+              <p class="muted" style="margin:6px 0 8px">
+                Kontakte aus dem Verzeichnis holen — danach über CardDAV auch auf anderen Geräten verfügbar.
+              </p>
+              <div class="form-grid">
+                <div class="field muted">ldaps://ldap.buero.local</div>
+                <div class="field muted">ou=people,dc=buero,dc=local</div>
+                <div class="field muted">(objectClass=inetOrgPerson)</div>
+                <div class="field muted">cn=novamail,ou=services,dc=buero,dc=local</div>
+              </div>
+              <button class="btn secondary sm" style="margin-top:8px">Jetzt mit LDAP synchronisieren</button>
+              <p style="margin:8px 0 0;color:var(--nova-accent);font-size:12px">
+                LDAP-Sync: 1 neu, 2 aktualisiert (3 gesamt).
+              </p>
+            </div>
+
+            <div class="panel">
+              <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                <div>
+                  <strong>Kontakt bearbeiten</strong>
+                  <p class="muted" style="margin:4px 0 0">LDAP: cn=faxraum,ou=people,dc=buero,dc=local</p>
+                </div>
+                <div class="avatar photo" style="width:56px;height:56px;font-size:18px">F</div>
+              </div>
+              <div class="form-grid" style="margin-top:10px">
+                <div class="field">Faxraum EG</div>
+                <div class="field">Büro</div>
+                <div class="field">MFP / Fax</div>
+                <div class="field muted">fax@buero.local</div>
+                <div class="field muted">+49 30 555010</div>
+                <div class="field">+49 30 123456</div>
+              </div>
+              <p class="muted" style="margin:12px 0 6px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-size:10px">Adresse</p>
+              <div class="form-grid">
+                <div class="field">Arbeit</div>
+                <div class="field">Hauptstraße 12</div>
+                <div class="field">10115</div>
+                <div class="field">Berlin</div>
+              </div>
+              <p class="muted" style="margin:12px 0 6px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-size:10px">Eigene Felder</p>
+              <div class="form-grid">
+                <div class="field">Raum</div>
+                <div class="field">EG-14</div>
+              </div>
+              <div class="field muted" style="margin-top:8px">Notizen: Für Scan-to-Fax und Drucker-Adressbuch</div>
+              <div style="margin-top:10px;display:flex;gap:8px">
+                <button class="btn sm">Kontakt speichern</button>
+                <button class="btn secondary sm">Löschen</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="actions"><button class="btn">Fertig</button></div>
       </div>
     </div>

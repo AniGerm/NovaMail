@@ -25,11 +25,11 @@ NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **Rea
 
 ## Screenshots
 
-![Unified inbox with attachments](docs/screenshots/inbox.png)
+![Threaded inbox with filters and sort](docs/screenshots/inbox.png)
 
 ![Quick Sort triage](docs/screenshots/quick-sort.png)
 
-![Address book + CardDAV](docs/screenshots/contacts-carddav.png)
+![Address book with LDAP sync and CardDAV](docs/screenshots/contacts-carddav.png)
 
 More captures: [`docs/screenshots/`](docs/screenshots/).
 
