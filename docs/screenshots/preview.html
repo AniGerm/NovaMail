@@ -24,7 +24,7 @@
         --nova-radius-sm: 8px;
         --nova-radius-md: 12px;
         --nova-radius-lg: 16px;
-        --nova-shadow: 0 8px 30px rgba(18, 20, 23, 0.08);
+        --nova-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
         --nova-font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
         --nova-font-display: "Source Serif 4", Georgia, serif;
       }
@@ -34,10 +34,10 @@
         font-family: var(--nova-font-sans);
         color: var(--nova-ink);
         background:
-          radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--nova-accent) 12%, transparent), transparent 55%),
+          radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--nova-accent) 14%, transparent), transparent 55%),
           linear-gradient(180deg, var(--nova-bg), var(--nova-bg-accent));
       }
-      .shell { display: flex; height: 100vh; }
+      .shell { display: flex; height: 100vh; padding-top: 56px; }
       .sidebar {
         width: 240px;
         border-right: 1px solid var(--nova-border);
@@ -62,9 +62,13 @@
       .nav {
         display: flex; align-items: center; gap: 10px;
         height: 44px; padding: 0 12px; border-radius: var(--nova-radius-md);
-        background: var(--nova-accent-soft); color: var(--nova-accent); font-weight: 600;
+        color: var(--nova-ink); font-weight: 500;
       }
-      .nav.ghost { background: transparent; color: var(--nova-ink); font-weight: 500; }
+      .nav.active {
+        background: var(--nova-accent-soft);
+        color: var(--nova-accent);
+        font-weight: 600;
+      }
       .main { flex: 1; display: flex; min-width: 0; }
       .list {
         width: 360px; border-right: 1px solid var(--nova-border);
@@ -82,7 +86,7 @@
         padding: 6px 10px; font-size: 13px; background: var(--nova-surface);
       }
       .overlay {
-        position: fixed; inset: 0; background: rgba(14,17,20,0.45);
+        position: fixed; inset: 0; background: rgba(15, 23, 42, 0.48);
         display: none; align-items: center; justify-content: center; padding: 24px;
         backdrop-filter: blur(4px);
       }
@@ -95,8 +99,8 @@
         box-shadow: var(--nova-shadow);
         padding: 20px;
       }
-      .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
-      .btn.secondary { background: var(--nova-surface); color: var(--nova-ink); border: 1px solid var(--nova-border); }
+      .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+      .btn.secondary { background: var(--nova-surface); color: var(--nova-ink); border: 1px solid var(--nova-border); padding: 0 14px; }
       .btn.danger { background: var(--nova-danger); }
       .topbar {
         position: absolute; left: 240px; right: 0; top: 0; height: 56px;
@@ -107,8 +111,8 @@
       .search {
         width: min(420px, 50vw); height: 40px; border-radius: var(--nova-radius-md);
         border: 1px solid var(--nova-border); padding: 0 12px; background: var(--nova-surface);
+        color: var(--nova-ink-muted);
       }
-      .shell { padding-top: 56px; }
       .account { display: flex; justify-content: space-between; padding: 8px; font-size: 14px; }
       .badge { font-size: 11px; background: var(--nova-accent-soft); color: var(--nova-accent); padding: 2px 8px; border-radius: 999px; }
     </style>
@@ -122,16 +126,16 @@
       <aside class="sidebar">
         <div>
           <p class="brand">NovaMail</p>
-            <p class="muted">Lokale E-Mail</p>
+          <p class="muted">Lokale E-Mail</p>
         </div>
         <button class="btn">Schreiben</button>
-        <div class="nav">Posteingang</div>
-        <div class="nav ghost">Schnellsortierung</div>
-        <div class="nav ghost">Kontakte</div>
+        <div class="nav active" id="nav-inbox">Posteingang</div>
+        <div class="nav" id="nav-triage">Schnellsortierung</div>
+        <div class="nav" id="nav-contacts">Kontakte</div>
         <div style="margin-top:18px">
           <p class="muted" style="margin:0 0 8px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Konten</p>
-          <div class="account"><span>Work</span><span class="badge">icloud</span></div>
-          <div class="account"><span>Personal</span><span class="badge">gmail</span></div>
+          <div class="account"><span>Arbeit</span><span class="badge">icloud</span></div>
+          <div class="account"><span>Privat</span><span class="badge">gmail</span></div>
         </div>
         <div style="margin-top:auto">
           <button class="btn secondary" style="width:100%">Sync</button>
@@ -140,23 +144,23 @@
       <div class="main">
         <div class="list">
           <div class="list-item active">
-            <strong>Quarterly report draft</strong>
-            <div class="muted">Alex Rivera · 12m</div>
-            <div style="margin-top:6px;font-size:14px">Attached PDF + spreadsheet for review…</div>
+            <strong>Quartalsbericht Entwurf</strong>
+            <div class="muted">Alex Rivera · vor 12 Min.</div>
+            <div style="margin-top:6px;font-size:14px">PDF und Tabelle zur Freigabe angehängt…</div>
           </div>
           <div class="list-item">
-            <strong>Fax confirm: +49 30…</strong>
-            <div class="muted">MFP Lobby · 1h</div>
-            <div style="margin-top:6px;font-size:14px">Delivery confirmation for scanned document</div>
+            <strong>Fax-Bestätigung: +49 30…</strong>
+            <div class="muted">MFP Empfang · vor 1 Std.</div>
+            <div style="margin-top:6px;font-size:14px">Zustellbestätigung für gescanntes Dokument</div>
           </div>
           <div class="list-item">
-            <strong>Newsletter: Week in design</strong>
-            <div class="muted">Inbox Weekly · Yesterday</div>
+            <strong>Newsletter: Woche im Design</strong>
+            <div class="muted">Inbox Weekly · Gestern</div>
           </div>
         </div>
         <article class="reading">
-          <h1 class="h2">Quarterly report draft</h1>
-          <div class="muted">Alex Rivera &lt;alex@example.com&gt; · 12 minutes ago · me@icloud.com</div>
+          <h1 class="h2">Quartalsbericht Entwurf</h1>
+          <div class="muted">Alex Rivera &lt;alex@example.com&gt; · vor 12 Minuten · ich@icloud.com</div>
           <div>
             <span class="chip">Antworten</span>
             <span class="chip">Weiterleiten</span>
@@ -164,12 +168,12 @@
           </div>
           <div style="margin-top:16px">
             <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Anhänge</div>
-            <span class="chip">Q3-report.pdf (420 KB)</span>
-            <span class="chip">numbers.xlsx (88 KB)</span>
+            <span class="chip">Q3-Bericht.pdf (420 KB)</span>
+            <span class="chip">zahlen.xlsx (88 KB)</span>
           </div>
           <p style="margin-top:28px; max-width:720px; line-height:1.7; font-size:15px">
-            Hi — attached are the Q3 numbers and the PDF summary. Please keep this in the inbox
-            until finance signs off. You can also triage with Quick Sort (hotkey T).
+            Hallo — anbei die Q3-Zahlen und die PDF-Zusammenfassung. Bitte im Posteingang
+            behalten, bis die Freigabe da ist. Mit der Schnellsortierung (Taste T) geht’s schneller.
           </p>
         </article>
       </div>
@@ -180,9 +184,12 @@
         <h2 class="h2" style="font-size:22px">Schnellsortierung</h2>
         <p class="muted">Tasten: B behalten · L löschen · V Vorschau · Esc schließen</p>
         <p class="muted" style="margin-top:18px">1 / 12</p>
-        <h3 class="h2" style="font-size:26px;margin-top:4px">Fax confirm: +49 30…</h3>
-        <p class="muted">MFP Lobby &lt;mfp@office.local&gt; · 1 hour ago</p>
-        <p style="margin-top:16px;line-height:1.7">Delivery confirmation for scanned document. Keep if you need the audit trail.</p>
+        <h3 class="h2" style="font-size:26px;margin-top:4px">Fax-Bestätigung: +49 30…</h3>
+        <p class="muted">MFP Empfang &lt;mfp@buero.local&gt; · vor 1 Stunde</p>
+        <p style="margin-top:16px;line-height:1.7">
+          Zustellbestätigung für ein gescanntes Dokument. Behalten, wenn du den Beleg noch brauchst —
+          sonst einfach löschen.
+        </p>
         <div class="actions">
           <button class="btn secondary">Vorschau</button>
           <button class="btn secondary">Im Posteingang behalten</button>
@@ -197,8 +204,8 @@
         <p class="muted">Lokale Kontakte mit eingebettetem CardDAV für MFP/Fax-Sync und optionalem LDAP-Import.</p>
         <p style="margin-top:16px"><strong>CardDAV-Server</strong></p>
         <p class="muted">Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte</p>
-        <p style="margin-top:16px"><strong>Fax Room</strong></p>
-        <p class="muted">fax@office.local · +49 30 123456</p>
+        <p style="margin-top:16px"><strong>Faxraum</strong></p>
+        <p class="muted">fax@buero.local · +49 30 123456</p>
         <div class="actions"><button class="btn">Fertig</button></div>
       </div>
     </div>
@@ -208,6 +215,9 @@
       const view = params.get("view") || "inbox";
       document.getElementById("triage").classList.toggle("show", view === "triage");
       document.getElementById("contacts").classList.toggle("show", view === "contacts");
+      document.getElementById("nav-inbox").classList.toggle("active", view === "inbox");
+      document.getElementById("nav-triage").classList.toggle("active", view === "triage");
+      document.getElementById("nav-contacts").classList.toggle("active", view === "contacts");
     </script>
   </body>
 </html>
