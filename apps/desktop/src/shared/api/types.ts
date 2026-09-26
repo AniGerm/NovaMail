@@ -197,11 +197,32 @@ export interface SuggestReplyMessageResponse {
   provider: string;
 }
 
+export interface ContactAddress {
+  label: string;
+  street: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+}
+
+export interface ContactCustomField {
+  label: string;
+  value: string;
+}
+
 export interface ContactDto {
   id: string;
   displayName: string;
   emails: string[];
   phones: string[];
+  faxes: string[];
+  organization: string;
+  jobTitle: string;
+  addresses: ContactAddress[];
+  customFields: ContactCustomField[];
+  photoBase64?: string | null;
+  ldapDn?: string | null;
   notes: string;
   updatedAt: number;
 }
@@ -211,6 +232,13 @@ export interface UpsertContactRequest {
   displayName: string;
   emails: string[];
   phones: string[];
+  faxes?: string[];
+  organization?: string;
+  jobTitle?: string;
+  addresses?: ContactAddress[];
+  customFields?: ContactCustomField[];
+  photoBase64?: string | null;
+  ldapDn?: string | null;
   notes: string;
 }
 
@@ -227,6 +255,29 @@ export interface LdapSearchRequest {
   password?: string | null;
   baseDn: string;
   filter: string;
+}
+
+export interface LdapSyncRequest {
+  url: string;
+  bindDn?: string | null;
+  password?: string | null;
+  baseDn: string;
+  filter: string;
+  saveSettings?: boolean;
+}
+
+export interface LdapSyncSettings {
+  url: string;
+  bindDn?: string | null;
+  password?: string | null;
+  baseDn: string;
+  filter: string;
+}
+
+export interface LdapSyncResult {
+  imported: number;
+  updated: number;
+  total: number;
 }
 
 export interface LabelDto {

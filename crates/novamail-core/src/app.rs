@@ -9,13 +9,14 @@ use novamail_crypto::{AccountCredentials, OAuthTokens, SecretStore};
 use novamail_db::{AccountRecord, Database};
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
-    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
-    ListMessagesResponse, ListThreadsResponse, MailboxDto, MessageDetailDto, MessageSummaryDto,
-    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
-    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
+    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailboxDto,
+    MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
+    OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest,
+    SetFlagsRequest, SetMessageLabelsRequest, SignatureDto, SuggestReplyMessageRequest,
+    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
+    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
+    UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{OAuthConfig, Pop3Client, SmtpClient, SyncEngine};
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
@@ -347,6 +348,13 @@ impl AppState {
             display_name: request.display_name,
             emails: request.emails,
             phones: request.phones,
+            faxes: request.faxes,
+            organization: request.organization,
+            job_title: request.job_title,
+            addresses: request.addresses,
+            custom_fields: request.custom_fields,
+            photo_base64: request.photo_base64,
+            ldap_dn: request.ldap_dn,
             notes: request.notes,
             updated_at: chrono::Utc::now().timestamp(),
         };
@@ -373,6 +381,101 @@ impl AppState {
 
     pub async fn ldap_search(&self, request: LdapSearchRequest) -> CoreResult<Vec<ContactDto>> {
         Ok(search_ldap(&request).await?)
+    }
+
+    pub fn ldap_get_settings(&self) -> CoreResult<LdapSyncSettings> {
+        let raw = self.db.get_setting("ldap.sync")?;
+        if let Some(raw) = raw {
+            let mut settings: LdapSyncSettings = serde_json::from_str(&raw)
+                .map_err(|e| CoreError::Message(e.to_string()))?;
+            settings.password = None;
+            Ok(settings)
+        } else {
+            Ok(LdapSyncSettings {
+                url: "ldaps://ldap.example.com".into(),
+                bind_dn: None,
+                password: None,
+                base_dn: "ou=people,dc=example,dc=com".into(),
+                filter: "(objectClass=inetOrgPerson)".into(),
+            })
+        }
+    }
+
+    pub fn ldap_save_settings(&self, mut settings: LdapSyncSettings) -> CoreResult<()> {
+        // Keep previously stored password when the client omits it.
+        if settings.password.as_deref().unwrap_or("").is_empty() {
+            if let Some(raw) = self.db.get_setting("ldap.sync")? {
+                if let Ok(prev) = serde_json::from_str::<LdapSyncSettings>(&raw) {
+                    settings.password = prev.password;
+                }
+            }
+        }
+        let raw =
+            serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?;
+        self.db.set_setting("ldap.sync", &raw)?;
+        Ok(())
+    }
+
+    /// Pull contacts from LDAP and upsert by `ldap_dn` so other devices can consume
+    /// them via the embedded CardDAV address book.
+    pub async fn ldap_sync(&self, request: LdapSyncRequest) -> CoreResult<LdapSyncResult> {
+        if request.save_settings {
+            self.ldap_save_settings(LdapSyncSettings {
+                url: request.url.clone(),
+                bind_dn: request.bind_dn.clone(),
+                password: request.password.clone(),
+                base_dn: request.base_dn.clone(),
+                filter: request.filter.clone(),
+            })?;
+        }
+
+        let found = search_ldap(&LdapSearchRequest {
+            url: request.url,
+            bind_dn: request.bind_dn,
+            password: request.password,
+            base_dn: request.base_dn,
+            filter: request.filter,
+        })
+        .await?;
+
+        let mut imported = 0u32;
+        let mut updated = 0u32;
+        for contact in found {
+            let ldap_dn = contact.ldap_dn.clone();
+            let existing = if let Some(dn) = &ldap_dn {
+                self.db.find_contact_by_ldap_dn(dn)?
+            } else {
+                None
+            };
+            let id = existing.as_ref().map(|c| c.id).unwrap_or(contact.id);
+            if existing.is_some() {
+                updated += 1;
+            } else {
+                imported += 1;
+            }
+            let record = novamail_db::models::ContactRecord {
+                id,
+                display_name: contact.display_name,
+                emails: contact.emails,
+                phones: contact.phones,
+                faxes: contact.faxes,
+                organization: contact.organization,
+                job_title: contact.job_title,
+                addresses: contact.addresses,
+                custom_fields: contact.custom_fields,
+                photo_base64: contact.photo_base64,
+                ldap_dn,
+                notes: contact.notes,
+                updated_at: chrono::Utc::now().timestamp(),
+            };
+            self.db.upsert_contact(&record)?;
+        }
+
+        Ok(LdapSyncResult {
+            imported,
+            updated,
+            total: imported + updated,
+        })
     }
 
     pub fn list_attachments(&self, message_id: Uuid) -> CoreResult<Vec<AttachmentDto>> {

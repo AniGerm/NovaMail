@@ -1,10 +1,10 @@
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
-    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
-    ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto,
-    MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto,
-    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
+    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailProvider,
+    MailboxDto, MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
+    ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest,
+    SetMessageLabelsRequest, SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
     UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
@@ -284,6 +284,21 @@ pub async fn ldap_search(
     request: LdapSearchRequest,
 ) -> Result<Vec<ContactDto>, AppError> {
     state.app.ldap_search(request).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ldap_get_settings(
+    state: State<'_, DesktopState>,
+) -> Result<LdapSyncSettings, AppError> {
+    state.app.ldap_get_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ldap_sync(
+    state: State<'_, DesktopState>,
+    request: LdapSyncRequest,
+) -> Result<LdapSyncResult, AppError> {
+    state.app.ldap_sync(request).await.map_err(map_err)
 }
 
 #[tauri::command]

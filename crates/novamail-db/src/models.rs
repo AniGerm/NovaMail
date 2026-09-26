@@ -97,6 +97,20 @@ pub struct ContactRecord {
     pub display_name: String,
     pub emails: Vec<String>,
     pub phones: Vec<String>,
+    #[serde(default)]
+    pub faxes: Vec<String>,
+    #[serde(default)]
+    pub organization: String,
+    #[serde(default)]
+    pub job_title: String,
+    #[serde(default)]
+    pub addresses: Vec<novamail_ipc::ContactAddress>,
+    #[serde(default)]
+    pub custom_fields: Vec<novamail_ipc::ContactCustomField>,
+    #[serde(default)]
+    pub photo_base64: Option<String>,
+    #[serde(default)]
+    pub ldap_dn: Option<String>,
     pub notes: String,
     pub updated_at: i64,
 }

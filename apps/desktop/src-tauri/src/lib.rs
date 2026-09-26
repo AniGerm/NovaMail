@@ -65,6 +65,8 @@ pub fn run() {
             commands::carddav_stop,
             commands::carddav_status,
             commands::ldap_search,
+            commands::ldap_get_settings,
+            commands::ldap_sync,
             commands::labels_list,
             commands::labels_upsert,
             commands::labels_delete,

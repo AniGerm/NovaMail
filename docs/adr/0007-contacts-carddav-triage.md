@@ -12,8 +12,12 @@ round-trips, iCloud setup, and a Yahoo-style keep/delete triage flow.
 ## Decision
 
 1. **Embedded CardDAV** (`novamail-contacts`) listens on `127.0.0.1:8765` and
-   serves `/addressbooks/novamail/` as vCard 3.0 resources backed by SQLite.
-2. **LDAP/LDAPS** lookup imports `inetOrgPerson` entries into the local book.
+   serves `/addressbooks/novamail/` as vCard 3.0 resources backed by SQLite so
+   printers, fax MFPs, and other devices can reuse the same address book.
+2. **LDAP/LDAPS sync** pulls `inetOrgPerson` entries (mail, phone, fax, address,
+   photo, org/title) and upserts them by `ldap_dn`; CardDAV then redistributes
+   those contacts. The contacts UI also supports fuzzy search, photos, fax,
+   postal addresses, notes, and custom fields.
 3. **Attachments** are stored under the app blobs directory during IMAP sync,
    exposed on `MessageDetailDto`, openable via the shell plugin, and sendable
    as base64 MIME parts through SMTP.

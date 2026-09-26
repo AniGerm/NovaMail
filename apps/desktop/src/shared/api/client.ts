@@ -10,6 +10,9 @@ import type {
   ContactDto,
   LabelDto,
   LdapSearchRequest,
+  LdapSyncRequest,
+  LdapSyncResult,
+  LdapSyncSettings,
   ListMessagesRequest,
   ListMessagesResponse,
   ListThreadsResponse,
@@ -116,6 +119,9 @@ export const api = {
   carddavStatus: () => call<CardDavServerStatus>("carddav_status"),
   ldapSearch: (request: LdapSearchRequest) =>
     call<ContactDto[]>("ldap_search", { request }),
+  ldapGetSettings: () => call<LdapSyncSettings>("ldap_get_settings"),
+  ldapSync: (request: LdapSyncRequest) =>
+    call<LdapSyncResult>("ldap_sync", { request }),
   labelsList: (accountId?: string | null) =>
     call<LabelDto[]>("labels_list", { accountId: accountId ?? null }),
   labelsUpsert: (request: {

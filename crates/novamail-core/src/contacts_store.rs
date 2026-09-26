@@ -36,6 +36,13 @@ impl ContactStore for DbContactStore {
             display_name: contact.display_name,
             emails: contact.emails,
             phones: contact.phones,
+            faxes: contact.faxes,
+            organization: contact.organization,
+            job_title: contact.job_title,
+            addresses: contact.addresses,
+            custom_fields: contact.custom_fields,
+            photo_base64: contact.photo_base64,
+            ldap_dn: contact.ldap_dn,
             notes: contact.notes,
             updated_at: contact.updated_at,
         };

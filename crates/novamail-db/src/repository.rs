@@ -8,6 +8,7 @@ use novamail_ipc::{
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::migrations;
@@ -15,7 +16,9 @@ use crate::models::{
     AccountRecord, AttachmentRecord, ContactRecord, LabelRecord, MailboxRecord, MessageRecord,
     RuleRecord, SignatureRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN, FLAG_STARRED,
 };
-use novamail_ipc::{AttachmentDto, ContactDto, LabelDto, RuleDto, SignatureDto};
+use novamail_ipc::{
+    AttachmentDto, ContactAddress, ContactCustomField, ContactDto, LabelDto, RuleDto, SignatureDto,
+};
 use crate::{DbError, DbResult};
 
 #[derive(Clone)]
@@ -799,13 +802,7 @@ impl Database {
     pub fn upsert_contact(&self, contact: &ContactRecord) -> DbResult<()> {
         let conn = self.conn.lock();
         let emails = serde_json::to_string(&contact.emails)?;
-        // phones stored inside notes_json extension until schema phones column exists —
-        // migration v2 contacts table has emails_json/notes only. Store phones in notes prefix.
-        let notes = serde_json::json!({
-            "phones": contact.phones,
-            "notes": contact.notes,
-        })
-        .to_string();
+        let profile = encode_contact_profile(contact);
         conn.execute(
             r#"
             INSERT INTO contacts (id, display_name, emails_json, notes, updated_at)
@@ -820,7 +817,7 @@ impl Database {
                 contact.id.to_string(),
                 contact.display_name,
                 emails,
-                notes,
+                profile,
                 contact.updated_at,
             ],
         )?;
@@ -832,35 +829,22 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, display_name, emails_json, notes, updated_at FROM contacts ORDER BY display_name COLLATE NOCASE",
         )?;
-        let rows = stmt.query_map([], |row| {
-            let emails: Vec<String> = serde_json::from_str(&row.get::<_, String>(2)?)
-                .unwrap_or_default();
-            let notes_raw: String = row.get(3)?;
-            let (phones, notes) = parse_contact_notes(&notes_raw);
-            Ok(ContactDto {
-                id: parse_uuid(row.get::<_, String>(0)?)?,
-                display_name: row.get(1)?,
-                emails,
-                phones,
-                notes,
-                updated_at: row.get(4)?,
-            })
-        })?;
-        let mut out = Vec::new();
+        let rows = stmt.query_map([], map_contact_row)?;
+        let mut scored: Vec<(u32, ContactDto)> = Vec::new();
         for row in rows {
             let contact = row?;
             if let Some(q) = query {
-                let q = q.to_ascii_lowercase();
-                let hit = contact.display_name.to_ascii_lowercase().contains(&q)
-                    || contact.emails.iter().any(|e| e.to_ascii_lowercase().contains(&q))
-                    || contact.phones.iter().any(|p| p.contains(&q));
-                if !hit {
-                    continue;
+                if let Some(score) = contact_fuzzy_score(&contact, q) {
+                    scored.push((score, contact));
                 }
+            } else {
+                scored.push((0, contact));
             }
-            out.push(contact);
         }
-        Ok(out)
+        if query.is_some() {
+            scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.display_name.cmp(&b.1.display_name)));
+        }
+        Ok(scored.into_iter().map(|(_, c)| c).collect())
     }
 
     pub fn delete_contact(&self, contact_id: Uuid) -> DbResult<()> {
@@ -878,23 +862,17 @@ impl Database {
         conn.query_row(
             "SELECT id, display_name, emails_json, notes, updated_at FROM contacts WHERE id = ?1",
             params![contact_id.to_string()],
-            |row| {
-                let emails: Vec<String> = serde_json::from_str(&row.get::<_, String>(2)?)
-                    .unwrap_or_default();
-                let notes_raw: String = row.get(3)?;
-                let (phones, notes) = parse_contact_notes(&notes_raw);
-                Ok(ContactDto {
-                    id: parse_uuid(row.get::<_, String>(0)?)?,
-                    display_name: row.get(1)?,
-                    emails,
-                    phones,
-                    notes,
-                    updated_at: row.get(4)?,
-                })
-            },
+            map_contact_row,
         )
         .optional()?
         .ok_or_else(|| DbError::NotFound(format!("contact {contact_id}")))
+    }
+
+    pub fn find_contact_by_ldap_dn(&self, ldap_dn: &str) -> DbResult<Option<ContactDto>> {
+        let contacts = self.list_contacts(None)?;
+        Ok(contacts
+            .into_iter()
+            .find(|c| c.ldap_dn.as_deref() == Some(ldap_dn)))
     }
 
     pub fn upsert_label(&self, label: &LabelRecord) -> DbResult<()> {
@@ -1166,21 +1144,142 @@ fn map_signature_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<SignatureDto> 
     })
 }
 
-fn parse_contact_notes(raw: &str) -> (Vec<String>, String) {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
-        let phones = value
-            .get("phones")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let notes = value
-            .get("notes")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        (phones, notes)
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContactProfileJson {
+    #[serde(default)]
+    phones: Vec<String>,
+    #[serde(default)]
+    faxes: Vec<String>,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    organization: String,
+    #[serde(default)]
+    job_title: String,
+    #[serde(default)]
+    addresses: Vec<ContactAddress>,
+    #[serde(default)]
+    custom_fields: Vec<ContactCustomField>,
+    #[serde(default)]
+    photo_base64: Option<String>,
+    #[serde(default)]
+    ldap_dn: Option<String>,
+}
+
+fn encode_contact_profile(contact: &ContactRecord) -> String {
+    serde_json::to_string(&ContactProfileJson {
+        phones: contact.phones.clone(),
+        faxes: contact.faxes.clone(),
+        notes: contact.notes.clone(),
+        organization: contact.organization.clone(),
+        job_title: contact.job_title.clone(),
+        addresses: contact.addresses.clone(),
+        custom_fields: contact.custom_fields.clone(),
+        photo_base64: contact.photo_base64.clone(),
+        ldap_dn: contact.ldap_dn.clone(),
+    })
+    .unwrap_or_else(|_| {
+        serde_json::json!({
+            "phones": contact.phones,
+            "notes": contact.notes,
+        })
+        .to_string()
+    })
+}
+
+fn decode_contact_profile(raw: &str) -> ContactProfileJson {
+    if let Ok(value) = serde_json::from_str::<ContactProfileJson>(raw) {
+        value
     } else {
-        (Vec::new(), raw.to_string())
+        ContactProfileJson {
+            notes: raw.to_string(),
+            ..Default::default()
+        }
     }
+}
+
+fn map_contact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContactDto> {
+    let emails: Vec<String> =
+        serde_json::from_str(&row.get::<_, String>(2)?).unwrap_or_default();
+    let profile = decode_contact_profile(&row.get::<_, String>(3)?);
+    Ok(ContactDto {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        display_name: row.get(1)?,
+        emails,
+        phones: profile.phones,
+        faxes: profile.faxes,
+        organization: profile.organization,
+        job_title: profile.job_title,
+        addresses: profile.addresses,
+        custom_fields: profile.custom_fields,
+        photo_base64: profile.photo_base64,
+        ldap_dn: profile.ldap_dn,
+        notes: profile.notes,
+        updated_at: row.get(4)?,
+    })
+}
+
+fn contact_fuzzy_score(contact: &ContactDto, query: &str) -> Option<u32> {
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let mut best = 0u32;
+    let mut hit = false;
+    let fields = std::iter::once(contact.display_name.as_str())
+        .chain(std::iter::once(contact.organization.as_str()))
+        .chain(std::iter::once(contact.job_title.as_str()))
+        .chain(std::iter::once(contact.notes.as_str()))
+        .chain(contact.emails.iter().map(String::as_str))
+        .chain(contact.phones.iter().map(String::as_str))
+        .chain(contact.faxes.iter().map(String::as_str))
+        .chain(contact.custom_fields.iter().flat_map(|f| [f.label.as_str(), f.value.as_str()]))
+        .chain(contact.addresses.iter().flat_map(|a| {
+            [
+                a.label.as_str(),
+                a.street.as_str(),
+                a.city.as_str(),
+                a.region.as_str(),
+                a.postal_code.as_str(),
+                a.country.as_str(),
+            ]
+        }));
+    for field in fields {
+        if let Some(score) = fuzzy_match_score(field, needle) {
+            hit = true;
+            best = best.max(score);
+        }
+    }
+    hit.then_some(best)
+}
+
+/// Lightweight fuzzy score: exact substring > prefix > subsequence.
+fn fuzzy_match_score(haystack: &str, needle: &str) -> Option<u32> {
+    let h = haystack.to_ascii_lowercase();
+    let n = needle.to_ascii_lowercase();
+    if n.is_empty() {
+        return Some(0);
+    }
+    if let Some(idx) = h.find(&n) {
+        let bonus = if idx == 0 { 200 } else { 0 };
+        return Some(800 + bonus - (idx as u32).min(100));
+    }
+    let mut hi = h.chars();
+    let mut matched = 0u32;
+    for nc in n.chars() {
+        loop {
+            match hi.next() {
+                Some(hc) if hc == nc => {
+                    matched += 1;
+                    break;
+                }
+                Some(_) => continue,
+                None => return None,
+            }
+        }
+    }
+    Some(200 + matched * 10)
 }
 
 fn map_mailbox_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxRecord> {

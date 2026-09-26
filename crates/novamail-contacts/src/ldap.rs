@@ -1,5 +1,6 @@
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use ldap3::{LdapConnAsync, Scope, SearchEntry};
-use novamail_ipc::{ContactDto, LdapSearchRequest};
+use novamail_ipc::{ContactAddress, ContactDto, LdapSearchRequest};
 use uuid::Uuid;
 
 use crate::{ContactsError, ContactsResult};
@@ -31,7 +32,27 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
             &request.base_dn,
             Scope::Subtree,
             &filter,
-            vec!["cn", "displayName", "mail", "telephoneNumber", "mobile"],
+            vec![
+                "cn",
+                "displayName",
+                "mail",
+                "telephoneNumber",
+                "mobile",
+                "facsimileTelephoneNumber",
+                "fax",
+                "o",
+                "organizationName",
+                "title",
+                "street",
+                "postalAddress",
+                "l",
+                "st",
+                "postalCode",
+                "c",
+                "description",
+                "jpegPhoto",
+                "labelledURI",
+            ],
         )
         .await
         .map_err(|e| ContactsError::Ldap(e.to_string()))?
@@ -47,7 +68,43 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
         let emails = all_attr(&entry, "mail");
         let mut phones = all_attr(&entry, "telephoneNumber");
         phones.extend(all_attr(&entry, "mobile"));
-        if emails.is_empty() && phones.is_empty() {
+        let mut faxes = all_attr(&entry, "facsimileTelephoneNumber");
+        faxes.extend(all_attr(&entry, "fax"));
+        let organization = first_attr(&entry, "o")
+            .or_else(|| first_attr(&entry, "organizationName"))
+            .unwrap_or_default();
+        let job_title = first_attr(&entry, "title").unwrap_or_default();
+        let street = first_attr(&entry, "street")
+            .or_else(|| first_attr(&entry, "postalAddress"))
+            .unwrap_or_default();
+        let city = first_attr(&entry, "l").unwrap_or_default();
+        let region = first_attr(&entry, "st").unwrap_or_default();
+        let postal_code = first_attr(&entry, "postalCode").unwrap_or_default();
+        let country = first_attr(&entry, "c").unwrap_or_default();
+        let mut addresses = Vec::new();
+        if !street.is_empty()
+            || !city.is_empty()
+            || !region.is_empty()
+            || !postal_code.is_empty()
+            || !country.is_empty()
+        {
+            addresses.push(ContactAddress {
+                label: "WORK".into(),
+                street,
+                city,
+                region,
+                postal_code,
+                country,
+            });
+        }
+        let notes = first_attr(&entry, "description").unwrap_or_default();
+        let photo_base64 = entry
+            .bin_attrs
+            .get("jpegPhoto")
+            .and_then(|vals| vals.first())
+            .map(|bytes| B64.encode(bytes));
+
+        if emails.is_empty() && phones.is_empty() && faxes.is_empty() && display_name.is_empty() {
             continue;
         }
         contacts.push(ContactDto {
@@ -55,7 +112,14 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
             display_name,
             emails,
             phones,
-            notes: format!("ldap:{}", entry.dn),
+            faxes,
+            organization,
+            job_title,
+            addresses,
+            custom_fields: Vec::new(),
+            photo_base64,
+            ldap_dn: Some(entry.dn),
+            notes,
             updated_at: chrono::Utc::now().timestamp(),
         });
     }
