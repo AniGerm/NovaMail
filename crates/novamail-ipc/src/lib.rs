@@ -7,6 +7,7 @@
 mod account;
 mod ai;
 mod attachments;
+mod backup;
 mod contacts;
 mod error;
 mod labels;
@@ -20,6 +21,7 @@ mod sync;
 pub use account::*;
 pub use ai::*;
 pub use attachments::*;
+pub use backup::*;
 pub use contacts::*;
 pub use error::*;
 pub use labels::*;

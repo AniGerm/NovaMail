@@ -81,6 +81,8 @@ pub fn run() {
             commands::signatures_upsert,
             commands::signatures_delete,
             commands::pop3_test,
+            commands::backup_export,
+            commands::backup_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");

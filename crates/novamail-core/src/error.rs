@@ -25,6 +25,7 @@ impl From<CoreError> for AppError {
     fn from(value: CoreError) -> Self {
         let code = match &value {
             CoreError::Db(novamail_db::DbError::NotFound(_)) => "not_found",
+            CoreError::Crypto(novamail_crypto::CryptoError::BadPassphrase) => "bad_passphrase",
             CoreError::Crypto(_) => "crypto",
             CoreError::Mail(novamail_mail::MailError::Auth(_)) => "auth",
             CoreError::Mail(_) => "mail",

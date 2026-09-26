@@ -98,7 +98,25 @@ export const de = {
   connectSync: "Verbinden & sync",
   otherImapSmtp: "Anderer IMAP / SMTP",
   settingsTitle: "Einstellungen",
-  settingsDescription: "Darstellung, Sprache, Signaturen, Labels und Regeln.",
+  settingsDescription:
+    "Darstellung, Sprache, Backup, Signaturen, Labels und Regeln.",
+  backupTitle: "Verschlüsseltes Backup",
+  backupDescription:
+    "Konten, Kontakte, Labels, Regeln und Signaturen als passwortgeschützte Datei (.nmbak) sichern oder wiederherstellen. Beim Import werden doppelte Kontakte zusammengeführt.",
+  backupPassphrase: "Passphrase (mind. 8 Zeichen)",
+  backupPassphraseConfirm: "Passphrase bestätigen",
+  backupExport: "Backup exportieren",
+  backupImport: "Backup importieren",
+  backupChooseFile: "Backup-Datei wählen…",
+  backupExportDone:
+    "Backup gespeichert ({accounts} Konten, {contacts} Kontakte).",
+  backupImportDone:
+    "Import: {accounts} Konten, {contacts} Kontakte (übersprungen: {skipped}).",
+  backupPassphraseMismatch: "Passphrasen stimmen nicht überein.",
+  backupPassphraseTooShort: "Passphrase muss mindestens 8 Zeichen haben.",
+  backupBadPassphrase: "Falsche Passphrase oder beschädigte Datei.",
+  backupFailed: "Backup fehlgeschlagen.",
+  backupNoFile: "Bitte zuerst eine Backup-Datei wählen.",
   theme: "Design",
   themeSystem: "Automatik",
   themeLight: "Hell",

@@ -7,4 +7,9 @@ mod error;
 mod secrets;
 
 pub use error::{CryptoError, CryptoResult};
+pub mod backup;
+
+pub use backup::{
+    decrypt_backup_payload, encrypt_backup_payload, EncryptedBackupFile, BACKUP_FORMAT,
+};
 pub use secrets::{AccountCredentials, OAuthTokens, SecretStore};

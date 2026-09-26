@@ -34,9 +34,12 @@ novamail-plugins = { path = "crates/novamail-plugins" }
 novamail-rules = { path = "crates/novamail-rules" }
 novamail-search = { path = "crates/novamail-search" }
 
+aes-gcm = "0.10"
 anyhow = "1"
+argon2 = "0.5"
 async-trait = "0.1"
 base64 = "0.22"
+rand = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 keyring = { version = "3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }

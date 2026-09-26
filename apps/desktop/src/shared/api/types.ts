@@ -320,3 +320,30 @@ export interface SignatureDto {
   bodyText: string;
   isDefault: boolean;
 }
+
+export interface ExportBackupRequest {
+  passphrase: string;
+}
+
+export interface ExportBackupResponse {
+  filename: string;
+  dataBase64: string;
+  accounts: number;
+  contacts: number;
+}
+
+export interface ImportBackupRequest {
+  passphrase: string;
+  dataBase64: string;
+}
+
+export interface ImportBackupResult {
+  accountsImported: number;
+  accountsUpdated: number;
+  contactsImported: number;
+  contactsUpdated: number;
+  contactsSkipped: number;
+  labelsImported: number;
+  rulesImported: number;
+  signaturesImported: number;
+}

@@ -100,7 +100,25 @@ export const en: Translations = {
   connectSync: "Connect & sync",
   otherImapSmtp: "Other IMAP / SMTP",
   settingsTitle: "Settings",
-  settingsDescription: "Appearance, language, signatures, labels, and mail rules.",
+  settingsDescription:
+    "Appearance, language, backup, signatures, labels, and mail rules.",
+  backupTitle: "Encrypted backup",
+  backupDescription:
+    "Save or restore accounts, contacts, labels, rules, and signatures as a passphrase-protected file (.nmbak). Import merges duplicate contacts.",
+  backupPassphrase: "Passphrase (min. 8 characters)",
+  backupPassphraseConfirm: "Confirm passphrase",
+  backupExport: "Export backup",
+  backupImport: "Import backup",
+  backupChooseFile: "Choose backup file…",
+  backupExportDone:
+    "Backup saved ({accounts} accounts, {contacts} contacts).",
+  backupImportDone:
+    "Import: {accounts} accounts, {contacts} contacts (skipped: {skipped}).",
+  backupPassphraseMismatch: "Passphrases do not match.",
+  backupPassphraseTooShort: "Passphrase must be at least 8 characters.",
+  backupBadPassphrase: "Wrong passphrase or corrupt file.",
+  backupFailed: "Backup failed.",
+  backupNoFile: "Choose a backup file first.",
   theme: "Theme",
   themeSystem: "Automatic",
   themeLight: "Light",

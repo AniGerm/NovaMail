@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, DialogActions, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
@@ -7,6 +7,38 @@ import { useT } from "@/shared/i18n/useT";
 import type { Locale } from "@/shared/i18n";
 import type { ColorSchemeId } from "@/shared/theme/schemes";
 import { useUiStore } from "@/shared/store/uiStore";
+
+function downloadBase64File(filename: string, dataBase64: string) {
+  const binary = atob(dataBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("read failed"));
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export function SettingsDialog({
   open,
@@ -37,6 +69,13 @@ export function SettingsDialog({
   const [labelName, setLabelName] = useState("");
   const [ruleName, setRuleName] = useState("");
   const [ruleSubject, setRuleSubject] = useState("");
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupPassphraseConfirm, setBackupPassphraseConfirm] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
+  const importFileRef = useRef<File | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshExtras() {
@@ -53,8 +92,84 @@ export function SettingsDialog({
   useEffect(() => {
     if (!open) return;
     setSigName(t("defaultSignatureName"));
+    setBackupPassphrase("");
+    setBackupPassphraseConfirm("");
+    setBackupStatus(null);
+    setImportFileName(null);
+    importFileRef.current = null;
     refreshExtras().catch((err) => setError((err as AppError).message));
   }, [open, t]);
+
+  async function handleExportBackup() {
+    setError(null);
+    setBackupStatus(null);
+    if (backupPassphrase.trim().length < 8) {
+      setError(t("backupPassphraseTooShort"));
+      return;
+    }
+    if (backupPassphrase !== backupPassphraseConfirm) {
+      setError(t("backupPassphraseMismatch"));
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      const result = await api.backupExport(backupPassphrase);
+      downloadBase64File(result.filename, result.dataBase64);
+      setBackupStatus(
+        t("backupExportDone", {
+          accounts: result.accounts,
+          contacts: result.contacts,
+        }),
+      );
+      setBackupPassphrase("");
+      setBackupPassphraseConfirm("");
+    } catch (err) {
+      setError((err as AppError).message || t("backupFailed"));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleImportBackup() {
+    setError(null);
+    setBackupStatus(null);
+    if (backupPassphrase.trim().length < 8) {
+      setError(t("backupPassphraseTooShort"));
+      return;
+    }
+    const file = importFileRef.current;
+    if (!file) {
+      setError(t("backupNoFile"));
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      const dataBase64 = await fileToBase64(file);
+      const result = await api.backupImport(backupPassphrase, dataBase64);
+      setBackupStatus(
+        t("backupImportDone", {
+          accounts: result.accountsImported + result.accountsUpdated,
+          contacts: result.contactsImported + result.contactsUpdated,
+          skipped: result.contactsSkipped,
+        }),
+      );
+      setBackupPassphrase("");
+      setBackupPassphraseConfirm("");
+      setImportFileName(null);
+      importFileRef.current = null;
+      if (importInputRef.current) importInputRef.current.value = "";
+      await refreshExtras();
+    } catch (err) {
+      const appErr = err as AppError;
+      if (appErr.code === "bad_passphrase") {
+        setError(t("backupBadPassphrase"));
+      } else {
+        setError(appErr.message || t("backupFailed"));
+      }
+    } finally {
+      setBackupBusy(false);
+    }
+  }
 
   return (
     <Dialog
@@ -159,6 +274,75 @@ export function SettingsDialog({
           />
           {t("highContrast")}
         </label>
+
+        <section className="grid gap-2">
+          <h3 className="font-medium">{t("backupTitle")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("backupDescription")}
+          </p>
+          <Input
+            type="password"
+            autoComplete="new-password"
+            placeholder={t("backupPassphrase")}
+            value={backupPassphrase}
+            onChange={(e) => setBackupPassphrase(e.target.value)}
+          />
+          <Input
+            type="password"
+            autoComplete="new-password"
+            placeholder={t("backupPassphraseConfirm")}
+            value={backupPassphraseConfirm}
+            onChange={(e) => setBackupPassphraseConfirm(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={backupBusy}
+              onClick={() => void handleExportBackup()}
+            >
+              {t("backupExport")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={backupBusy}
+              onClick={() => importInputRef.current?.click()}
+            >
+              {t("backupChooseFile")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={backupBusy || !importFileName}
+              onClick={() => void handleImportBackup()}
+            >
+              {t("backupImport")}
+            </Button>
+          </div>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".nmbak,application/json,application/octet-stream"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0] ?? null;
+              importFileRef.current = file;
+              setImportFileName(file?.name ?? null);
+              setBackupStatus(null);
+              setError(null);
+            }}
+          />
+          {importFileName ? (
+            <p className="text-xs text-[var(--nova-ink-muted)]">{importFileName}</p>
+          ) : null}
+          {backupStatus ? (
+            <p className="text-xs text-[var(--nova-ink-muted)]" role="status">
+              {backupStatus}
+            </p>
+          ) : null}
+        </section>
 
         <section className="grid gap-2">
           <h3 className="font-medium">{t("signatures")}</h3>

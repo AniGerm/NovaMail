@@ -158,6 +158,74 @@ impl Database {
         Ok(())
     }
 
+    pub fn find_account_by_email(&self, email: &str) -> DbResult<Option<AccountRecord>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            r#"
+            SELECT id, name, email, provider, auth_type,
+                   imap_host, imap_port, imap_tls,
+                   smtp_host, smtp_port, smtp_tls, created_at
+            FROM accounts WHERE lower(email) = lower(?1)
+            "#,
+            params![email],
+            |row| {
+                Ok(AccountRecord {
+                    id: parse_uuid(row.get::<_, String>(0)?)?,
+                    name: row.get(1)?,
+                    email: row.get(2)?,
+                    provider: parse_provider(&row.get::<_, String>(3)?),
+                    auth_type: parse_auth(&row.get::<_, String>(4)?),
+                    imap_host: row.get(5)?,
+                    imap_port: row.get::<_, i64>(6)? as u16,
+                    imap_tls: row.get::<_, i64>(7)? != 0,
+                    smtp_host: row.get(8)?,
+                    smtp_port: row.get::<_, i64>(9)? as u16,
+                    smtp_tls: row.get::<_, i64>(10)? != 0,
+                    created_at: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn update_account(&self, account: &AccountRecord) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            r#"
+            UPDATE accounts SET
+              name = ?2,
+              email = ?3,
+              provider = ?4,
+              auth_type = ?5,
+              imap_host = ?6,
+              imap_port = ?7,
+              imap_tls = ?8,
+              smtp_host = ?9,
+              smtp_port = ?10,
+              smtp_tls = ?11
+            WHERE id = ?1
+            "#,
+            params![
+                account.id.to_string(),
+                account.name,
+                account.email,
+                provider_to_str(&account.provider),
+                auth_to_str(&account.auth_type),
+                account.imap_host,
+                account.imap_port as i64,
+                account.imap_tls as i64,
+                account.smtp_host,
+                account.smtp_port as i64,
+                account.smtp_tls as i64,
+            ],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("account {}", account.id)));
+        }
+        Ok(())
+    }
+
     pub fn upsert_mailbox(&self, mailbox: &MailboxRecord) -> DbResult<()> {
         let conn = self.conn.lock();
         conn.execute(

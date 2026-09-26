@@ -5,12 +5,18 @@ use novamail_ai::{
     SummarizeRequest,
 };
 use novamail_contacts::{search_ldap, CardDavServer};
-use novamail_crypto::{AccountCredentials, OAuthTokens, SecretStore};
-use novamail_db::{AccountRecord, Database};
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use novamail_crypto::{
+    decrypt_backup_payload, encrypt_backup_payload, AccountCredentials, EncryptedBackupFile,
+    OAuthTokens, SecretStore,
+};
+use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
-    CardDavServerStatus, ContactDto, ContactsBookSettings, LabelDto, LdapSearchRequest,
-    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
+    ContactDto, ContactsBookSettings, ExportBackupRequest, ExportBackupResponse,
+    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
+    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest,
     OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
     SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
@@ -404,6 +410,244 @@ impl AppState {
         Ok(search_ldap(&request).await?)
     }
 
+    /// Phase-1 org sync: passphrase-encrypted JSON backup (accounts, contacts, rules…).
+    pub fn export_backup(&self, request: ExportBackupRequest) -> CoreResult<ExportBackupResponse> {
+        let accounts = self.db.list_accounts()?;
+        let mut backup_accounts = Vec::with_capacity(accounts.len());
+        for account in &accounts {
+            let mut entry = BackupAccount::from(account);
+            if let Ok(creds) = self.secrets.load_credentials(account.id) {
+                entry.credentials = Some(match creds {
+                    AccountCredentials::Password { password } => BackupAccountCredentials {
+                        kind: "password".into(),
+                        password: Some(password),
+                        access_token: None,
+                        refresh_token: None,
+                        expires_at: None,
+                    },
+                    AccountCredentials::OAuth2 { tokens } => BackupAccountCredentials {
+                        kind: "oauth2".into(),
+                        password: None,
+                        access_token: Some(tokens.access_token),
+                        refresh_token: tokens.refresh_token,
+                        expires_at: tokens.expires_at,
+                    },
+                });
+            }
+            backup_accounts.push(entry);
+        }
+
+        let contacts = self.db.list_contacts(None)?;
+        let payload = BackupPayload {
+            version: 1,
+            exported_at: chrono::Utc::now().timestamp(),
+            accounts: backup_accounts,
+            contacts: contacts.iter().map(BackupContact::from).collect(),
+            labels: self.db.list_labels(None)?,
+            rules: self.db.list_rules()?,
+            signatures: self.db.list_signatures(None)?,
+            contacts_book: Some(self.contacts_book_settings()?),
+            ldap: Some(self.ldap_get_settings()?),
+        };
+
+        let plaintext = serde_json::to_vec(&payload)
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        let encrypted = encrypt_backup_payload(&request.passphrase, &plaintext)?;
+        let envelope = serde_json::to_vec(&encrypted)
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        Ok(ExportBackupResponse {
+            filename: format!("novamail-backup-{stamp}.nmbak"),
+            data_base64: B64.encode(envelope),
+            accounts: payload.accounts.len() as u32,
+            contacts: payload.contacts.len() as u32,
+        })
+    }
+
+    pub fn import_backup(&self, request: ImportBackupRequest) -> CoreResult<ImportBackupResult> {
+        let envelope_bytes = B64
+            .decode(request.data_base64.as_bytes())
+            .map_err(|_| CoreError::Message("invalid backup data encoding".into()))?;
+        let file: EncryptedBackupFile = serde_json::from_slice(&envelope_bytes)
+            .map_err(|_| CoreError::Message("invalid backup file".into()))?;
+        let plaintext = decrypt_backup_payload(&request.passphrase, &file)?;
+        let payload: BackupPayload = serde_json::from_slice(&plaintext)
+            .map_err(|_| CoreError::Message("backup payload corrupt or unsupported".into()))?;
+
+        let mut result = ImportBackupResult::default();
+        let existing_contacts = self.db.list_contacts(None)?;
+
+        for account in payload.accounts {
+            let email = account.email.clone();
+            let existing = self.db.find_account_by_email(&email)?;
+            let id = existing
+                .as_ref()
+                .map(|a| a.id)
+                .unwrap_or(account.id);
+            let record = AccountRecord {
+                id,
+                name: account.name,
+                email,
+                provider: account.provider,
+                auth_type: account.auth_type,
+                imap_host: account.imap_host,
+                imap_port: account.imap_port,
+                imap_tls: account.imap_tls,
+                smtp_host: account.smtp_host,
+                smtp_port: account.smtp_port,
+                smtp_tls: account.smtp_tls,
+                created_at: existing
+                    .as_ref()
+                    .map(|a| a.created_at)
+                    .unwrap_or(account.created_at),
+            };
+            if existing.is_some() {
+                self.db.update_account(&record)?;
+                result.accounts_updated += 1;
+            } else {
+                // Prefer original id; if clash, insert with fresh id.
+                if self.db.get_account(id).is_ok() {
+                    let mut fresh = record.clone();
+                    fresh.id = Uuid::new_v4();
+                    self.db.insert_account(&fresh)?;
+                    if let Some(creds) = account.credentials {
+                        self.store_backup_credentials(fresh.id, &creds)?;
+                    }
+                } else {
+                    self.db.insert_account(&record)?;
+                    if let Some(creds) = account.credentials {
+                        self.store_backup_credentials(id, &creds)?;
+                    }
+                }
+                result.accounts_imported += 1;
+                continue;
+            }
+            if let Some(creds) = account.credentials {
+                self.store_backup_credentials(id, &creds)?;
+            }
+        }
+
+        for contact in payload.contacts {
+            if let Some(existing) = find_matching_contact(&existing_contacts, &contact) {
+                if existing.updated_at >= contact.updated_at
+                    && existing.display_name == contact.display_name
+                    && existing.emails == contact.emails
+                {
+                    result.contacts_skipped += 1;
+                    continue;
+                }
+                let record = ContactRecord {
+                    id: existing.id,
+                    display_name: contact.display_name,
+                    given_name: contact.given_name,
+                    family_name: contact.family_name,
+                    emails: contact.emails,
+                    phones: contact.phones,
+                    faxes: contact.faxes,
+                    organization: contact.organization,
+                    job_title: contact.job_title,
+                    addresses: contact.addresses,
+                    custom_fields: contact.custom_fields,
+                    photo_base64: contact.photo_base64,
+                    ldap_dn: contact.ldap_dn,
+                    notes: contact.notes,
+                    updated_at: contact.updated_at.max(chrono::Utc::now().timestamp()),
+                };
+                self.db.upsert_contact(&record)?;
+                result.contacts_updated += 1;
+            } else {
+                let id = if self.db.get_contact(contact.id).is_ok() {
+                    Uuid::new_v4()
+                } else {
+                    contact.id
+                };
+                let record = ContactRecord {
+                    id,
+                    display_name: contact.display_name,
+                    given_name: contact.given_name,
+                    family_name: contact.family_name,
+                    emails: contact.emails,
+                    phones: contact.phones,
+                    faxes: contact.faxes,
+                    organization: contact.organization,
+                    job_title: contact.job_title,
+                    addresses: contact.addresses,
+                    custom_fields: contact.custom_fields,
+                    photo_base64: contact.photo_base64,
+                    ldap_dn: contact.ldap_dn,
+                    notes: contact.notes,
+                    updated_at: contact.updated_at,
+                };
+                self.db.upsert_contact(&record)?;
+                result.contacts_imported += 1;
+            }
+        }
+
+        for label in payload.labels {
+            if self.db.get_account(label.account_id).is_err() {
+                continue;
+            }
+            self.db.upsert_label(&LabelRecord {
+                id: label.id,
+                account_id: label.account_id,
+                name: label.name,
+                color: label.color,
+            })?;
+            result.labels_imported += 1;
+        }
+        for rule in payload.rules {
+            self.db.upsert_rule(&RuleRecord {
+                id: rule.id,
+                account_id: rule.account_id,
+                name: rule.name,
+                enabled: rule.enabled,
+                predicate_json: rule.predicate_json,
+                action_json: rule.action_json,
+            })?;
+            result.rules_imported += 1;
+        }
+        for signature in payload.signatures {
+            self.db.upsert_signature(&SignatureRecord {
+                id: signature.id,
+                account_id: signature.account_id,
+                name: signature.name,
+                body_text: signature.body_text,
+                is_default: signature.is_default,
+            })?;
+            result.signatures_imported += 1;
+        }
+
+        if let Some(book) = payload.contacts_book {
+            self.set_contacts_book_settings(book)?;
+        }
+        if let Some(ldap) = payload.ldap {
+            self.ldap_save_settings(ldap)?;
+        }
+
+        Ok(result)
+    }
+
+    fn store_backup_credentials(
+        &self,
+        account_id: Uuid,
+        creds: &BackupAccountCredentials,
+    ) -> CoreResult<()> {
+        let mapped = match creds.kind.as_str() {
+            "oauth2" => AccountCredentials::OAuth2 {
+                tokens: OAuthTokens {
+                    access_token: creds.access_token.clone().unwrap_or_default(),
+                    refresh_token: creds.refresh_token.clone(),
+                    expires_at: creds.expires_at,
+                },
+            },
+            _ => AccountCredentials::Password {
+                password: creds.password.clone().unwrap_or_default(),
+            },
+        };
+        self.secrets.store_credentials(account_id, &mapped)?;
+        Ok(())
+    }
+
     pub fn ldap_get_settings(&self) -> CoreResult<LdapSyncSettings> {
         let raw = self.db.get_setting("ldap.sync")?;
         if let Some(raw) = raw {
@@ -754,3 +998,30 @@ impl AppState {
     }
 }
 
+/// Match backup contacts to local ones: LDAP DN, then shared email, then id.
+fn find_matching_contact<'a>(
+    existing: &'a [ContactDto],
+    contact: &BackupContact,
+) -> Option<&'a ContactDto> {
+    if let Some(dn) = contact.ldap_dn.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(found) = existing
+            .iter()
+            .find(|c| c.ldap_dn.as_deref() == Some(dn))
+        {
+            return Some(found);
+        }
+    }
+    for email in &contact.emails {
+        let email = email.trim();
+        if email.is_empty() {
+            continue;
+        }
+        if let Some(found) = existing
+            .iter()
+            .find(|c| c.emails.iter().any(|e| e.eq_ignore_ascii_case(email)))
+        {
+            return Some(found);
+        }
+    }
+    existing.iter().find(|c| c.id == contact.id)
+}

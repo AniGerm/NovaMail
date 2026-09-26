@@ -9,6 +9,8 @@ import type {
   CardDavServerStatus,
   ContactDto,
   ContactsBookSettings,
+  ExportBackupResponse,
+  ImportBackupResult,
   LabelDto,
   LdapSearchRequest,
   LdapSyncRequest,
@@ -164,6 +166,12 @@ export const api = {
     user: string;
     password: string;
   }) => call<number>("pop3_test", args),
+  backupExport: (passphrase: string) =>
+    call<ExportBackupResponse>("backup_export", { request: { passphrase } }),
+  backupImport: (passphrase: string, dataBase64: string) =>
+    call<ImportBackupResult>("backup_import", {
+      request: { passphrase, dataBase64 },
+    }),
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),
   oauthWaitCallback: (timeoutSecs = 180) =>

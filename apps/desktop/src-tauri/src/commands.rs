@@ -1,6 +1,7 @@
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
-    CardDavServerStatus, ContactDto, ContactsBookSettings, LabelDto, LdapSearchRequest,
+    CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
+    ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
     LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto, MessageSummaryDto,
     OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto, SearchRequest,
@@ -413,4 +414,20 @@ pub async fn pop3_test(
         .pop3_test(host, port, use_tls, user, password)
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn backup_export(
+    state: State<'_, DesktopState>,
+    request: ExportBackupRequest,
+) -> Result<ExportBackupResponse, AppError> {
+    state.app.export_backup(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn backup_import(
+    state: State<'_, DesktopState>,
+    request: ImportBackupRequest,
+) -> Result<ImportBackupResult, AppError> {
+    state.app.import_backup(request).map_err(map_err)
 }

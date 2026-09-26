@@ -10,4 +10,8 @@ pub enum CryptoError {
     Serde(#[from] serde_json::Error),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("backup encryption error: {0}")]
+    Backup(String),
+    #[error("wrong backup passphrase or corrupt file")]
+    BadPassphrase,
 }
