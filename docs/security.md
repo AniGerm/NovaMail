@@ -21,6 +21,8 @@
 | HTML XSS from mail | ammonia sanitization before IPC |
 | Plugin escape | WASM + capability manifests (scaffold) |
 | OAuth interception | localhost callback bound to 127.0.0.1 only |
+| OAuth token expiry | Automatic refresh before IMAP/SMTP when `expires_at` near |
+| Open CardDAV on LAN | HTTP Basic auth (generated password in settings) |
 | Supply-chain updates | Signed releases (packaging phase) |
 
 ## Out of scope for MVP
