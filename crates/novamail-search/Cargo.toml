@@ -1,0 +1,11 @@
+[package]
+name = "novamail-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Full-text search helpers for NovaMail"
+
+[dependencies]
+novamail-db = { workspace = true }
+novamail-ipc = { workspace = true }
+thiserror = { workspace = true }

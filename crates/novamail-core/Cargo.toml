@@ -1,0 +1,28 @@
+[package]
+name = "novamail-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Application services and use-cases for NovaMail"
+
+[dependencies]
+chrono = { workspace = true }
+dirs = { workspace = true }
+novamail-ai = { workspace = true }
+novamail-crypto = { workspace = true }
+novamail-db = { workspace = true }
+novamail-ipc = { workspace = true }
+novamail-mail = { workspace = true }
+novamail-plugins = { workspace = true }
+novamail-search = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

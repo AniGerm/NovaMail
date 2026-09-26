@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+target/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# App data (local)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Tauri
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+
+# Logs / coverage
+*.log
+coverage/
+.nyc_output/
+
+# OS
+Thumbs.db
