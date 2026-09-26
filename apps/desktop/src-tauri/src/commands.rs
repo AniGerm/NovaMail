@@ -159,3 +159,31 @@ pub async fn ai_suggest_reply(
         .await
         .map_err(map_err)
 }
+
+#[tauri::command]
+pub async fn oauth_wait_callback(
+    state: State<'_, DesktopState>,
+    timeout_secs: Option<u64>,
+) -> Result<novamail_mail::OAuthCallbackResult, AppError> {
+    state
+        .app
+        .oauth_wait_callback(timeout_secs.unwrap_or(180))
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_archive(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.archive_message(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_forward_draft(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<SendMessageRequest, AppError> {
+    state.app.build_forward_draft(message_id).map_err(map_err)
+}

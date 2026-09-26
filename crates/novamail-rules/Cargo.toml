@@ -1,0 +1,16 @@
+[package]
+name = "novamail-rules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Mail filter and rules engine for NovaMail"
+
+[dependencies]
+novamail-ipc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

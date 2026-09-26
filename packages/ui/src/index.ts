@@ -1,7 +1,11 @@
 export { Badge } from "./Badge";
 export { Button } from "./Button";
+export { CommandPalette } from "./CommandPalette";
+export type { CommandItem } from "./CommandPalette";
+export { Dialog, DialogActions } from "./Dialog";
 export { EmptyState } from "./EmptyState";
 export { IconButton } from "./IconButton";
 export { Input } from "./Input";
 export { Skeleton } from "./Skeleton";
+export { VisuallyHidden } from "./VisuallyHidden";
 export { cn } from "./utils";

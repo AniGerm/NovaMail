@@ -15,6 +15,7 @@ novamail-db = { workspace = true }
 novamail-ipc = { workspace = true }
 novamail-mail = { workspace = true }
 novamail-plugins = { workspace = true }
+novamail-rules = { workspace = true }
 novamail-search = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }

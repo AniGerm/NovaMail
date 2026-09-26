@@ -18,6 +18,9 @@ import type {
   SyncResult,
 } from "./types";
 
+// Re-export for consumers that need the send draft shape.
+export type { SendMessageRequest };
+
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -42,6 +45,20 @@ export const api = {
   accountsList: () => call<AccountDto[]>("accounts_list"),
   accountsAddPassword: (request: AddAccountPasswordRequest) =>
     call<AccountDto>("accounts_add_password", { request }),
+  accountsAddOAuth: (request: {
+    name: string;
+    email: string;
+    provider: string;
+    accessToken: string;
+    refreshToken?: string | null;
+    expiresAt?: number | null;
+    imapHost: string;
+    imapPort: number;
+    imapTls: boolean;
+    smtpHost: string;
+    smtpPort: number;
+    smtpTls: boolean;
+  }) => call<AccountDto>("accounts_add_oauth", { request }),
   accountsRemove: (accountId: string) =>
     call<void>("accounts_remove", { accountId }),
   mailboxesList: (accountId?: string | null) =>
@@ -64,6 +81,24 @@ export const api = {
     call<SuggestReplyMessageResponse>("ai_suggest_reply", {
       request: { messageId },
     }),
+  messagesArchive: (messageId: string) =>
+    call<void>("messages_archive", { messageId }),
+  messagesForwardDraft: (messageId: string) =>
+    call<SendMessageRequest>("messages_forward_draft", { messageId }),
+  oauthAuthorizeUrl: (provider: string) =>
+    call<string>("oauth_authorize_url", { provider }),
+  oauthWaitCallback: (timeoutSecs = 180) =>
+    call<{ code: string; state?: string | null }>("oauth_wait_callback", {
+      timeoutSecs,
+    }),
+  oauthExchangeCode: (provider: string, code: string) =>
+    call<{
+      tokens: {
+        accessToken: string;
+        refreshToken?: string | null;
+        expiresAt?: number | null;
+      };
+    }>("oauth_exchange_code", { request: { provider, code } }),
   onSyncProgress: async (
     handler: (event: SyncProgressEvent) => void,
   ): Promise<UnlistenFn> => {

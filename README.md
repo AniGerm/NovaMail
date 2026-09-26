@@ -4,17 +4,19 @@ Modern open-source email for Ubuntu Linux.
 
 NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It targets Thunderbird-class capability with Spark-class UX and Outlook-class productivity — without cloud lock-in.
 
-## Features (MVP scaffold)
+## Features (MVP)
 
-- Multi-account IMAP / SMTP
-- Unified Inbox
+- Multi-account IMAP / SMTP + background sync scheduler
+- Unified Inbox (archived mail filtered out)
 - Provider presets (Gmail, Microsoft 365, Yahoo, Proton Bridge, generic)
 - Password auth via OS keyring
-- OAuth2 plumbing (client IDs via env)
+- OAuth2 browser sign-in (localhost callback + token exchange)
 - Full-text search (SQLite FTS5)
-- Compose / reply
-- Light, dark, and high-contrast themes
-- Keyboard shortcuts (`c`, `r`, `/`, `Ctrl/Cmd+K`)
+- Compose / reply / forward / archive
+- Local AI summarize + suggest reply (Ollama, offline fallback)
+- Command palette, settings (theme/density/high contrast)
+- Keyboard shortcuts (`c`, `r`, `f`, `e`, `j`/`k`, `/`, `Ctrl/Cmd+K`)
+- HTML sanitization, CI, Linux packaging script
 
 ## Quick start
 

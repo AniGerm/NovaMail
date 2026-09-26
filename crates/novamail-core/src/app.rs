@@ -14,6 +14,7 @@ use novamail_ipc::{
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
 };
 use novamail_mail::{OAuthConfig, SmtpClient, SyncEngine};
+use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
 use uuid::Uuid;
 
@@ -254,6 +255,59 @@ impl AppState {
         })
     }
 
+    /// Starts the localhost callback listener and returns the authorization code.
+    pub async fn oauth_wait_callback(
+        &self,
+        timeout_secs: u64,
+    ) -> CoreResult<novamail_mail::OAuthCallbackResult> {
+        Ok(novamail_mail::wait_for_oauth_callback(
+            std::time::Duration::from_secs(timeout_secs.max(30)),
+        )
+        .await?)
+    }
+
+    pub fn archive_message(&self, message_id: Uuid) -> CoreResult<()> {
+        self.db.archive_message(message_id)?;
+        Ok(())
+    }
+
+    pub fn build_forward_draft(&self, message_id: Uuid) -> CoreResult<SendMessageRequest> {
+        let detail = self.get_message(message_id)?;
+        let original = detail
+            .body_text
+            .unwrap_or_else(|| detail.summary.snippet.clone());
+        let body = format!(
+            "\n\n---------- Forwarded message ----------\nFrom: {}\nDate: {}\nSubject: {}\n\n{}",
+            detail.summary.from.email,
+            detail.summary.date,
+            detail.summary.subject,
+            original
+        );
+        Ok(SendMessageRequest {
+            account_id: detail.summary.account_id,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: if detail.summary.subject.to_ascii_lowercase().starts_with("fwd:") {
+                detail.summary.subject
+            } else {
+                format!("Fwd: {}", detail.summary.subject)
+            },
+            body_text: body,
+            body_html: None,
+            in_reply_to: None,
+            references: vec![],
+        })
+    }
+
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
+    pub fn secrets(&self) -> &SecretStore {
+        &self.secrets
+    }
+
     pub async fn summarize_message(
         &self,
         request: SummarizeMessageRequest,
@@ -315,6 +369,41 @@ impl AppState {
             suggestion: result.suggestion,
             provider: result.provider,
         })
+    }
+
+    /// Applies enabled rules from SQLite against a message (first version).
+    pub fn apply_rules_for_message(&self, message_id: Uuid) -> CoreResult<Vec<Action>> {
+        let detail = self.get_message(message_id)?;
+        let conn_rules = self.load_rule_definitions()?;
+        let ctx = RuleMatchContext {
+            message: &detail.summary,
+            body_text: detail.body_text.as_deref().unwrap_or(""),
+        };
+        let matched = evaluate_rules(&conn_rules, &ctx);
+        let mut actions = Vec::new();
+        for (_id, acts) in matched {
+            for action in acts {
+                match &action {
+                    Action::MarkRead => {
+                        self.db.set_flags(message_id, Some(false), None)?;
+                    }
+                    Action::Star => {
+                        self.db.set_flags(message_id, None, Some(true))?;
+                    }
+                    Action::AddLabel { .. } | Action::MoveToMailbox { .. } => {
+                        // Labels/mailbox moves land with P1 UI; actions are recorded.
+                    }
+                }
+                actions.push(action);
+            }
+        }
+        Ok(actions)
+    }
+
+    fn load_rule_definitions(&self) -> CoreResult<Vec<RuleDefinition>> {
+        // Rules rows are read once the rules repository UI persists them (P2).
+        // The evaluate path is wired so sync can call `apply_rules_for_message`.
+        Ok(Vec::<RuleDefinition>::new())
     }
 
     pub async fn prioritize_message(&self, message_id: Uuid) -> CoreResult<(f32, String, String)> {

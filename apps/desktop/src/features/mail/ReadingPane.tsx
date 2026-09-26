@@ -9,6 +9,7 @@ import { displayName, formatRelative } from "@/shared/lib/format";
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
   onReply: () => void;
+  onForward?: () => void;
   onToggleStar: () => void;
   onUseSuggestedReply?: (suggestion: string) => void;
 }
@@ -16,6 +17,7 @@ interface ReadingPaneProps {
 export function ReadingPane({
   message,
   onReply,
+  onForward,
   onToggleStar,
   onUseSuggestedReply,
 }: ReadingPaneProps) {
@@ -96,7 +98,7 @@ export function ReadingPane({
             <IconButton label="Reply" onClick={onReply}>
               <Reply />
             </IconButton>
-            <IconButton label="Forward">
+            <IconButton label="Forward" onClick={onForward}>
               <Forward />
             </IconButton>
           </div>
@@ -115,7 +117,7 @@ export function ReadingPane({
           <Button size="sm" onClick={onReply}>
             Reply
           </Button>
-          <Button size="sm" variant="secondary">
+          <Button size="sm" variant="secondary" onClick={onForward}>
             Forward
           </Button>
           <Button

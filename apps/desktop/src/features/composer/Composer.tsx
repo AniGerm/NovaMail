@@ -9,6 +9,7 @@ interface ComposerProps {
   accounts: AccountDto[];
   replyTo?: MessageDetailDto | null;
   initialBody?: string;
+  initialSubject?: string;
   onClose: () => void;
   onSent: () => void;
 }
@@ -18,6 +19,7 @@ export function Composer({
   accounts,
   replyTo,
   initialBody = "",
+  initialSubject,
   onClose,
   onSent,
 }: ComposerProps) {
@@ -32,10 +34,13 @@ export function Composer({
     if (!open) return;
     setAccountId((current) => current || accounts[0]?.id || "");
     setTo(replyTo?.summary.from.email ?? "");
-    setSubject(replyTo ? `Re: ${replyTo.summary.subject}` : "");
+    setSubject(
+      initialSubject ??
+        (replyTo ? `Re: ${replyTo.summary.subject}` : ""),
+    );
     setBody(initialBody);
     setError(null);
-  }, [open, replyTo, initialBody, accounts]);
+  }, [open, replyTo, initialBody, initialSubject, accounts]);
 
   if (!open) return null;
 

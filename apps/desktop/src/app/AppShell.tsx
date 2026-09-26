@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useKeyboardShortcuts } from "@novamail/hooks";
-import { EmptyState, Input } from "@novamail/ui";
+import { CommandPalette, EmptyState, Input, VisuallyHidden } from "@novamail/ui";
 
 import { AccountSetup } from "@/features/accounts/AccountSetup";
 import { Composer } from "@/features/composer/Composer";
 import { MessageList } from "@/features/mail/MessageList";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
+import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
-import type { AppError, MessageDetailDto } from "@/shared/api/types";
+import type { AccountDto, AppError, MessageDetailDto } from "@/shared/api/types";
 import { useUiStore } from "@/shared/store/uiStore";
 
 export function AppShell() {
@@ -21,16 +22,22 @@ export function AppShell() {
     setComposerOpen,
     accountSetupOpen,
     setAccountSetupOpen,
+    settingsOpen,
+    setSettingsOpen,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
     searchQuery,
     setSearchQuery,
     syncStatus,
     setSyncStatus,
     theme,
     setTheme,
+    density,
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
   const [composerBody, setComposerBody] = useState("");
+  const [composerSubject, setComposerSubject] = useState<string | undefined>();
   const desktop = isDesktopShell();
 
   const accountsQuery = useQuery({
@@ -73,6 +80,9 @@ export function AppShell() {
             ? `Synced ${event.mailboxName}`
             : `Syncing ${event.mailboxName}… ${event.fetched}`,
         );
+        if (event.done) {
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        }
       })
       .then((fn) => {
         unlisten = fn;
@@ -80,7 +90,7 @@ export function AppShell() {
     return () => {
       unlisten?.();
     };
-  }, [desktop, setSyncStatus]);
+  }, [desktop, queryClient, setSyncStatus]);
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -117,6 +127,35 @@ export function AppShell() {
     await queryClient.invalidateQueries({ queryKey: ["messages"] });
   }, [desktop, messageQuery.data, queryClient]);
 
+  const handleArchive = useCallback(async () => {
+    if (!selectedMessageId || !desktop) return;
+    await api.messagesArchive(selectedMessageId);
+    selectMessage(null);
+    await refresh();
+  }, [desktop, refresh, selectMessage, selectedMessageId]);
+
+  const handleForward = useCallback(async () => {
+    if (!selectedMessageId || !desktop) return;
+    const draft = await api.messagesForwardDraft(selectedMessageId);
+    setReplyTo(null);
+    setComposerSubject(draft.subject);
+    setComposerBody(draft.bodyText);
+    setComposerOpen(true);
+  }, [desktop, selectedMessageId, setComposerOpen]);
+
+  const messages = messagesQuery.data?.messages ?? [];
+  const accounts = accountsQuery.data ?? [];
+
+  const navigateList = useCallback(
+    (delta: number) => {
+      if (messages.length === 0) return;
+      const index = messages.findIndex((m) => m.id === selectedMessageId);
+      const next = index < 0 ? 0 : Math.min(Math.max(index + delta, 0), messages.length - 1);
+      selectMessage(messages[next].id);
+    },
+    [messages, selectMessage, selectedMessageId],
+  );
+
   const themeDark =
     theme === "dark" ||
     (theme === "system" &&
@@ -128,28 +167,108 @@ export function AppShell() {
       c: () => {
         setReplyTo(null);
         setComposerBody("");
+        setComposerSubject(undefined);
         setComposerOpen(true);
       },
       r: () => {
         if (messageQuery.data) {
           setReplyTo(messageQuery.data);
           setComposerBody("");
+          setComposerSubject(undefined);
           setComposerOpen(true);
         }
       },
+      f: () => {
+        void handleForward();
+      },
+      e: () => {
+        void handleArchive();
+      },
+      j: () => navigateList(1),
+      k: () => navigateList(-1),
       "/": () => {
         document.getElementById("global-search")?.focus();
       },
-      "mod+k": () => {
-        document.getElementById("global-search")?.focus();
-      },
+      "mod+k": () => setCommandPaletteOpen(true),
+      ",": () => setSettingsOpen(true),
     }),
-    [messageQuery.data, setComposerOpen],
+    [
+      handleArchive,
+      handleForward,
+      messageQuery.data,
+      navigateList,
+      setCommandPaletteOpen,
+      setComposerOpen,
+      setSettingsOpen,
+    ],
   );
   useKeyboardShortcuts(shortcuts);
 
-  const messages = messagesQuery.data?.messages ?? [];
-  const accounts = accountsQuery.data ?? [];
+  const commandItems = useMemo(
+    () => [
+      {
+        id: "compose",
+        label: "Compose message",
+        hint: "C",
+        onSelect: () => {
+          setReplyTo(null);
+          setComposerBody("");
+          setComposerSubject(undefined);
+          setComposerOpen(true);
+        },
+      },
+      {
+        id: "sync",
+        label: "Sync all accounts",
+        hint: "",
+        onSelect: () => {
+          void handleSync();
+        },
+      },
+      {
+        id: "add-account",
+        label: "Add account",
+        onSelect: () => setAccountSetupOpen(true),
+      },
+      {
+        id: "settings",
+        label: "Open settings",
+        hint: ",",
+        onSelect: () => setSettingsOpen(true),
+      },
+      {
+        id: "archive",
+        label: "Archive selected message",
+        hint: "E",
+        onSelect: () => {
+          void handleArchive();
+        },
+      },
+      {
+        id: "forward",
+        label: "Forward selected message",
+        hint: "F",
+        onSelect: () => {
+          void handleForward();
+        },
+      },
+      {
+        id: "theme",
+        label: themeDark ? "Switch to light mode" : "Switch to dark mode",
+        onSelect: () => setTheme(themeDark ? "light" : "dark"),
+      },
+    ],
+    [
+      handleArchive,
+      handleForward,
+      handleSync,
+      setAccountSetupOpen,
+      setComposerOpen,
+      setSettingsOpen,
+      setTheme,
+      themeDark,
+    ],
+  );
 
   if (!desktop) {
     return (
@@ -161,7 +280,13 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full flex-col"
+      data-density={density}
+    >
+      <VisuallyHidden>
+        <h1>NovaMail unified inbox</h1>
+      </VisuallyHidden>
       <div className="flex items-center gap-3 border-b border-[var(--nova-border)] px-4 py-3">
         <label className="sr-only" htmlFor="global-search">
           Search mail
@@ -173,6 +298,13 @@ export function AppShell() {
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-xl"
         />
+        <button
+          type="button"
+          className="text-xs text-[var(--nova-ink-muted)]"
+          onClick={() => setCommandPaletteOpen(true)}
+        >
+          Ctrl/Cmd+K
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -182,11 +314,14 @@ export function AppShell() {
           themeDark={themeDark}
           onCompose={() => {
             setReplyTo(null);
+            setComposerBody("");
+            setComposerSubject(undefined);
             setComposerOpen(true);
           }}
           onSync={handleSync}
           onAddAccount={() => setAccountSetupOpen(true)}
           onToggleTheme={() => setTheme(themeDark ? "light" : "dark")}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         {accounts.length === 0 ? (
@@ -219,8 +354,12 @@ export function AppShell() {
                 onReply={() => {
                   if (messageQuery.data) {
                     setReplyTo(messageQuery.data);
+                    setComposerSubject(undefined);
                     setComposerOpen(true);
                   }
+                }}
+                onForward={() => {
+                  void handleForward();
                 }}
                 onToggleStar={handleToggleStar}
                 onUseSuggestedReply={(suggestion) => {
@@ -248,12 +387,32 @@ export function AppShell() {
         accounts={accounts}
         replyTo={replyTo}
         initialBody={composerBody}
+        initialSubject={composerSubject}
         onClose={() => {
           setComposerOpen(false);
           setComposerBody("");
+          setComposerSubject(undefined);
         }}
         onSent={refresh}
       />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CommandPalette
+        open={commandPaletteOpen}
+        items={commandItems}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
+      <div aria-live="polite" className="sr-only">
+        {syncStatus}
+      </div>
+      <AccountCountAnnouncer accounts={accounts} />
     </div>
+  );
+}
+
+function AccountCountAnnouncer({ accounts }: { accounts: AccountDto[] }) {
+  return (
+    <VisuallyHidden>
+      <p>{accounts.length} accounts configured</p>
+    </VisuallyHidden>
   );
 }

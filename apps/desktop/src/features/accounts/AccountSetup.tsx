@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
+import { addAccountPasswordSchema } from "@/shared/api/schemas";
 import type {
   AddAccountPasswordRequest,
   AppError,
@@ -87,14 +89,52 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
       smtpPort,
       smtpTls,
     };
+    const parsed = addAccountPasswordSchema.safeParse(request);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? "Invalid account details");
+      setBusy(false);
+      return;
+    }
     try {
-      await api.accountsAddPassword(request);
+      await api.accountsAddPassword(parsed.data);
       onCreated();
       onClose();
       setPassword("");
     } catch (err) {
       const appError = err as AppError;
       setError(appError.message || "Failed to add account");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOAuth() {
+    setBusy(true);
+    setError(null);
+    try {
+      const url = await api.oauthAuthorizeUrl(provider);
+      const wait = api.oauthWaitCallback(180);
+      await openUrl(url);
+      const callback = await wait;
+      const tokens = await api.oauthExchangeCode(provider, callback.code);
+      await api.accountsAddOAuth({
+        name: name || email,
+        email,
+        provider,
+        accessToken: tokens.tokens.accessToken,
+        refreshToken: tokens.tokens.refreshToken ?? null,
+        expiresAt: tokens.tokens.expiresAt ?? null,
+        imapHost,
+        imapPort,
+        imapTls,
+        smtpHost,
+        smtpPort,
+        smtpTls,
+      });
+      onCreated();
+      onClose();
+    } catch (err) {
+      setError((err as AppError).message || "OAuth sign-in failed");
     } finally {
       setBusy(false);
     }
@@ -157,15 +197,17 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
             />
           </label>
 
-          <label className="grid gap-1 text-sm">
-            <span>Password / app password</span>
-            <Input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
+          {selected?.authType !== "oauth2" ? (
+            <label className="grid gap-1 text-sm">
+              <span>Password / app password</span>
+              <Input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+          ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1 text-sm">
@@ -223,14 +265,6 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
             </label>
           </div>
 
-          {selected?.authType === "oauth2" ? (
-            <p className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 py-2 text-sm text-[var(--nova-accent)]">
-              OAuth2 is available for this provider. Configure
-              NOVAMAIL_*_CLIENT_ID and use app passwords until the browser
-              callback flow is enabled in settings.
-            </p>
-          ) : null}
-
           {error ? (
             <p className="text-sm text-[var(--nova-danger)]" role="alert">
               {error}
@@ -238,13 +272,19 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           ) : null}
         </div>
 
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy}>
-            {busy ? "Connecting…" : "Connect & sync"}
-          </Button>
+          {selected?.authType === "oauth2" ? (
+            <Button type="button" disabled={busy || !email} onClick={handleOAuth}>
+              {busy ? "Waiting for browser…" : "Sign in with OAuth"}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={busy}>
+              {busy ? "Connecting…" : "Connect & sync"}
+            </Button>
+          )}
         </div>
       </form>
     </div>

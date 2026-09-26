@@ -109,6 +109,77 @@ const MIGRATIONS: &[&str] = &[
       VALUES (new.rowid, new.subject, new.snippet, coalesce(new.body_text, ''));
     END;
     "#,
+    // v2 — attachments, labels, rules, contacts, calendar, ai, plugins
+    r#"
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY NOT NULL,
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      path TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+
+    CREATE TABLE IF NOT EXISTS labels (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#0B6E4F',
+      UNIQUE(account_id, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS message_labels (
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+      PRIMARY KEY(message_id, label_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS rules (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      predicate_json TEXT NOT NULL,
+      action_json TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY NOT NULL,
+      display_name TEXT NOT NULL,
+      emails_json TEXT NOT NULL DEFAULT '[]',
+      notes TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      ical_uid TEXT,
+      title TEXT NOT NULL,
+      starts_at INTEGER NOT NULL,
+      ends_at INTEGER,
+      location TEXT,
+      description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_insights (
+      id TEXT PRIMARY KEY NOT NULL,
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_insights_message ON ai_insights(message_id);
+
+    CREATE TABLE IF NOT EXISTS plugins (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      manifest_json TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -161,6 +232,14 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
+        let attachments: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(attachments, 1);
     }
 }

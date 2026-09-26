@@ -6,6 +6,7 @@ pub const FLAG_SEEN: i64 = 1 << 0;
 pub const FLAG_STARRED: i64 = 1 << 1;
 pub const FLAG_ANSWERED: i64 = 1 << 2;
 pub const FLAG_FLAGGED: i64 = 1 << 3;
+pub const FLAG_ARCHIVED: i64 = 1 << 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountRecord {

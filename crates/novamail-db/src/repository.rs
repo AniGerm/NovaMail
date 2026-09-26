@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::migrations;
 use crate::models::{
-    AccountRecord, MailboxRecord, MessageRecord, ThreadRecord, FLAG_SEEN, FLAG_STARRED,
+    AccountRecord, MailboxRecord, MessageRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN,
+    FLAG_STARRED,
 };
 use crate::{DbError, DbResult};
 
@@ -388,6 +389,7 @@ impl Database {
             where_parts.push(
                 "(mb.role = 'inbox' OR lower(mb.name) = 'inbox' OR mb.name = 'INBOX')".into(),
             );
+            where_parts.push(format!("(m.flags & {FLAG_ARCHIVED}) = 0"));
         } else if let Some(mailbox_id) = req.mailbox_id {
             where_parts.push("m.mailbox_id = ?1".into());
             bind_ids.push(mailbox_id.to_string());
@@ -480,6 +482,20 @@ impl Database {
         unread: Option<bool>,
         starred: Option<bool>,
     ) -> DbResult<()> {
+        self.apply_flag_updates(message_id, unread, starred, None)
+    }
+
+    pub fn archive_message(&self, message_id: Uuid) -> DbResult<()> {
+        self.apply_flag_updates(message_id, Some(false), None, Some(true))
+    }
+
+    fn apply_flag_updates(
+        &self,
+        message_id: Uuid,
+        unread: Option<bool>,
+        starred: Option<bool>,
+        archived: Option<bool>,
+    ) -> DbResult<()> {
         let conn = self.conn.lock();
         let flags: i64 = conn
             .query_row(
@@ -503,6 +519,13 @@ impl Database {
                 flags |= FLAG_STARRED;
             } else {
                 flags &= !FLAG_STARRED;
+            }
+        }
+        if let Some(archived) = archived {
+            if archived {
+                flags |= FLAG_ARCHIVED | FLAG_SEEN;
+            } else {
+                flags &= !FLAG_ARCHIVED;
             }
         }
 

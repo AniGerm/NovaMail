@@ -5,6 +5,7 @@ import { useUiStore } from "@/shared/store/uiStore";
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const theme = useUiStore((s) => s.theme);
   const highContrast = useUiStore((s) => s.highContrast);
+  const density = useUiStore((s) => s.density);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -13,11 +14,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       const dark = theme === "dark" || (theme === "system" && media.matches);
       root.classList.toggle("dark", dark);
       root.classList.toggle("hc", highContrast);
+      root.dataset.density = density;
     };
     apply();
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [theme, highContrast]);
+  }, [theme, highContrast, density]);
 
   return children;
 }

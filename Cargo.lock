@@ -2703,6 +2703,7 @@ dependencies = [
  "novamail-ipc",
  "novamail-mail",
  "novamail-plugins",
+ "novamail-rules",
  "novamail-search",
  "parking_lot",
  "serde",
@@ -2748,6 +2749,7 @@ version = "0.1.0"
 dependencies = [
  "novamail-core",
  "novamail-ipc",
+ "novamail-mail",
  "serde",
  "serde_json",
  "tauri",
@@ -2805,6 +2807,17 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "novamail-rules"
+version = "0.1.0"
+dependencies = [
+ "novamail-ipc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]

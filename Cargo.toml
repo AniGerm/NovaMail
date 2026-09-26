@@ -9,6 +9,7 @@ members = [
   "crates/novamail-ipc",
   "crates/novamail-mail",
   "crates/novamail-plugins",
+  "crates/novamail-rules",
   "crates/novamail-search",
 ]
 default-members = ["apps/desktop/src-tauri"]
@@ -28,6 +29,7 @@ novamail-db = { path = "crates/novamail-db" }
 novamail-ipc = { path = "crates/novamail-ipc" }
 novamail-mail = { path = "crates/novamail-mail" }
 novamail-plugins = { path = "crates/novamail-plugins" }
+novamail-rules = { path = "crates/novamail-rules" }
 novamail-search = { path = "crates/novamail-search" }
 
 anyhow = "1"

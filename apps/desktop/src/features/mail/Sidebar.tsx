@@ -11,6 +11,7 @@ interface SidebarProps {
   onSync: () => void;
   onAddAccount: () => void;
   onToggleTheme: () => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
@@ -21,6 +22,7 @@ export function Sidebar({
   onSync,
   onAddAccount,
   onToggleTheme,
+  onOpenSettings,
 }: SidebarProps) {
   return (
     <aside
@@ -101,7 +103,7 @@ export function Sidebar({
             <RefreshCw size={16} />
             Sync
           </Button>
-          <IconButton label="Settings">
+          <IconButton label="Settings" onClick={onOpenSettings}>
             <Settings2 size={18} />
           </IconButton>
         </div>
