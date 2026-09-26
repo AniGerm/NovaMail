@@ -104,7 +104,7 @@ export const en: Translations = {
     "Appearance, language, backup, signatures, labels, and mail rules.",
   backupTitle: "Encrypted backup",
   backupDescription:
-    "Save or restore accounts, contacts, labels, rules, and signatures as a passphrase-protected file (.nmbak). Import merges duplicate contacts.",
+    "Migrate NovaMail config between installs (accounts, rules, signatures, contacts). For a shared phone book with phone/printer: use CardDAV on the main PC.",
   backupPassphrase: "Passphrase (min. 8 characters)",
   backupPassphraseConfirm: "Confirm passphrase",
   backupExport: "Export backup",
@@ -171,11 +171,12 @@ export const en: Translations = {
   contactSortDescending: "Descending (Z–A)",
   saveBookSettings: "Save settings",
   bookSettingsSaved: "Address book settings saved.",
-  cardDavServer: "CardDAV server",
+  cardDavServer: "CardDAV server (shared address book)",
   cardDavRunning: "Running at {url} · {count} contacts",
-  cardDavStopped: "Stopped — start to let printers/fax and other devices pull vCards.",
+  cardDavStopped:
+    "Stopped — start so phones, printers, and fax share the same address book.",
   cardDavDeviceHint:
-    "Other devices (printers, fax, phones) connect to the CardDAV URL and see the same contacts.",
+    "Other devices connect to this CardDAV URL on the main PC (same LAN or VPN). That keeps one shared address book — no copying backup files around.",
   stopCardDav: "Stop CardDAV",
   startCardDav: "Start CardDAV",
   addContact: "Add contact",

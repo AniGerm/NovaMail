@@ -471,6 +471,14 @@ export function ContactsDialog({
                   })
                 : t("cardDavStopped")}
             </p>
+            {carddav?.running && carddav.addressbookUrl ? (
+              <Input
+                readOnly
+                value={carddav.addressbookUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                aria-label="CardDAV URL"
+              />
+            ) : null}
             <p className="text-xs text-[var(--nova-ink-muted)]">
               {t("cardDavDeviceHint")}
             </p>

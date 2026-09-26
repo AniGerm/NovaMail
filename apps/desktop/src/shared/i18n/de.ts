@@ -102,7 +102,7 @@ export const de = {
     "Darstellung, Sprache, Backup, Signaturen, Labels und Regeln.",
   backupTitle: "Verschlüsseltes Backup",
   backupDescription:
-    "Konten, Kontakte, Labels, Regeln und Signaturen als passwortgeschützte Datei (.nmbak) sichern oder wiederherstellen. Beim Import werden doppelte Kontakte zusammengeführt.",
+    "Konfiguration zwischen NovaMail-Installationen sichern (Konten, Regeln, Signaturen, Kontakte). Fürs gemeinsame Telefonbuch mit Handy/Drucker: CardDAV am Hauptrechner nutzen.",
   backupPassphrase: "Passphrase (mind. 8 Zeichen)",
   backupPassphraseConfirm: "Passphrase bestätigen",
   backupExport: "Backup exportieren",
@@ -169,11 +169,12 @@ export const de = {
   contactSortDescending: "Absteigend (Z–A)",
   saveBookSettings: "Einstellungen speichern",
   bookSettingsSaved: "Adressbuch-Einstellungen gespeichert.",
-  cardDavServer: "CardDAV-Server",
+  cardDavServer: "CardDAV-Server (gemeinsames Telefonbuch)",
   cardDavRunning: "Läuft unter {url} · {count} Kontakte",
-  cardDavStopped: "Gestoppt — starten, damit Drucker/Fax und andere Geräte vCards abrufen können.",
+  cardDavStopped:
+    "Gestoppt — starten, damit Handy, Drucker und Fax dasselbe Telefonbuch nutzen.",
   cardDavDeviceHint:
-    "Andere Geräte (Drucker, Fax, Smartphones) verbinden sich mit der CardDAV-URL und sehen dieselben Kontakte.",
+    "Weitere Geräte verbinden sich mit dieser CardDAV-URL am Hauptrechner (gleiches LAN oder VPN). So bleibt ein gemeinsames Telefonbuch — ohne Backup-Datei hin- und herzukopieren.",
   stopCardDav: "CardDAV stoppen",
   startCardDav: "CardDAV starten",
   addContact: "Kontakt hinzufügen",

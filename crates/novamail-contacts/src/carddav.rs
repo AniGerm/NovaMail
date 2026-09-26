@@ -18,7 +18,9 @@ use uuid::Uuid;
 use crate::vcard::{contact_to_vcard, vcard_to_contact};
 use crate::{ContactsError, ContactsResult};
 
-const DEFAULT_ADDR: &str = "127.0.0.1:8765";
+/// Bind all interfaces so phones/printers on the LAN can share this address book.
+/// Advertised URLs use the machine's LAN IP (not 0.0.0.0).
+const DEFAULT_ADDR: &str = "0.0.0.0:8765";
 const BOOK_PATH: &str = "/addressbooks/novamail/";
 
 #[async_trait]
@@ -54,10 +56,11 @@ impl CardDavServer {
     pub fn status(&self) -> CardDavServerStatus {
         let contacts = self.store.list().map(|c| c.len() as u32).unwrap_or(0);
         let running = *self.running.lock();
+        let advertise = advertise_host_port(&self.listen_addr);
         CardDavServerStatus {
             running,
-            listen_url: format!("http://{}", self.listen_addr),
-            addressbook_url: format!("http://{}{BOOK_PATH}", self.listen_addr),
+            listen_url: format!("http://{advertise}"),
+            addressbook_url: format!("http://{advertise}{BOOK_PATH}"),
             contact_count: contacts,
         }
     }
@@ -316,4 +319,48 @@ fn xml_escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Host:port shown to users for CardDAV clients (LAN IP when bound to 0.0.0.0).
+fn advertise_host_port(listen_addr: &str) -> String {
+    let port = listen_addr
+        .rsplit_once(':')
+        .map(|(_, p)| p)
+        .unwrap_or("8765");
+    let host_part = listen_addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(listen_addr);
+    let wildcard = host_part == "0.0.0.0" || host_part == "::" || host_part == "[::]";
+    if wildcard {
+        let host = detect_lan_ipv4().unwrap_or_else(|| "127.0.0.1".into());
+        format!("{host}:{port}")
+    } else {
+        let host = host_part.trim_matches(|c| c == '[' || c == ']');
+        format!("{host}:{port}")
+    }
+}
+
+fn detect_lan_ipv4() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // No packets are sent; this selects the interface used for outbound traffic.
+    socket.connect("1.1.1.1:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_loopback() => Some(ip.to_string()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertise_keeps_explicit_host() {
+        assert_eq!(advertise_host_port("192.168.1.10:8765"), "192.168.1.10:8765");
+    }
+
+    #[test]
+    fn advertise_wildcard_uses_port() {
+        let advertised = advertise_host_port("0.0.0.0:8765");
+        assert!(advertised.ends_with(":8765"), "{advertised}");
+        assert!(!advertised.starts_with("0.0.0.0"), "{advertised}");
+    }
 }
