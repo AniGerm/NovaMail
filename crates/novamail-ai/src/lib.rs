@@ -9,5 +9,6 @@ mod provider;
 pub use ollama::OllamaProvider;
 pub use provider::{
     AiError, AiProvider, AiResult, NullAiProvider, PrioritizeRequest, PrioritizeResponse,
-    SuggestReplyRequest, SuggestReplyResponse, SummarizeRequest, SummarizeResponse,
+    SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest,
+    SummarizeResponse,
 };

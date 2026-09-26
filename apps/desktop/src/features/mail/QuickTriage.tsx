@@ -41,6 +41,7 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
   const [index, setIndex] = useState(0);
   const [preview, setPreview] = useState<MessageDetailDto | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,8 +53,24 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
     setIndex(0);
     setPreview(null);
     setPreviewOpen(false);
+    setAiSummary(null);
     setError(null);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !current) return;
+    let cancelled = false;
+    setAiSummary(null);
+    void api
+      .aiMessageInsights(current.id)
+      .then((insights) => {
+        if (!cancelled && insights.summary) setAiSummary(insights.summary);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, current]);
 
   useEffect(() => {
     if (!open || !current || !previewOpen) return;
@@ -74,6 +91,7 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
   const advance = useCallback(() => {
     setPreviewOpen(false);
     setPreview(null);
+    setAiSummary(null);
     setIndex((i) => i + 1);
   }, []);
 
@@ -214,7 +232,18 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
                   <span>{formatRelative(current.date, locale)}</span>
                 </div>
 
-                <div className="mt-5 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_70%,var(--nova-surface))] px-4 py-4">
+                {aiSummary ? (
+                  <div className="mt-5 rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/25 bg-[var(--nova-accent-soft)] px-4 py-3">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
+                      {t("aiPreviewSummary")}
+                    </p>
+                    <p className="text-[15px] leading-6 text-[var(--nova-ink)]">
+                      {aiSummary}
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_70%,var(--nova-surface))] px-4 py-4">
                   <p className="text-[15px] leading-7 text-[var(--nova-ink)]">
                     {plainPreview(current.snippet)}
                   </p>
@@ -225,6 +254,11 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
                       {t("preview")}
                     </p>
+                    {aiSummary ? (
+                      <p className="mb-3 text-sm font-medium leading-6 text-[var(--nova-ink)]">
+                        {aiSummary}
+                      </p>
+                    ) : null}
                     {preview ? (
                       <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
                         {previewText || current.snippet}

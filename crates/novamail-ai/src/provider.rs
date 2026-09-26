@@ -32,12 +32,25 @@ pub struct SuggestReplyRequest {
     pub subject: String,
     pub body_text: String,
     pub from_email: String,
+    /// Optional facts / instructions the user wants included in the reply.
+    #[serde(default)]
+    pub facts: Option<String>,
+    /// Optional style hint: "concise" | "friendly".
+    #[serde(default)]
+    pub style: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuggestReplyResponse {
     pub suggestion: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestReplyVariantsResponse {
+    pub variants: Vec<String>,
     pub provider: String,
 }
 
@@ -66,6 +79,12 @@ pub trait AiProvider: Send + Sync {
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse>;
 
+    /// Two short reply alternatives (CPU-friendly single call when possible).
+    async fn suggest_reply_variants(
+        &self,
+        request: SuggestReplyRequest,
+    ) -> AiResult<SuggestReplyVariantsResponse>;
+
     async fn prioritize(&self, request: PrioritizeRequest) -> AiResult<PrioritizeResponse>;
 }
 
@@ -93,12 +112,45 @@ impl AiProvider for NullAiProvider {
     }
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse> {
+        let facts = request
+            .facts
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| format!("\n\nPlease include these facts:\n{s}"))
+            .unwrap_or_default();
         Ok(SuggestReplyResponse {
             suggestion: format!(
-                "Hi {},\n\nThanks for your email regarding \"{}\".\n\nBest regards",
+                "Hi {},\n\nThanks for your email regarding \"{}\".{}\n\nBest regards",
                 guess_first_name(&request.from_email),
-                request.subject
+                request.subject,
+                facts
             ),
+            provider: self.name().into(),
+        })
+    }
+
+    async fn suggest_reply_variants(
+        &self,
+        request: SuggestReplyRequest,
+    ) -> AiResult<SuggestReplyVariantsResponse> {
+        let name = guess_first_name(&request.from_email);
+        let facts = request
+            .facts
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| format!("\n\nZu den Punkten: {s}"))
+            .unwrap_or_default();
+        Ok(SuggestReplyVariantsResponse {
+            variants: vec![
+                format!(
+                    "Hallo {name},\n\nvielen Dank für Ihre Nachricht zu \"{}\".{} Wir melden uns zeitnah.\n\nFreundliche Grüße",
+                    request.subject, facts
+                ),
+                format!(
+                    "Hallo {name},\n\ndanke für die Mail.{} Gerne klären wir \"{}\" gemeinsam.\n\nViele Grüße",
+                    facts, request.subject
+                ),
+            ],
             provider: self.name().into(),
         })
     }

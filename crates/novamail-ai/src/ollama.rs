@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::{
     AiError, AiProvider, AiResult, PrioritizeRequest, PrioritizeResponse, SuggestReplyRequest,
-    SuggestReplyResponse, SummarizeRequest, SummarizeResponse,
+    SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest, SummarizeResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -124,15 +124,50 @@ impl AiProvider for OllamaProvider {
     }
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse> {
+        let facts_block = request
+            .facts
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                format!(
+                    "\nImportant: write a FULL email reply that naturally includes these facts \
+                     (never output the facts alone as the whole reply):\n- {}\n",
+                    s.trim().replace('\n', "\n- ")
+                )
+            })
+            .unwrap_or_default();
+        let style = match request.style.as_deref() {
+            Some("concise") => "concise and direct",
+            Some("friendly") => "warm and friendly",
+            _ => "professional",
+        };
         let prompt = format!(
-            "Draft a short professional reply (3-6 sentences). Match the email language \
-             (German or English). Reply with the email body only.\n\nFrom: {}\nSubject: {}\n\n{}",
+            "Write a complete {style} email reply body with greeting, 3-6 sentences, and sign-off. \
+             Match German or English to the original mail. \
+             Output ONLY the reply body — no Subject line, no markdown, no commentary.\
+             {facts_block}\nOriginal From: {}\nOriginal Subject: {}\n\nOriginal body:\n{}",
             request.from_email,
             request.subject,
             truncate(&request.body_text, 3_500)
         );
         Ok(SuggestReplyResponse {
-            suggestion: self.generate_with_limit(&prompt, 200).await?,
+            suggestion: self.generate_with_limit(&prompt, 240).await?,
+            provider: format!("{}:{}", self.name(), self.model),
+        })
+    }
+
+    async fn suggest_reply_variants(
+        &self,
+        request: SuggestReplyRequest,
+    ) -> AiResult<SuggestReplyVariantsResponse> {
+        let mut a_req = request.clone();
+        a_req.style = Some("concise".into());
+        let mut b_req = request.clone();
+        b_req.style = Some("friendly".into());
+        let a = self.suggest_reply(a_req).await?;
+        let b = self.suggest_reply(b_req).await?;
+        Ok(SuggestReplyVariantsResponse {
+            variants: vec![a.suggestion, b.suggestion],
             provider: format!("{}:{}", self.name(), self.model),
         })
     }
@@ -193,11 +228,27 @@ mod live_tests {
                 subject: "Termin verschieben".into(),
                 body_text: "Hallo Team,\n\nkönnen wir das Meeting von Dienstag auf Donnerstag 14 Uhr verschieben?\n\nViele Grüße\nAnna".into(),
                 from_email: "anna@example.com".into(),
+                facts: None,
+                style: None,
             })
             .await
             .expect("qwen reply");
         assert!(!reply.suggestion.trim().is_empty());
         println!("reply={}", reply.suggestion);
+
+        let variants = provider
+            .suggest_reply_variants(SuggestReplyRequest {
+                subject: "Termin verschieben".into(),
+                body_text: "Hallo Team, Termin bitte verschieben.".into(),
+                from_email: "anna@example.com".into(),
+                facts: Some("Donnerstag 14 Uhr passt. Bitte Zoom-Link schicken.".into()),
+                style: None,
+            })
+            .await
+            .expect("qwen variants");
+        assert!(variants.variants.len() >= 2);
+        println!("variant_a={}", variants.variants[0]);
+        println!("variant_b={}", variants.variants[1]);
     }
 }
 

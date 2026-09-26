@@ -12,6 +12,7 @@ import type {
   ExportBackupResponse,
   ImportBackupResult,
   MessageAiInsights,
+  SuggestRepliesMessageResponse,
   LabelDto,
   LdapSearchRequest,
   LdapSyncRequest,
@@ -100,9 +101,13 @@ export const api = {
     call<SummarizeMessageResponse>("ai_summarize_message", {
       request: { messageId },
     }),
-  aiSuggestReply: (messageId: string) =>
+  aiSuggestReply: (messageId: string, facts?: string | null) =>
     call<SuggestReplyMessageResponse>("ai_suggest_reply", {
-      request: { messageId },
+      request: { messageId, facts: facts ?? null },
+    }),
+  aiSuggestReplies: (messageId: string, facts?: string | null) =>
+    call<SuggestRepliesMessageResponse>("ai_suggest_replies", {
+      request: { messageId, facts: facts ?? null },
     }),
   aiMessageInsights: (messageId: string) =>
     call<MessageAiInsights>("ai_message_insights", { messageId }),

@@ -326,8 +326,16 @@ export interface SignatureDto {
 export interface MessageAiInsights {
   messageId: string;
   summary?: string | null;
+  replyA?: string | null;
+  replyB?: string | null;
   replySuggestion?: string | null;
   provider?: string | null;
+}
+
+export interface SuggestRepliesMessageResponse {
+  messageId: string;
+  variants: string[];
+  provider: string;
 }
 
 export interface ExportBackupRequest {

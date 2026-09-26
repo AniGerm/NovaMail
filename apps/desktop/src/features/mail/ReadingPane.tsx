@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { open as openPath } from "@tauri-apps/plugin-shell";
 import { Reply, Star, Forward, Sparkles, Paperclip } from "lucide-react";
-import { Button, EmptyState, IconButton } from "@novamail/ui";
+import { Button, EmptyState, IconButton, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, MessageDetailDto } from "@/shared/api/types";
@@ -28,12 +28,22 @@ export function ReadingPane({
   const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryProvider, setSummaryProvider] = useState<string | null>(null);
+  const [variantA, setVariantA] = useState<string | null>(null);
+  const [variantB, setVariantB] = useState<string | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<"a" | "b">("a");
+  const [draft, setDraft] = useState("");
+  const [facts, setFacts] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     setSummary(null);
     setSummaryProvider(null);
+    setVariantA(null);
+    setVariantB(null);
+    setSelectedVariant("a");
+    setDraft("");
+    setFacts("");
     setAiError(null);
     const id = message?.summary.id;
     if (!id) return;
@@ -46,6 +56,13 @@ export function ReadingPane({
           setSummary(insights.summary);
           setSummaryProvider(insights.provider ?? "cache");
         }
+        const a = insights.replyA ?? insights.replySuggestion ?? null;
+        const b = insights.replyB ?? null;
+        if (a) {
+          setVariantA(a);
+          setDraft(a);
+        }
+        if (b) setVariantB(b);
       })
       .catch(() => {
         /* insights optional */
@@ -85,13 +102,21 @@ export function ReadingPane({
     }
   }
 
-  async function handleSuggestReply() {
+  async function loadReplyVariants(withFacts?: string) {
     setAiBusy(true);
     setAiError(null);
     try {
-      const result = await api.aiSuggestReply(current.summary.id);
-      onUseSuggestedReply?.(result.suggestion);
-      onReply();
+      const result = await api.aiSuggestReplies(
+        current.summary.id,
+        withFacts?.trim() || null,
+      );
+      const a = result.variants[0] ?? "";
+      const b = result.variants[1] ?? result.variants[0] ?? "";
+      setVariantA(a || null);
+      setVariantB(b || null);
+      setSelectedVariant("a");
+      setDraft(a);
+      setSummaryProvider(result.provider);
     } catch (error) {
       setAiError((error as AppError).message || t("suggestFailed"));
     } finally {
@@ -99,13 +124,16 @@ export function ReadingPane({
     }
   }
 
-  async function handleOpenAttachment(id: string) {
-    try {
-      const path = await api.attachmentsOpenPath(id);
-      await openPath(path);
-    } catch (error) {
-      setAiError((error as AppError).message || t("openAttachmentFailed"));
-    }
+  function pickVariant(which: "a" | "b") {
+    setSelectedVariant(which);
+    const text = which === "a" ? variantA : variantB;
+    if (text) setDraft(text);
+  }
+
+  function useDraftInReply() {
+    if (!draft.trim()) return;
+    onUseSuggestedReply?.(draft);
+    onReply();
   }
 
   return (
@@ -157,7 +185,7 @@ export function ReadingPane({
             size="sm"
             variant="secondary"
             disabled={aiBusy}
-            onClick={handleSummarize}
+            onClick={() => void handleSummarize()}
           >
             <Sparkles size={14} />
             {aiBusy ? t("working") : t("summarize")}
@@ -166,7 +194,7 @@ export function ReadingPane({
             size="sm"
             variant="ghost"
             disabled={aiBusy}
-            onClick={handleSuggestReply}
+            onClick={() => void loadReplyVariants()}
           >
             {t("suggestReply")}
           </Button>
@@ -184,7 +212,16 @@ export function ReadingPane({
                     type="button"
                     className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
                     onClick={() => {
-                      void handleOpenAttachment(attachment.id);
+                      void (async () => {
+                        try {
+                          const path = await api.attachmentsOpenPath(attachment.id);
+                          await openPath(path);
+                        } catch (error) {
+                          setAiError(
+                            (error as AppError).message || t("openAttachmentFailed"),
+                          );
+                        }
+                      })();
                     }}
                   >
                     {attachment.filename}{" "}
@@ -211,6 +248,77 @@ export function ReadingPane({
             <p className="leading-6">{summary}</p>
           </div>
         ) : null}
+
+        <section className="mt-4 grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">{t("replyAssistTitle")}</h3>
+            <span className="text-xs text-[var(--nova-ink-muted)]">
+              {t("replyAssistHint")}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={selectedVariant === "a" ? "primary" : "secondary"}
+              disabled={!variantA || aiBusy}
+              onClick={() => pickVariant("a")}
+            >
+              {t("replyVariantA")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={selectedVariant === "b" ? "primary" : "secondary"}
+              disabled={!variantB || aiBusy}
+              onClick={() => pickVariant("b")}
+            >
+              {t("replyVariantB")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={aiBusy}
+              onClick={() => void loadReplyVariants()}
+            >
+              {aiBusy ? t("working") : t("generateReplyVariants")}
+            </Button>
+          </div>
+          <textarea
+            className="min-h-[120px] w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2 text-sm leading-6"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t("replyDraftPlaceholder")}
+          />
+          <label className="grid gap-1 text-xs">
+            <span>{t("replyFactsLabel")}</span>
+            <Input
+              value={facts}
+              onChange={(e) => setFacts(e.target.value)}
+              placeholder={t("replyFactsPlaceholder")}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={aiBusy || !facts.trim()}
+              onClick={() => void loadReplyVariants(facts)}
+            >
+              {t("rewriteWithFacts")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!draft.trim()}
+              onClick={useDraftInReply}
+            >
+              {t("useReplyDraft")}
+            </Button>
+          </div>
+        </section>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
         {current.bodyHtml ? (

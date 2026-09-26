@@ -6,7 +6,8 @@ use novamail_ipc::{
     ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto,
     MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto,
     SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SignatureDto, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
     SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
     UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
@@ -180,6 +181,18 @@ pub async fn ai_suggest_reply(
     state
         .app
         .suggest_reply_message(request)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_suggest_replies(
+    state: State<'_, DesktopState>,
+    request: SuggestRepliesMessageRequest,
+) -> Result<SuggestRepliesMessageResponse, AppError> {
+    state
+        .app
+        .suggest_replies_message(request)
         .await
         .map_err(map_err)
 }

@@ -20,7 +20,8 @@ use novamail_ipc::{
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
     OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
     SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SignatureDto, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
     SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
     UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
@@ -914,35 +915,19 @@ impl AppState {
     }
 
     pub fn get_message_ai_insights(&self, message_id: Uuid) -> CoreResult<MessageAiInsights> {
-        let summary = self
-            .db
-            .get_ai_insight(message_id, "summary")?
-            .and_then(|raw| {
-                serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|v| v.get("text")?.as_str().map(|s| s.to_string()))
-            });
-        let reply_suggestion = self
-            .db
-            .get_ai_insight(message_id, "reply")?
-            .and_then(|raw| {
-                serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|v| v.get("text")?.as_str().map(|s| s.to_string()))
-            });
-        let provider = self
-            .db
-            .get_ai_insight(message_id, "summary")?
-            .or(self.db.get_ai_insight(message_id, "reply")?)
-            .and_then(|raw| {
-                serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|v| v.get("provider")?.as_str().map(|s| s.to_string()))
-            });
+        let summary = insight_text(&self.db, message_id, "summary")?;
+        let reply_a = insight_text(&self.db, message_id, "reply_a")?
+            .or(insight_text(&self.db, message_id, "reply")?);
+        let reply_b = insight_text(&self.db, message_id, "reply_b")?;
+        let provider = insight_provider(&self.db, message_id, "summary")?
+            .or(insight_provider(&self.db, message_id, "reply_a")?)
+            .or(insight_provider(&self.db, message_id, "reply")?);
         Ok(MessageAiInsights {
             message_id,
             summary,
-            reply_suggestion,
+            reply_suggestion: reply_a.clone(),
+            reply_a,
+            reply_b,
             provider,
         })
     }
@@ -972,7 +957,9 @@ impl AppState {
         ai: &dyn AiProvider,
         message_id: Uuid,
     ) -> CoreResult<()> {
-        if db.has_ai_insight(message_id, "summary")? && db.has_ai_insight(message_id, "reply")? {
+        let has_replies = db.has_ai_insight(message_id, "reply_a")?
+            && db.has_ai_insight(message_id, "reply_b")?;
+        if db.has_ai_insight(message_id, "summary")? && has_replies {
             return Ok(());
         }
         let detail = db.get_message(message_id)?;
@@ -1006,21 +993,33 @@ impl AppState {
             db.upsert_ai_insight(message_id, "summary", &payload.to_string())?;
         }
 
-        if !db.has_ai_insight(message_id, "reply")? {
+        if !has_replies {
             let ai_request = SuggestReplyRequest {
                 subject: detail.summary.subject.clone(),
                 body_text: body,
                 from_email: detail.summary.from.email.clone(),
+                facts: None,
+                style: None,
             };
-            let result = match ai.suggest_reply(ai_request.clone()).await {
+            let result = match ai.suggest_reply_variants(ai_request.clone()).await {
                 Ok(r) => r,
-                Err(_) => Self::offline_ai().suggest_reply(ai_request).await?,
+                Err(_) => Self::offline_ai().suggest_reply_variants(ai_request).await?,
             };
-            let payload = serde_json::json!({
-                "text": result.suggestion,
-                "provider": result.provider,
-            });
-            db.upsert_ai_insight(message_id, "reply", &payload.to_string())?;
+            if let Some(a) = result.variants.first() {
+                let payload = serde_json::json!({
+                    "text": a,
+                    "provider": result.provider,
+                });
+                db.upsert_ai_insight(message_id, "reply_a", &payload.to_string())?;
+                db.upsert_ai_insight(message_id, "reply", &payload.to_string())?;
+            }
+            if let Some(b) = result.variants.get(1) {
+                let payload = serde_json::json!({
+                    "text": b,
+                    "provider": result.provider,
+                });
+                db.upsert_ai_insight(message_id, "reply_b", &payload.to_string())?;
+            }
         }
         Ok(())
     }
@@ -1089,21 +1088,48 @@ impl AppState {
         &self,
         request: SuggestReplyMessageRequest,
     ) -> CoreResult<SuggestReplyMessageResponse> {
-        if let Some(cached) = self.db.get_ai_insight(request.message_id, "reply")? {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cached) {
-                if let (Some(text), provider) = (
-                    value.get("text").and_then(|v| v.as_str()),
-                    value
-                        .get("provider")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("cache"),
-                ) {
-                    return Ok(SuggestReplyMessageResponse {
-                        message_id: request.message_id,
-                        suggestion: text.to_string(),
-                        provider: provider.to_string(),
-                    });
-                }
+        let variants = self
+            .suggest_replies_message(SuggestRepliesMessageRequest {
+                message_id: request.message_id,
+                facts: request.facts,
+            })
+            .await?;
+        let suggestion = variants
+            .variants
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        Ok(SuggestReplyMessageResponse {
+            message_id: request.message_id,
+            suggestion,
+            provider: variants.provider,
+        })
+    }
+
+    pub async fn suggest_replies_message(
+        &self,
+        request: SuggestRepliesMessageRequest,
+    ) -> CoreResult<SuggestRepliesMessageResponse> {
+        let facts = request
+            .facts
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        // Use cache only when no custom facts were requested.
+        if facts.is_none() {
+            let a = insight_text(&self.db, request.message_id, "reply_a")?
+                .or(insight_text(&self.db, request.message_id, "reply")?);
+            let b = insight_text(&self.db, request.message_id, "reply_b")?;
+            if let (Some(a), Some(b)) = (a, b) {
+                let provider = insight_provider(&self.db, request.message_id, "reply_a")?
+                    .unwrap_or_else(|| "cache".into());
+                return Ok(SuggestRepliesMessageResponse {
+                    message_id: request.message_id,
+                    variants: vec![a, b],
+                    provider,
+                });
             }
         }
 
@@ -1116,24 +1142,46 @@ impl AppState {
             subject: detail.summary.subject.clone(),
             body_text: body,
             from_email: detail.summary.from.email.clone(),
+            facts: facts.clone(),
+            style: None,
         };
-        let result = match self.ai.suggest_reply(ai_request.clone()).await {
+        let result = match self.ai.suggest_reply_variants(ai_request.clone()).await {
             Ok(result) => result,
             Err(err) => {
                 tracing::warn!(error = %err, "primary AI provider failed; using offline fallback");
-                Self::offline_ai().suggest_reply(ai_request).await?
+                Self::offline_ai()
+                    .suggest_reply_variants(ai_request)
+                    .await?
             }
         };
-        let payload = serde_json::json!({
-            "text": result.suggestion,
-            "provider": result.provider,
-        });
-        let _ = self
-            .db
-            .upsert_ai_insight(request.message_id, "reply", &payload.to_string());
-        Ok(SuggestReplyMessageResponse {
+
+        if facts.is_none() {
+            if let Some(a) = result.variants.first() {
+                let payload = serde_json::json!({
+                    "text": a,
+                    "provider": result.provider,
+                });
+                let _ = self
+                    .db
+                    .upsert_ai_insight(request.message_id, "reply_a", &payload.to_string());
+                let _ = self
+                    .db
+                    .upsert_ai_insight(request.message_id, "reply", &payload.to_string());
+            }
+            if let Some(b) = result.variants.get(1) {
+                let payload = serde_json::json!({
+                    "text": b,
+                    "provider": result.provider,
+                });
+                let _ = self
+                    .db
+                    .upsert_ai_insight(request.message_id, "reply_b", &payload.to_string());
+            }
+        }
+
+        Ok(SuggestRepliesMessageResponse {
             message_id: request.message_id,
-            suggestion: result.suggestion,
+            variants: result.variants,
             provider: result.provider,
         })
     }
@@ -1204,6 +1252,22 @@ impl AppState {
         };
         Ok((result.score, result.rationale, result.provider))
     }
+}
+
+fn insight_text(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<Option<String>> {
+    Ok(db.get_ai_insight(message_id, kind)?.and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|v| v.get("text")?.as_str().map(|s| s.to_string()))
+    }))
+}
+
+fn insight_provider(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<Option<String>> {
+    Ok(db.get_ai_insight(message_id, kind)?.and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|v| v.get("provider")?.as_str().map(|s| s.to_string()))
+    }))
 }
 
 /// Match backup contacts to local ones: LDAP DN, then shared email, then id.
