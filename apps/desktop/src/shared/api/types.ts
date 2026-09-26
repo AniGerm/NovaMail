@@ -214,6 +214,8 @@ export interface ContactCustomField {
 export interface ContactDto {
   id: string;
   displayName: string;
+  givenName: string;
+  familyName: string;
   emails: string[];
   phones: string[];
   faxes: string[];
@@ -230,6 +232,8 @@ export interface ContactDto {
 export interface UpsertContactRequest {
   id?: string | null;
   displayName: string;
+  givenName?: string;
+  familyName?: string;
   emails: string[];
   phones: string[];
   faxes?: string[];
@@ -240,6 +244,19 @@ export interface UpsertContactRequest {
   photoBase64?: string | null;
   ldapDn?: string | null;
   notes: string;
+}
+
+export type ContactNameOrder = "givenFamily" | "familyGiven";
+export type ContactSortBy =
+  | "familyName"
+  | "givenName"
+  | "displayName"
+  | "organization";
+
+export interface ContactsBookSettings {
+  nameOrder: ContactNameOrder;
+  sortBy: ContactSortBy;
+  sortAscending: boolean;
 }
 
 export interface CardDavServerStatus {

@@ -35,6 +35,8 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
             vec![
                 "cn",
                 "displayName",
+                "givenName",
+                "sn",
                 "mail",
                 "telephoneNumber",
                 "mobile",
@@ -62,9 +64,18 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
     let mut contacts = Vec::new();
     for entry in rs {
         let entry = SearchEntry::construct(entry);
+        let given_name = first_attr(&entry, "givenName").unwrap_or_default();
+        let family_name = first_attr(&entry, "sn").unwrap_or_default();
         let display_name = first_attr(&entry, "displayName")
             .or_else(|| first_attr(&entry, "cn"))
-            .unwrap_or_else(|| entry.dn.clone());
+            .unwrap_or_else(|| {
+                let joined = format!("{given_name} {family_name}").trim().to_string();
+                if joined.is_empty() {
+                    entry.dn.clone()
+                } else {
+                    joined
+                }
+            });
         let emails = all_attr(&entry, "mail");
         let mut phones = all_attr(&entry, "telephoneNumber");
         phones.extend(all_attr(&entry, "mobile"));
@@ -110,6 +121,8 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
         contacts.push(ContactDto {
             id: Uuid::new_v4(),
             display_name,
+            given_name,
+            family_name,
             emails,
             phones,
             faxes,

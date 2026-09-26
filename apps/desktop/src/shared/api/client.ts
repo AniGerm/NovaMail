@@ -8,6 +8,7 @@ import type {
   AttachmentDto,
   CardDavServerStatus,
   ContactDto,
+  ContactsBookSettings,
   LabelDto,
   LdapSearchRequest,
   LdapSyncRequest,
@@ -122,6 +123,10 @@ export const api = {
   ldapGetSettings: () => call<LdapSyncSettings>("ldap_get_settings"),
   ldapSync: (request: LdapSyncRequest) =>
     call<LdapSyncResult>("ldap_sync", { request }),
+  contactsBookSettings: () =>
+    call<ContactsBookSettings>("contacts_book_settings"),
+  contactsSetBookSettings: (settings: ContactsBookSettings) =>
+    call<ContactsBookSettings>("contacts_set_book_settings", { settings }),
   labelsList: (accountId?: string | null) =>
     call<LabelDto[]>("labels_list", { accountId: accountId ?? null }),
   labelsUpsert: (request: {

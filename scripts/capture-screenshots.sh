@@ -48,3 +48,4 @@ capture() {
 capture inbox inbox.png
 capture triage quick-sort.png
 capture contacts contacts-carddav.png
+capture contacts-settings contacts-settings.png

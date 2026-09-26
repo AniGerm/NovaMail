@@ -34,6 +34,8 @@ impl ContactStore for DbContactStore {
         let record = novamail_db::models::ContactRecord {
             id: contact.id,
             display_name: contact.display_name,
+            given_name: contact.given_name,
+            family_name: contact.family_name,
             emails: contact.emails,
             phones: contact.phones,
             faxes: contact.faxes,

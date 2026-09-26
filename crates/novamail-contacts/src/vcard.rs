@@ -8,7 +8,15 @@ pub fn contact_to_vcard(contact: &ContactDto) -> String {
         "VERSION:3.0".to_string(),
         format!("UID:{}", contact.id),
         format!("FN:{}", escape_text(&contact.display_name)),
-        format!("N:;{};;;", escape_text(&contact.display_name)),
+        format!(
+            "N:{};{};;;",
+            escape_text(&contact.family_name),
+            escape_text(if contact.given_name.is_empty() {
+                &contact.display_name
+            } else {
+                &contact.given_name
+            })
+        ),
     ];
     if !contact.organization.trim().is_empty() {
         lines.push(format!("ORG:{}", escape_text(&contact.organization)));
@@ -73,6 +81,8 @@ pub fn contact_to_vcard(contact: &ContactDto) -> String {
 pub fn vcard_to_contact(raw: &str, fallback_id: Option<Uuid>) -> Option<ContactDto> {
     let mut uid = fallback_id;
     let mut display_name = String::new();
+    let mut given_name = String::new();
+    let mut family_name = String::new();
     let mut emails = Vec::new();
     let mut phones = Vec::new();
     let mut faxes = Vec::new();
@@ -93,6 +103,10 @@ pub fn vcard_to_contact(raw: &str, fallback_id: Option<Uuid>) -> Option<ContactD
             }
         } else if upper.starts_with("FN:") {
             display_name = unescape_text(&line[3..]);
+        } else if upper.starts_with("N:") {
+            let parts: Vec<String> = line[2..].split(';').map(unescape_text).collect();
+            family_name = parts.first().cloned().unwrap_or_default();
+            given_name = parts.get(1).cloned().unwrap_or_default();
         } else if upper.starts_with("ORG:") {
             organization = unescape_text(&line[4..]);
         } else if upper.starts_with("TITLE:") {
@@ -174,6 +188,8 @@ pub fn vcard_to_contact(raw: &str, fallback_id: Option<Uuid>) -> Option<ContactD
     Some(ContactDto {
         id: uid.unwrap_or_else(Uuid::new_v4),
         display_name,
+        given_name,
+        family_name,
         emails,
         phones,
         faxes,
@@ -256,6 +272,8 @@ mod tests {
         let contact = ContactDto {
             id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
             display_name: "Fax Room".into(),
+            given_name: "Fax".into(),
+            family_name: "Room".into(),
             emails: vec!["fax@example.com".into()],
             phones: vec!["+491234".into()],
             faxes: vec!["+499999".into()],

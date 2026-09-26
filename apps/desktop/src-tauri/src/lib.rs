@@ -67,6 +67,8 @@ pub fn run() {
             commands::ldap_search,
             commands::ldap_get_settings,
             commands::ldap_sync,
+            commands::contacts_book_settings,
+            commands::contacts_set_book_settings,
             commands::labels_list,
             commands::labels_upsert,
             commands::labels_delete,

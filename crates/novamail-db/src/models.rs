@@ -95,6 +95,10 @@ pub struct AttachmentRecord {
 pub struct ContactRecord {
     pub id: Uuid,
     pub display_name: String,
+    #[serde(default)]
+    pub given_name: String,
+    #[serde(default)]
+    pub family_name: String,
     pub emails: Vec<String>,
     pub phones: Vec<String>,
     #[serde(default)]

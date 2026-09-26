@@ -30,6 +30,10 @@ pub struct ContactCustomField {
 pub struct ContactDto {
     pub id: Uuid,
     pub display_name: String,
+    #[serde(default)]
+    pub given_name: String,
+    #[serde(default)]
+    pub family_name: String,
     pub emails: Vec<String>,
     pub phones: Vec<String>,
     #[serde(default)]
@@ -57,6 +61,10 @@ pub struct ContactDto {
 pub struct UpsertContactRequest {
     pub id: Option<Uuid>,
     pub display_name: String,
+    #[serde(default)]
+    pub given_name: String,
+    #[serde(default)]
+    pub family_name: String,
     pub emails: Vec<String>,
     pub phones: Vec<String>,
     #[serde(default)]
@@ -74,6 +82,49 @@ pub struct UpsertContactRequest {
     #[serde(default)]
     pub ldap_dn: Option<String>,
     pub notes: String,
+}
+
+/// How contact names are shown in the address book list and editor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactNameOrder {
+    /// "Max Mustermann"
+    #[default]
+    GivenFamily,
+    /// "Mustermann, Max"
+    FamilyGiven,
+}
+
+/// Primary key used when sorting the contact list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactSortBy {
+    #[default]
+    FamilyName,
+    GivenName,
+    DisplayName,
+    Organization,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactsBookSettings {
+    #[serde(default)]
+    pub name_order: ContactNameOrder,
+    #[serde(default)]
+    pub sort_by: ContactSortBy,
+    #[serde(default)]
+    pub sort_ascending: bool,
+}
+
+impl Default for ContactsBookSettings {
+    fn default() -> Self {
+        Self {
+            name_order: ContactNameOrder::GivenFamily,
+            sort_by: ContactSortBy::FamilyName,
+            sort_ascending: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

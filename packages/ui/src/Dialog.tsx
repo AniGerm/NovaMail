@@ -8,12 +8,14 @@ export function Dialog({
   children,
   onClose,
   className,
+  headerActions,
 }: PropsWithChildren<{
   open: boolean;
   title: string;
   description?: string;
   onClose: () => void;
   className?: string;
+  headerActions?: ReactNode;
 }>) {
   if (!open) return null;
   return (
@@ -25,12 +27,12 @@ export function Dialog({
     >
       <div
         className={cn(
-          "w-full max-w-lg rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
+          "flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
           className,
         )}
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
+        <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
+          <div className="min-w-0">
             <h2
               id="nova-dialog-title"
               className="font-[family-name:var(--nova-font-display)] text-xl"
@@ -41,20 +43,29 @@ export function Dialog({
               <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">{description}</p>
             ) : null}
           </div>
-          <button
-            type="button"
-            className="text-sm text-[var(--nova-ink-muted)]"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerActions}
+            <button
+              type="button"
+              className="px-1 text-sm text-[var(--nova-ink-muted)]"
+              onClick={onClose}
+            >
+              ×
+            </button>
+          </div>
         </div>
-        {children}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {children}
+        </div>
       </div>
     </div>
   );
 }
 
 export function DialogActions({ children }: { children: ReactNode }) {
-  return <div className="mt-6 flex justify-end gap-2">{children}</div>;
+  return (
+    <div className="mt-4 flex shrink-0 justify-end gap-2 border-t border-[var(--nova-border)] pt-4">
+      {children}
+    </div>
+  );
 }

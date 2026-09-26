@@ -428,14 +428,16 @@
           <div>
             <h2 class="h2" style="font-size:22px;margin:0">Adressbuch</h2>
             <p class="muted" style="margin-top:6px;max-width:640px">
-              Kontakte mit Foto, Fax, Adresse und eigenen Feldern — lokal pflegen, per LDAP synchronisieren
-              und über CardDAV an andere Geräte ausliefern.
+              Kontakte mit Foto, Fax, Adresse und eigenen Feldern.
             </p>
           </div>
-          <span class="muted" style="font-size:18px">×</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="avatar" style="width:36px;height:36px;border-radius:10px;background:var(--nova-surface-2);color:var(--nova-ink-muted);font-size:16px">⚙</span>
+            <span class="muted" style="font-size:18px">×</span>
+          </div>
         </div>
 
-        <div class="contacts-grid">
+        <div class="contacts-grid" id="contacts-main">
           <aside class="contacts-side">
             <div style="display:flex;gap:8px">
               <div class="field muted" style="flex:1">Fuzzy-Suche… fax</div>
@@ -444,55 +446,27 @@
             <div class="contact-row active">
               <div class="avatar photo">F</div>
               <div style="min-width:0">
-                <div style="font-weight:600;font-size:13px">Faxraum EG</div>
-                <div class="muted" style="truncate">Büro · +49 30 123456</div>
+                <div style="font-weight:600;font-size:13px">Faxraum, EG</div>
+                <div class="muted">Büro · +49 30 123456</div>
               </div>
             </div>
             <div class="contact-row">
-              <div class="avatar">A</div>
+              <div class="avatar">R</div>
               <div style="min-width:0">
-                <div style="font-weight:600;font-size:13px">Alex Rivera</div>
+                <div style="font-weight:600;font-size:13px">Rivera, Alex</div>
                 <div class="muted">Nova GmbH</div>
               </div>
             </div>
             <div class="contact-row">
-              <div class="avatar">M</div>
+              <div class="avatar">E</div>
               <div style="min-width:0">
-                <div style="font-weight:600;font-size:13px">MFP Empfang</div>
+                <div style="font-weight:600;font-size:13px">Empfang, MFP</div>
                 <div class="muted">mfp@buero.local</div>
               </div>
             </div>
           </aside>
 
           <div style="overflow:auto;padding-right:4px">
-            <div class="panel">
-              <strong>CardDAV-Server</strong>
-              <p class="muted" style="margin:6px 0">
-                Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte
-              </p>
-              <p class="muted" style="margin:0 0 8px">
-                Andere Geräte (Drucker, Fax, Smartphones) verbinden sich mit der CardDAV-URL.
-              </p>
-              <button class="btn secondary sm">CardDAV stoppen</button>
-            </div>
-
-            <div class="panel">
-              <strong>LDAP-Synchronisation</strong>
-              <p class="muted" style="margin:6px 0 8px">
-                Kontakte aus dem Verzeichnis holen — danach über CardDAV auch auf anderen Geräten verfügbar.
-              </p>
-              <div class="form-grid">
-                <div class="field muted">ldaps://ldap.buero.local</div>
-                <div class="field muted">ou=people,dc=buero,dc=local</div>
-                <div class="field muted">(objectClass=inetOrgPerson)</div>
-                <div class="field muted">cn=novamail,ou=services,dc=buero,dc=local</div>
-              </div>
-              <button class="btn secondary sm" style="margin-top:8px">Jetzt mit LDAP synchronisieren</button>
-              <p style="margin:8px 0 0;color:var(--nova-accent);font-size:12px">
-                LDAP-Sync: 1 neu, 2 aktualisiert (3 gesamt).
-              </p>
-            </div>
-
             <div class="panel">
               <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
                 <div>
@@ -502,12 +476,13 @@
                 <div class="avatar photo" style="width:56px;height:56px;font-size:18px">F</div>
               </div>
               <div class="form-grid" style="margin-top:10px">
-                <div class="field">Faxraum EG</div>
+                <div class="field">Faxraum</div>
+                <div class="field">EG</div>
                 <div class="field">Büro</div>
                 <div class="field">MFP / Fax</div>
                 <div class="field muted">fax@buero.local</div>
                 <div class="field muted">+49 30 555010</div>
-                <div class="field">+49 30 123456</div>
+                <div class="field" style="grid-column:1/-1">+49 30 123456</div>
               </div>
               <p class="muted" style="margin:12px 0 6px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-size:10px">Adresse</p>
               <div class="form-grid">
@@ -530,6 +505,33 @@
           </div>
         </div>
 
+        <div id="contacts-settings" style="display:none;margin-top:14px">
+          <div class="panel">
+            <strong>Namensanzeige</strong>
+            <div class="form-grid" style="margin-top:8px">
+              <div class="field">Nachname, Vorname</div>
+              <div class="field">Sortieren nach: Nachname</div>
+              <div class="field" style="grid-column:1/-1">Aufsteigend (A–Z)</div>
+            </div>
+            <button class="btn sm" style="margin-top:8px">Einstellungen speichern</button>
+          </div>
+          <div class="panel">
+            <strong>CardDAV-Server</strong>
+            <p class="muted" style="margin:6px 0">
+              Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte
+            </p>
+            <button class="btn secondary sm">CardDAV stoppen</button>
+          </div>
+          <div class="panel">
+            <strong>LDAP-Synchronisation</strong>
+            <div class="form-grid" style="margin-top:8px">
+              <div class="field muted">ldaps://ldap.buero.local</div>
+              <div class="field muted">ou=people,dc=buero,dc=local</div>
+            </div>
+            <button class="btn secondary sm" style="margin-top:8px">Jetzt mit LDAP synchronisieren</button>
+          </div>
+        </div>
+
         <div class="actions"><button class="btn">Fertig</button></div>
       </div>
     </div>
@@ -538,10 +540,17 @@
       const params = new URLSearchParams(location.search);
       const view = params.get("view") || "inbox";
       document.getElementById("triage").classList.toggle("show", view === "triage");
-      document.getElementById("contacts").classList.toggle("show", view === "contacts");
+      document.getElementById("contacts").classList.toggle("show", view === "contacts" || view === "contacts-settings");
+      const settings = view === "contacts-settings";
+      document.getElementById("contacts-main").style.display = settings ? "none" : "grid";
+      document.getElementById("contacts-settings").style.display = settings ? "block" : "none";
+      if (settings) {
+        document.querySelector("#contacts .h2").textContent = "Adressbuch-Einstellungen";
+        document.querySelector("#contacts .muted").textContent = "Server, Sync und Namensdarstellung";
+      }
       document.getElementById("nav-inbox").classList.toggle("active", view === "inbox");
       document.getElementById("nav-triage").classList.toggle("active", view === "triage");
-      document.getElementById("nav-contacts").classList.toggle("active", view === "contacts");
+      document.getElementById("nav-contacts").classList.toggle("active", view === "contacts" || view === "contacts-settings");
     </script>
   </body>
 </html>

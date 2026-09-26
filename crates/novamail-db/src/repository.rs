@@ -1154,6 +1154,10 @@ struct ContactProfileJson {
     #[serde(default)]
     notes: String,
     #[serde(default)]
+    given_name: String,
+    #[serde(default)]
+    family_name: String,
+    #[serde(default)]
     organization: String,
     #[serde(default)]
     job_title: String,
@@ -1172,6 +1176,8 @@ fn encode_contact_profile(contact: &ContactRecord) -> String {
         phones: contact.phones.clone(),
         faxes: contact.faxes.clone(),
         notes: contact.notes.clone(),
+        given_name: contact.given_name.clone(),
+        family_name: contact.family_name.clone(),
         organization: contact.organization.clone(),
         job_title: contact.job_title.clone(),
         addresses: contact.addresses.clone(),
@@ -1206,6 +1212,8 @@ fn map_contact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContactDto> {
     Ok(ContactDto {
         id: parse_uuid(row.get::<_, String>(0)?)?,
         display_name: row.get(1)?,
+        given_name: profile.given_name,
+        family_name: profile.family_name,
         emails,
         phones: profile.phones,
         faxes: profile.faxes,
@@ -1228,6 +1236,8 @@ fn contact_fuzzy_score(contact: &ContactDto, query: &str) -> Option<u32> {
     let mut best = 0u32;
     let mut hit = false;
     let fields = std::iter::once(contact.display_name.as_str())
+        .chain(std::iter::once(contact.given_name.as_str()))
+        .chain(std::iter::once(contact.family_name.as_str()))
         .chain(std::iter::once(contact.organization.as_str()))
         .chain(std::iter::once(contact.job_title.as_str()))
         .chain(std::iter::once(contact.notes.as_str()))

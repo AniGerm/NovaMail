@@ -1,12 +1,13 @@
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
-    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
-    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailProvider,
-    MailboxDto, MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
-    ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest,
-    SetMessageLabelsRequest, SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    CardDavServerStatus, ContactDto, ContactsBookSettings, LabelDto, LdapSearchRequest,
+    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto, MessageSummaryDto,
+    OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto, SearchRequest,
+    SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
+    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -291,6 +292,24 @@ pub fn ldap_get_settings(
     state: State<'_, DesktopState>,
 ) -> Result<LdapSyncSettings, AppError> {
     state.app.ldap_get_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_book_settings(
+    state: State<'_, DesktopState>,
+) -> Result<ContactsBookSettings, AppError> {
+    state.app.contacts_book_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_set_book_settings(
+    state: State<'_, DesktopState>,
+    settings: ContactsBookSettings,
+) -> Result<ContactsBookSettings, AppError> {
+    state
+        .app
+        .set_contacts_book_settings(settings)
+        .map_err(map_err)
 }
 
 #[tauri::command]

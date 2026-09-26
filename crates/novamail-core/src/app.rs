@@ -9,14 +9,14 @@ use novamail_crypto::{AccountCredentials, OAuthTokens, SecretStore};
 use novamail_db::{AccountRecord, Database};
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
-    CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
-    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailboxDto,
-    MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
-    OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest,
-    SetFlagsRequest, SetMessageLabelsRequest, SignatureDto, SuggestReplyMessageRequest,
-    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
-    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
-    UpsertRuleRequest, UpsertSignatureRequest,
+    CardDavServerStatus, ContactDto, ContactsBookSettings, LabelDto, LdapSearchRequest,
+    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    ListThreadsResponse, MailboxDto, MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest,
+    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
+    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
+    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{OAuthConfig, Pop3Client, SmtpClient, SyncEngine};
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
@@ -346,6 +346,8 @@ impl AppState {
         let record = novamail_db::models::ContactRecord {
             id,
             display_name: request.display_name,
+            given_name: request.given_name,
+            family_name: request.family_name,
             emails: request.emails,
             phones: request.phones,
             faxes: request.faxes,
@@ -360,6 +362,25 @@ impl AppState {
         };
         self.db.upsert_contact(&record)?;
         Ok(self.db.get_contact(id)?)
+    }
+
+    pub fn contacts_book_settings(&self) -> CoreResult<ContactsBookSettings> {
+        let raw = self.db.get_setting("contacts.book")?;
+        if let Some(raw) = raw {
+            Ok(serde_json::from_str(&raw).unwrap_or_default())
+        } else {
+            Ok(ContactsBookSettings::default())
+        }
+    }
+
+    pub fn set_contacts_book_settings(
+        &self,
+        settings: ContactsBookSettings,
+    ) -> CoreResult<ContactsBookSettings> {
+        let raw =
+            serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?;
+        self.db.set_setting("contacts.book", &raw)?;
+        Ok(settings)
     }
 
     pub fn delete_contact(&self, contact_id: Uuid) -> CoreResult<()> {
@@ -456,6 +477,8 @@ impl AppState {
             let record = novamail_db::models::ContactRecord {
                 id,
                 display_name: contact.display_name,
+                given_name: contact.given_name,
+                family_name: contact.family_name,
                 emails: contact.emails,
                 phones: contact.phones,
                 faxes: contact.faxes,
