@@ -29,7 +29,9 @@ NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **Rea
 
 ![Quick Sort triage](docs/screenshots/quick-sort.png)
 
-![Address book with LDAP sync and CardDAV](docs/screenshots/contacts-carddav.png)
+![Address book contact editor](docs/screenshots/contacts-carddav.png)
+
+![Address book settings (name order, CardDAV, LDAP)](docs/screenshots/contacts-settings.png)
 
 More captures: [`docs/screenshots/`](docs/screenshots/).
 
