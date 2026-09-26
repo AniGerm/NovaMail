@@ -90,7 +90,7 @@ export function SettingsDialog({
           </select>
         </label>
 
-        <div className="grid grid-cols-4 gap-2 px-0.5 py-1" aria-hidden>
+        <div className="grid grid-cols-4 gap-2" aria-hidden>
           {(
             [
               ["navy", "#1e3a5f", "#d7e4f4"],
@@ -98,22 +98,29 @@ export function SettingsDialog({
               ["slate", "#334155", "#e2e8f0"],
               ["midnight", "#312e81", "#e0e7ff"],
             ] as const
-          ).map(([id, accent, soft]) => (
-            <button
-              key={id}
-              type="button"
-              title={id}
-              onClick={() => setColorScheme(id)}
-              className="h-7 w-full rounded-[6px] border border-[var(--nova-border)]"
-              style={{
-                background: `linear-gradient(135deg, ${soft} 55%, ${accent})`,
-                boxShadow:
-                  colorScheme === id
-                    ? "0 0 0 2px var(--nova-surface), 0 0 0 4px var(--nova-accent)"
-                    : undefined,
-              }}
-            />
-          ))}
+          ).map(([id, accent, soft]) => {
+            const selected = colorScheme === id;
+            return (
+              <div
+                key={id}
+                className={
+                  selected
+                    ? "rounded-[8px] p-[3px] ring-2 ring-inset ring-[var(--nova-accent)]"
+                    : "rounded-[8px] p-[3px] ring-2 ring-inset ring-transparent"
+                }
+              >
+                <button
+                  type="button"
+                  title={id}
+                  onClick={() => setColorScheme(id)}
+                  className="h-6 w-full rounded-[5px] border border-[var(--nova-border)]"
+                  style={{
+                    background: `linear-gradient(135deg, ${soft} 55%, ${accent})`,
+                  }}
+                />
+              </div>
+            );
+          })}
         </div>
 
         <label className="grid gap-1">
