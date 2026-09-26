@@ -4,7 +4,9 @@ import { Paperclip, Star } from "lucide-react";
 import { cn } from "@novamail/ui";
 
 import type { MessageSummaryDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 import { displayName, formatMessageDate } from "@/shared/lib/format";
+import { useUiStore } from "@/shared/store/uiStore";
 
 interface MessageListProps {
   messages: MessageSummaryDto[];
@@ -14,6 +16,8 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, selectedId, onSelect, total }: MessageListProps) {
+  const t = useT();
+  const locale = useUiStore((s) => s.locale);
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -24,15 +28,17 @@ export function MessageList({ messages, selectedId, onSelect, total }: MessageLi
 
   return (
     <section
-      aria-label="Message list"
+      aria-label={t("messageList")}
       className="flex h-full min-w-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]"
     >
       <header className="flex items-center justify-between px-4 py-3">
         <div>
           <h1 className="text-sm font-semibold tracking-wide text-[var(--nova-ink)]">
-            Unified Inbox
+            {t("unifiedInbox")}
           </h1>
-          <p className="text-xs text-[var(--nova-ink-muted)]">{total} messages</p>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("messagesCount", { count: total })}
+          </p>
         </div>
       </header>
       <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -68,7 +74,7 @@ export function MessageList({ messages, selectedId, onSelect, total }: MessageLi
                     {displayName(message.from)}
                   </span>
                   <span className="shrink-0 text-xs text-[var(--nova-ink-muted)]">
-                    {formatMessageDate(message.date)}
+                    {formatMessageDate(message.date, locale)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -80,7 +86,7 @@ export function MessageList({ messages, selectedId, onSelect, total }: MessageLi
                         : "text-[var(--nova-ink-muted)]",
                     )}
                   >
-                    {message.subject || "(no subject)"}
+                    {message.subject || t("noSubject")}
                   </span>
                   {message.starred ? (
                     <Star className="h-3.5 w-3.5 fill-[var(--nova-warning)] text-[var(--nova-warning)]" />

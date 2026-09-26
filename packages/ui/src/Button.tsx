@@ -13,7 +13,7 @@ export type ButtonProps = PropsWithChildren<
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-[var(--nova-accent)] text-white dark:text-[#0e1114] hover:opacity-90",
+    "bg-[var(--nova-accent)] text-white dark:text-[#0b1220] hover:opacity-90",
   secondary:
     "bg-[var(--nova-surface-2)] text-[var(--nova-ink)] border border-[var(--nova-border)] hover:bg-[var(--nova-surface)]",
   ghost: "bg-transparent text-[var(--nova-ink)] hover:bg-[var(--nova-surface-2)]",

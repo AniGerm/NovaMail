@@ -3,6 +3,7 @@ import { Button, Dialog, DialogActions, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, CardDavServerStatus, ContactDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 
 export function ContactsDialog({
   open,
@@ -11,6 +12,7 @@ export function ContactsDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const [contacts, setContacts] = useState<ContactDto[]>([]);
   const [query, setQuery] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -44,7 +46,7 @@ export function ContactsDialog({
     setError(null);
     try {
       await api.contactsUpsert({
-        displayName: displayName || emails.split(",")[0]?.trim() || "Contact",
+        displayName: displayName || emails.split(",")[0]?.trim() || t("contactFallback"),
         emails: emails
           .split(",")
           .map((v) => v.trim())
@@ -113,72 +115,75 @@ export function ContactsDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Address book"
-      description="Local contacts with embedded CardDAV for MFP/fax sync and optional LDAP import."
+      title={t("addressBook")}
+      description={t("addressBookDescription")}
     >
       <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
         <section className="grid gap-2">
-          <h3 className="font-medium">CardDAV server</h3>
+          <h3 className="font-medium">{t("cardDavServer")}</h3>
           <p className="text-[var(--nova-ink-muted)]">
             {carddav?.running
-              ? `Running at ${carddav.addressbookUrl} · ${carddav.contactCount} contacts`
-              : "Stopped — start to let printers/fax pull vCards."}
+              ? t("cardDavRunning", {
+                  url: carddav.addressbookUrl,
+                  count: carddav.contactCount,
+                })
+              : t("cardDavStopped")}
           </p>
           <Button type="button" size="sm" disabled={busy} onClick={toggleCardDav}>
-            {carddav?.running ? "Stop CardDAV" : "Start CardDAV"}
+            {carddav?.running ? t("stopCardDav") : t("startCardDav")}
           </Button>
         </section>
 
         <form onSubmit={handleSave} className="grid gap-2">
-          <h3 className="font-medium">Add contact</h3>
+          <h3 className="font-medium">{t("addContact")}</h3>
           <Input
-            placeholder="Display name"
+            placeholder={t("displayName")}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
           />
           <Input
-            placeholder="Emails (comma-separated)"
+            placeholder={t("emailsComma")}
             value={emails}
             onChange={(e) => setEmails(e.target.value)}
           />
           <Input
-            placeholder="Phones (comma-separated)"
+            placeholder={t("phonesComma")}
             value={phones}
             onChange={(e) => setPhones(e.target.value)}
           />
           <Input
-            placeholder="Notes"
+            placeholder={t("notes")}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
           <Button type="submit" size="sm" disabled={busy}>
-            Save contact
+            {t("saveContact")}
           </Button>
         </form>
 
         <section className="grid gap-2">
-          <h3 className="font-medium">LDAP lookup</h3>
+          <h3 className="font-medium">{t("ldapLookup")}</h3>
           <Input value={ldapUrl} onChange={(e) => setLdapUrl(e.target.value)} />
           <Input value={ldapBase} onChange={(e) => setLdapBase(e.target.value)} />
           <Input value={ldapFilter} onChange={(e) => setLdapFilter(e.target.value)} />
           <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={runLdap}>
-            Search & import
+            {t("searchImport")}
           </Button>
         </section>
 
         <section className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="font-medium">Contacts</h3>
+            <h3 className="font-medium">{t("contacts")}</h3>
             <Input
               className="max-w-[180px]"
-              placeholder="Filter"
+              placeholder={t("filter")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
           <ul className="space-y-2">
             {contacts.length === 0 ? (
-              <li className="text-[var(--nova-ink-muted)]">No contacts yet</li>
+              <li className="text-[var(--nova-ink-muted)]">{t("noContactsYet")}</li>
             ) : (
               contacts.map((contact) => (
                 <li
@@ -203,7 +208,7 @@ export function ContactsDialog({
                       await refresh();
                     }}
                   >
-                    Delete
+                    {t("delete")}
                   </Button>
                 </li>
               ))
@@ -218,7 +223,7 @@ export function ContactsDialog({
         ) : null}
       </div>
       <DialogActions>
-        <Button onClick={onClose}>Done</Button>
+        <Button onClick={onClose}>{t("done")}</Button>
       </DialogActions>
     </Dialog>
   );

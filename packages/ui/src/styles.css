@@ -1,20 +1,21 @@
 :root {
-  --nova-bg: #f7f6f3;
-  --nova-bg-accent: #eef0f2;
+  /* Default: Navy (dark blue / white) — overridable via Settings color scheme */
+  --nova-bg: #f4f7fb;
+  --nova-bg-accent: #e8eef6;
   --nova-surface: #ffffff;
-  --nova-surface-2: #eef0f2;
-  --nova-ink: #121417;
-  --nova-ink-muted: #5c6570;
-  --nova-border: #d8dde3;
-  --nova-accent: #0b6e4f;
-  --nova-accent-soft: #d8f3e7;
+  --nova-surface-2: #eef3f9;
+  --nova-ink: #0f172a;
+  --nova-ink-muted: #475569;
+  --nova-border: #cfd9e6;
+  --nova-accent: #1e3a5f;
+  --nova-accent-soft: #d7e4f4;
   --nova-danger: #b42318;
   --nova-warning: #b54708;
-  --nova-success: #067647;
+  --nova-success: #0f6b4c;
   --nova-radius-sm: 8px;
   --nova-radius-md: 12px;
   --nova-radius-lg: 16px;
-  --nova-shadow: 0 8px 30px rgba(18, 20, 23, 0.08);
+  --nova-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
   --nova-blur: saturate(140%) blur(16px);
   --nova-font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
   --nova-font-display: "Source Serif 4", Georgia, serif;
@@ -23,15 +24,15 @@
 }
 
 .dark {
-  --nova-bg: #0e1114;
-  --nova-bg-accent: #171b20;
-  --nova-surface: #171b20;
-  --nova-surface-2: #21262d;
-  --nova-ink: #f2f4f7;
-  --nova-ink-muted: #9aa3ad;
-  --nova-border: #2c333c;
-  --nova-accent: #3dcf9a;
-  --nova-accent-soft: #12352a;
+  --nova-bg: #0b1220;
+  --nova-bg-accent: #111a2b;
+  --nova-surface: #152033;
+  --nova-surface-2: #1c2a42;
+  --nova-ink: #f1f5f9;
+  --nova-ink-muted: #94a3b8;
+  --nova-border: #2a3b55;
+  --nova-accent: #7eb6ff;
+  --nova-accent-soft: #1a3358;
   --nova-danger: #f97066;
   --nova-warning: #fdb022;
   --nova-success: #32d583;
@@ -45,8 +46,8 @@
   --nova-ink: #000000;
   --nova-ink-muted: #1a1a1a;
   --nova-border: #000000;
-  --nova-accent: #005c3a;
-  --nova-accent-soft: #c6ffe8;
+  --nova-accent: #0b1f3a;
+  --nova-accent-soft: #d0e4ff;
 }
 
 .dark.hc {
@@ -55,8 +56,8 @@
   --nova-ink: #ffffff;
   --nova-ink-muted: #e6e6e6;
   --nova-border: #ffffff;
-  --nova-accent: #5dffc0;
-  --nova-accent-soft: #003d28;
+  --nova-accent: #9ecbff;
+  --nova-accent-soft: #0a1a33;
 }
 
 * {
@@ -74,7 +75,7 @@ body {
   font-family: var(--nova-font-sans);
   color: var(--nova-ink);
   background:
-    radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--nova-accent) 12%, transparent), transparent 55%),
+    radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--nova-accent) 14%, transparent), transparent 55%),
     linear-gradient(180deg, var(--nova-bg), var(--nova-bg-accent));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

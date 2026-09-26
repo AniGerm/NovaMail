@@ -12,14 +12,14 @@
     />
     <style>
       :root {
-        --nova-bg: #f7f6f3;
-        --nova-bg-accent: #eef0f2;
+        --nova-bg: #f4f7fb;
+        --nova-bg-accent: #e8eef6;
         --nova-surface: #ffffff;
-        --nova-ink: #121417;
-        --nova-ink-muted: #5c6570;
-        --nova-border: #d8dde3;
-        --nova-accent: #0b6e4f;
-        --nova-accent-soft: #d8f3e7;
+        --nova-ink: #0f172a;
+        --nova-ink-muted: #475569;
+        --nova-border: #cfd9e6;
+        --nova-accent: #1e3a5f;
+        --nova-accent-soft: #d7e4f4;
         --nova-danger: #b42318;
         --nova-radius-sm: 8px;
         --nova-radius-md: 12px;
@@ -115,21 +115,21 @@
   </head>
   <body>
     <div class="topbar">
-      <input class="search" value="Search unified inbox" readonly />
-      <span class="muted">Ctrl/Cmd+K</span>
+      <input class="search" value="Posteingang durchsuchen" readonly />
+      <span class="muted">Strg/Cmd+K</span>
     </div>
     <div class="shell" id="inbox">
       <aside class="sidebar">
         <div>
           <p class="brand">NovaMail</p>
-          <p class="muted">Local-first mail</p>
+            <p class="muted">Lokale E-Mail</p>
         </div>
-        <button class="btn">Compose</button>
-        <div class="nav">Unified Inbox</div>
-        <div class="nav ghost">Quick Sort</div>
-        <div class="nav ghost">Contacts</div>
+        <button class="btn">Schreiben</button>
+        <div class="nav">Posteingang</div>
+        <div class="nav ghost">Schnellsortierung</div>
+        <div class="nav ghost">Kontakte</div>
         <div style="margin-top:18px">
-          <p class="muted" style="margin:0 0 8px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Accounts</p>
+          <p class="muted" style="margin:0 0 8px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Konten</p>
           <div class="account"><span>Work</span><span class="badge">icloud</span></div>
           <div class="account"><span>Personal</span><span class="badge">gmail</span></div>
         </div>
@@ -158,12 +158,12 @@
           <h1 class="h2">Quarterly report draft</h1>
           <div class="muted">Alex Rivera &lt;alex@example.com&gt; · 12 minutes ago · me@icloud.com</div>
           <div>
-            <span class="chip">Reply</span>
-            <span class="chip">Forward</span>
-            <span class="chip">Summarize</span>
+            <span class="chip">Antworten</span>
+            <span class="chip">Weiterleiten</span>
+            <span class="chip">Zusammenfassen</span>
           </div>
           <div style="margin-top:16px">
-            <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Attachments</div>
+            <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Anhänge</div>
             <span class="chip">Q3-report.pdf (420 KB)</span>
             <span class="chip">numbers.xlsx (88 KB)</span>
           </div>
@@ -177,29 +177,29 @@
 
     <div class="overlay" id="triage">
       <div class="card">
-        <h2 class="h2" style="font-size:22px">Quick Sort</h2>
-        <p class="muted">Hotkeys: K keep · D delete · Space preview · Esc close</p>
+        <h2 class="h2" style="font-size:22px">Schnellsortierung</h2>
+        <p class="muted">Tasten: B behalten · L löschen · V Vorschau · Esc schließen</p>
         <p class="muted" style="margin-top:18px">1 / 12</p>
         <h3 class="h2" style="font-size:26px;margin-top:4px">Fax confirm: +49 30…</h3>
         <p class="muted">MFP Lobby &lt;mfp@office.local&gt; · 1 hour ago</p>
         <p style="margin-top:16px;line-height:1.7">Delivery confirmation for scanned document. Keep if you need the audit trail.</p>
         <div class="actions">
-          <button class="btn secondary">Preview</button>
-          <button class="btn secondary">Keep in inbox</button>
-          <button class="btn danger">Delete</button>
+          <button class="btn secondary">Vorschau</button>
+          <button class="btn secondary">Im Posteingang behalten</button>
+          <button class="btn danger">Löschen</button>
         </div>
       </div>
     </div>
 
     <div class="overlay" id="contacts">
       <div class="card" style="max-width:560px">
-        <h2 class="h2" style="font-size:22px">Address book</h2>
-        <p class="muted">Local contacts with embedded CardDAV for MFP/fax sync and optional LDAP import.</p>
-        <p style="margin-top:16px"><strong>CardDAV server</strong></p>
-        <p class="muted">Running at http://127.0.0.1:8765/addressbooks/novamail/ · 3 contacts</p>
+        <h2 class="h2" style="font-size:22px">Adressbuch</h2>
+        <p class="muted">Lokale Kontakte mit eingebettetem CardDAV für MFP/Fax-Sync und optionalem LDAP-Import.</p>
+        <p style="margin-top:16px"><strong>CardDAV-Server</strong></p>
+        <p class="muted">Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte</p>
         <p style="margin-top:16px"><strong>Fax Room</strong></p>
         <p class="muted">fax@office.local · +49 30 123456</p>
-        <div class="actions"><button class="btn">Done</button></div>
+        <div class="actions"><button class="btn">Fertig</button></div>
       </div>
     </div>
 

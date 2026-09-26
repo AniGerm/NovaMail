@@ -46,7 +46,7 @@ export function Dialog({
             className="text-sm text-[var(--nova-ink-muted)]"
             onClick={onClose}
           >
-            Close
+            ×
           </button>
         </div>
         {children}

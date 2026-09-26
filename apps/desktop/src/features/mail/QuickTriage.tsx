@@ -4,7 +4,9 @@ import { Button } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, MessageDetailDto, MessageSummaryDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
+import { useUiStore } from "@/shared/store/uiStore";
 
 interface QuickTriageProps {
   open: boolean;
@@ -13,11 +15,28 @@ interface QuickTriageProps {
   onChanged: () => void;
 }
 
+function plainPreview(htmlOrText: string): string {
+  return htmlOrText
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\{[^}]*\}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageProps) {
-  const queue = useMemo(
-    () => messages.filter((m) => m.unread || true),
-    [messages],
-  );
+  const t = useT();
+  const locale = useUiStore((s) => s.locale);
+  const queue = useMemo(() => messages, [messages]);
   const [index, setIndex] = useState(0);
   const [preview, setPreview] = useState<MessageDetailDto | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -65,11 +84,11 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
       onChanged();
       advance();
     } catch (err) {
-      setError((err as AppError).message || "Keep failed");
+      setError((err as AppError).message || t("keepFailed"));
     } finally {
       setBusy(false);
     }
-  }, [advance, busy, current, onChanged]);
+  }, [advance, busy, current, onChanged, t]);
 
   const handleDelete = useCallback(async () => {
     if (!current || busy) return;
@@ -80,34 +99,44 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
       onChanged();
       advance();
     } catch (err) {
-      setError((err as AppError).message || "Delete failed");
+      setError((err as AppError).message || t("deleteFailed"));
     } finally {
       setBusy(false);
     }
-  }, [advance, busy, current, onChanged]);
+  }, [advance, busy, current, onChanged, t]);
 
-  const shortcuts = useMemo(
-    () => ({
+  const shortcuts = useMemo(() => {
+    const map: Record<string, () => void> = {
+      // German-friendly + English keep/delete; V for preview (never Space / braces)
+      b: () => {
+        void handleKeep();
+      },
       k: () => {
         void handleKeep();
+      },
+      l: () => {
+        void handleDelete();
       },
       d: () => {
         void handleDelete();
       },
-      " ": () => setPreviewOpen((v) => !v),
+      v: () => setPreviewOpen((value) => !value),
       enter: () => setPreviewOpen(true),
       escape: () => {
         if (previewOpen) setPreviewOpen(false);
         else onClose();
       },
-    }),
-    [handleDelete, handleKeep, onClose, previewOpen],
-  );
+    };
+    return map;
+  }, [handleDelete, handleKeep, onClose, previewOpen]);
   useKeyboardShortcuts(open ? shortcuts : {});
 
   if (!open) return null;
 
   const done = !current;
+  const previewText = preview
+    ? plainPreview(preview.bodyText || preview.bodyHtml || current?.snippet || "")
+    : "";
 
   return (
     <div
@@ -123,52 +152,49 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
               id="triage-title"
               className="font-[family-name:var(--nova-font-display)] text-xl"
             >
-              Quick Sort
+              {t("triageTitle")}
             </h2>
-            <p className="text-sm text-[var(--nova-ink-muted)]">
-              Hotkeys: K keep · D delete · Space preview · Esc close
-            </p>
+            <p className="text-sm text-[var(--nova-ink-muted)]">{t("triageHotkeys")}</p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Close
+            {t("close")}
           </Button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {done ? (
-            <p className="text-[var(--nova-ink-muted)]">
-              Inbox sorted. No more messages in this queue.
-            </p>
+            <p className="text-[var(--nova-ink-muted)]">{t("triageDone")}</p>
           ) : (
             <>
               <p className="mb-2 text-xs uppercase tracking-wide text-[var(--nova-ink-muted)]">
                 {index + 1} / {queue.length}
               </p>
               <h3 className="font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
-                {current.subject || "(no subject)"}
+                {current.subject || t("noSubject")}
               </h3>
               <p className="mt-2 text-sm text-[var(--nova-ink-muted)]">
                 {displayName(current.from)} &lt;{current.from.email}&gt; ·{" "}
-                {formatRelative(current.date)}
+                {formatRelative(current.date, locale)}
               </p>
               <p className="mt-4 text-[15px] leading-7 text-[var(--nova-ink)]">
-                {current.snippet}
+                {plainPreview(current.snippet)}
               </p>
               {current.hasAttachments ? (
-                <p className="mt-3 text-sm text-[var(--nova-accent)]">Has attachments</p>
+                <p className="mt-3 text-sm text-[var(--nova-accent)]">
+                  {t("hasAttachments")}
+                </p>
               ) : null}
 
               {previewOpen ? (
                 <div className="mt-5 max-h-[40vh] overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_85%,var(--nova-bg))] p-4">
-                  {preview?.bodyHtml ? (
-                    <div
-                      className="prose text-[14px] leading-6"
-                      dangerouslySetInnerHTML={{ __html: preview.bodyHtml }}
-                    />
+                  {preview ? (
+                    <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
+                      {previewText || current.snippet}
+                    </div>
                   ) : (
-                    <pre className="whitespace-pre-wrap text-[14px] leading-6">
-                      {preview?.bodyText || current.snippet}
-                    </pre>
+                    <p className="text-sm text-[var(--nova-ink-muted)]">
+                      {t("loadingPreview")}
+                    </p>
                   )}
                 </div>
               ) : null}
@@ -187,15 +213,15 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
               type="button"
               variant="secondary"
               disabled={busy}
-              onClick={() => setPreviewOpen((v) => !v)}
+              onClick={() => setPreviewOpen((value) => !value)}
             >
-              {previewOpen ? "Hide preview" : "Preview"}
+              {previewOpen ? t("hidePreview") : t("preview")}
             </Button>
             <Button type="button" variant="secondary" disabled={busy} onClick={handleKeep}>
-              Keep in inbox
+              {t("keepInInbox")}
             </Button>
-            <Button type="button" disabled={busy} onClick={handleDelete}>
-              Delete
+            <Button type="button" variant="danger" disabled={busy} onClick={handleDelete}>
+              {t("delete")}
             </Button>
           </footer>
         ) : null}

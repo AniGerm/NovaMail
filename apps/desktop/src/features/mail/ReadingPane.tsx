@@ -5,7 +5,9 @@ import { Button, EmptyState, IconButton } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, MessageDetailDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
+import { useUiStore } from "@/shared/store/uiStore";
 
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
@@ -22,6 +24,8 @@ export function ReadingPane({
   onToggleStar,
   onUseSuggestedReply,
 }: ReadingPaneProps) {
+  const t = useT();
+  const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryProvider, setSummaryProvider] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -36,8 +40,8 @@ export function ReadingPane({
   if (!message) {
     return (
       <EmptyState
-        title="Select a message"
-        description="Choose a conversation from the unified inbox to read it here."
+        title={t("selectMessageTitle")}
+        description={t("selectMessageDescription")}
       />
     );
   }
@@ -57,7 +61,7 @@ export function ReadingPane({
       setSummary(result.summary);
       setSummaryProvider(result.provider);
     } catch (error) {
-      setAiError((error as AppError).message || "Summarize failed");
+      setAiError((error as AppError).message || t("summarizeFailed"));
     } finally {
       setAiBusy(false);
     }
@@ -71,7 +75,7 @@ export function ReadingPane({
       onUseSuggestedReply?.(result.suggestion);
       onReply();
     } catch (error) {
-      setAiError((error as AppError).message || "Suggest reply failed");
+      setAiError((error as AppError).message || t("suggestFailed"));
     } finally {
       setAiBusy(false);
     }
@@ -82,22 +86,22 @@ export function ReadingPane({
       const path = await api.attachmentsOpenPath(id);
       await openPath(path);
     } catch (error) {
-      setAiError((error as AppError).message || "Could not open attachment");
+      setAiError((error as AppError).message || t("openAttachmentFailed"));
     }
   }
 
   return (
     <article
-      aria-label="Reading pane"
+      aria-label={t("readingPane")}
       className="nova-fade-in flex h-full min-w-0 flex-col"
     >
       <header className="border-b border-[var(--nova-border)] px-8 py-5">
         <div className="mb-3 flex items-start justify-between gap-4">
           <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
-            {current.summary.subject || "(no subject)"}
+            {current.summary.subject || t("noSubject")}
           </h2>
           <div className="flex items-center gap-1">
-            <IconButton label="Star message" onClick={onToggleStar}>
+            <IconButton label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
                   current.summary.starred
@@ -106,10 +110,10 @@ export function ReadingPane({
                 }
               />
             </IconButton>
-            <IconButton label="Reply" onClick={onReply}>
+            <IconButton label={t("reply")} onClick={onReply}>
               <Reply />
             </IconButton>
-            <IconButton label="Forward" onClick={onForward}>
+            <IconButton label={t("forward")} onClick={onForward}>
               <Forward />
             </IconButton>
           </div>
@@ -120,16 +124,16 @@ export function ReadingPane({
           </span>
           <span>&lt;{current.summary.from.email}&gt;</span>
           <span>·</span>
-          <span>{formatRelative(current.summary.date)}</span>
+          <span>{formatRelative(current.summary.date, locale)}</span>
           <span>·</span>
           <span>{current.summary.accountEmail}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" onClick={onReply}>
-            Reply
+            {t("reply")}
           </Button>
           <Button size="sm" variant="secondary" onClick={onForward}>
-            Forward
+            {t("forward")}
           </Button>
           <Button
             size="sm"
@@ -138,7 +142,7 @@ export function ReadingPane({
             onClick={handleSummarize}
           >
             <Sparkles size={14} />
-            {aiBusy ? "Working…" : "Summarize"}
+            {aiBusy ? t("working") : t("summarize")}
           </Button>
           <Button
             size="sm"
@@ -146,14 +150,14 @@ export function ReadingPane({
             disabled={aiBusy}
             onClick={handleSuggestReply}
           >
-            Suggest reply
+            {t("suggestReply")}
           </Button>
         </div>
         {attachments.length > 0 ? (
           <div className="mt-4">
             <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
               <Paperclip size={14} />
-              Attachments
+              {t("attachments")}
             </p>
             <ul className="flex flex-wrap gap-2">
               {attachments.map((attachment) => (
@@ -183,7 +187,8 @@ export function ReadingPane({
         {summary ? (
           <div className="mt-4 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-4 py-3 text-sm text-[var(--nova-ink)]">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
-              Summary{summaryProvider ? ` · ${summaryProvider}` : ""}
+              {t("summary")}
+              {summaryProvider ? ` · ${summaryProvider}` : ""}
             </p>
             <p className="leading-6">{summary}</p>
           </div>

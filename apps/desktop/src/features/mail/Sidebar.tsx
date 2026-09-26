@@ -11,6 +11,7 @@ import {
 import { Badge, Button, IconButton } from "@novamail/ui";
 
 import type { AccountDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 
 interface SidebarProps {
   accounts: AccountDto[];
@@ -37,21 +38,22 @@ export function Sidebar({
   onOpenContacts,
   onOpenTriage,
 }: SidebarProps) {
+  const t = useT();
   return (
     <aside
-      aria-label="Navigation"
+      aria-label={t("navigation")}
       className="nova-slide-in flex h-full w-[240px] shrink-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_70%,transparent)] backdrop-blur-[var(--nova-blur)]"
     >
       <div className="px-4 pb-2 pt-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="font-[family-name:var(--nova-font-display)] text-xl tracking-tight">
-              NovaMail
+              {t("appName")}
             </p>
-            <p className="text-xs text-[var(--nova-ink-muted)]">Local-first mail</p>
+            <p className="text-xs text-[var(--nova-ink-muted)]">{t("tagline")}</p>
           </div>
           <IconButton
-            label={themeDark ? "Switch to light mode" : "Switch to dark mode"}
+            label={themeDark ? t("switchToLight") : t("switchToDark")}
             onClick={onToggleTheme}
           >
             {themeDark ? <Sun size={18} /> : <Moon size={18} />}
@@ -59,7 +61,7 @@ export function Sidebar({
         </div>
         <Button className="w-full" onClick={onCompose}>
           <PenSquare size={16} />
-          Compose
+          {t("compose")}
         </Button>
       </div>
 
@@ -69,7 +71,7 @@ export function Sidebar({
           className="flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
         >
           <Inbox size={18} />
-          Unified Inbox
+          {t("unifiedInbox")}
         </button>
         <button
           type="button"
@@ -77,7 +79,7 @@ export function Sidebar({
           onClick={onOpenTriage}
         >
           <Zap size={18} />
-          Quick Sort
+          {t("quickSort")}
         </button>
         <button
           type="button"
@@ -85,26 +87,26 @@ export function Sidebar({
           onClick={onOpenContacts}
         >
           <BookUser size={18} />
-          Contacts
+          {t("contacts")}
         </button>
 
         <div className="mt-6 px-2">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-ink-muted)]">
-              Accounts
+              {t("accounts")}
             </p>
             <button
               type="button"
               className="text-xs text-[var(--nova-accent)]"
               onClick={onAddAccount}
             >
-              Add
+              {t("add")}
             </button>
           </div>
           <ul className="space-y-1">
             {accounts.length === 0 ? (
               <li className="px-1 text-sm text-[var(--nova-ink-muted)]">
-                No accounts yet
+                {t("noAccountsYet")}
               </li>
             ) : (
               accounts.map((account) => (
@@ -130,9 +132,9 @@ export function Sidebar({
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onSync}>
             <RefreshCw size={16} />
-            Sync
+            {t("sync")}
           </Button>
-          <IconButton label="Settings" onClick={onOpenSettings}>
+          <IconButton label={t("settings")} onClick={onOpenSettings}>
             <Settings2 size={18} />
           </IconButton>
         </div>

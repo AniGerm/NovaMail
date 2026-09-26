@@ -10,6 +10,7 @@ import type {
   MailProvider,
   ProviderPreset,
 } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 
 interface AccountSetupProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface AccountSetupProps {
 }
 
 export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
+  const t = useT();
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [provider, setProvider] = useState<MailProvider>("generic");
   const [name, setName] = useState("");
@@ -44,7 +46,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
       .catch(() => {
         const fallback: ProviderPreset = {
           provider: "generic",
-          label: "Other IMAP / SMTP",
+          label: t("otherImapSmtp"),
           imapHost: "",
           imapPort: 993,
           imapTls: true,
@@ -56,7 +58,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
         setPresets([fallback]);
         applyPreset(fallback);
       });
-  }, [open]);
+  }, [open, t]);
 
   const selected = useMemo(
     () => presets.find((p) => p.provider === provider),
@@ -91,7 +93,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
     };
     const parsed = addAccountPasswordSchema.safeParse(request);
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Invalid account details");
+      setError(parsed.error.issues[0]?.message ?? t("invalidAccount"));
       setBusy(false);
       return;
     }
@@ -102,7 +104,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
       setPassword("");
     } catch (err) {
       const appError = err as AppError;
-      setError(appError.message || "Failed to add account");
+      setError(appError.message || t("failedAddAccount"));
     } finally {
       setBusy(false);
     }
@@ -134,7 +136,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
       onCreated();
       onClose();
     } catch (err) {
-      setError((err as AppError).message || "OAuth sign-in failed");
+      setError((err as AppError).message || t("oauthFailed"));
     } finally {
       setBusy(false);
     }
@@ -157,15 +159,15 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           id="account-setup-title"
           className="font-[family-name:var(--nova-font-display)] text-2xl"
         >
-          Add account
+          {t("addAccountTitle")}
         </h2>
         <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">
-          Connect IMAP/SMTP. Passwords are stored in the system keyring.
+          {t("addAccountDescription")}
         </p>
 
         <div className="mt-5 grid gap-3">
           <label className="grid gap-1 text-sm">
-            <span>Provider</span>
+            <span>{t("provider")}</span>
             <select
               className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
               value={provider}
@@ -183,12 +185,12 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           </label>
 
           <label className="grid gap-1 text-sm">
-            <span>Display name</span>
+            <span>{t("displayName")}</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
 
           <label className="grid gap-1 text-sm">
-            <span>Email</span>
+            <span>{t("email")}</span>
             <Input
               type="email"
               required
@@ -199,7 +201,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
 
           {selected?.authType !== "oauth2" ? (
             <label className="grid gap-1 text-sm">
-              <span>Password / app password</span>
+              <span>{t("passwordAppPassword")}</span>
               <Input
                 type="password"
                 required
@@ -211,16 +213,13 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
 
           {provider === "icloud" ? (
             <p className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 py-2 text-sm text-[var(--nova-ink)]">
-              iCloud requires an{" "}
-              <strong>app-specific password</strong> from appleid.apple.com
-              (Sign-In and Security → App-Specific Passwords). Use your full
-              iCloud email as the username.
+              {t("icloudHint")}
             </p>
           ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1 text-sm">
-              <span>IMAP host</span>
+              <span>{t("imapHost")}</span>
               <Input
                 required
                 value={imapHost}
@@ -228,7 +227,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span>IMAP port</span>
+              <span>{t("imapPort")}</span>
               <Input
                 type="number"
                 required
@@ -237,7 +236,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span>SMTP host</span>
+              <span>{t("smtpHost")}</span>
               <Input
                 required
                 value={smtpHost}
@@ -245,7 +244,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span>SMTP port</span>
+              <span>{t("smtpPort")}</span>
               <Input
                 type="number"
                 required
@@ -262,7 +261,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
                 checked={imapTls}
                 onChange={(e) => setImapTls(e.target.checked)}
               />
-              IMAP TLS
+              {t("imapTls")}
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -270,7 +269,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
                 checked={smtpTls}
                 onChange={(e) => setSmtpTls(e.target.checked)}
               />
-              SMTP TLS
+              {t("smtpTls")}
             </label>
           </div>
 
@@ -283,15 +282,15 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
+            {t("cancel")}
           </Button>
           {selected?.authType === "oauth2" ? (
             <Button type="button" disabled={busy || !email} onClick={handleOAuth}>
-              {busy ? "Waiting for browser…" : "Sign in with OAuth"}
+              {busy ? t("waitingBrowser") : t("signInOAuth")}
             </Button>
           ) : (
             <Button type="submit" disabled={busy}>
-              {busy ? "Connecting…" : "Connect & sync"}
+              {busy ? t("connecting") : t("connectSync")}
             </Button>
           )}
         </div>

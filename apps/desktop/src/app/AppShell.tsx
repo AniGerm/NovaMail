@@ -13,9 +13,11 @@ import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
 import type { AccountDto, AppError, MessageDetailDto } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 
 export function AppShell() {
+  const t = useT();
   const queryClient = useQueryClient();
   const {
     selectedMessageId,
@@ -78,13 +80,13 @@ export function AppShell() {
     api
       .onSyncProgress((event) => {
         if (event.error) {
-          setSyncStatus(`Sync error in ${event.mailboxName}: ${event.error}`);
+          setSyncStatus(`Sync-Fehler in ${event.mailboxName}: ${event.error}`);
           return;
         }
         setSyncStatus(
           event.done
-            ? `Synced ${event.mailboxName}`
-            : `Syncing ${event.mailboxName}… ${event.fetched}`,
+            ? `${event.mailboxName} synchronisiert`
+            : `Synchronisiere ${event.mailboxName}… ${event.fetched}`,
         );
         if (event.done) {
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -107,19 +109,19 @@ export function AppShell() {
 
   const handleSync = useCallback(async () => {
     if (!desktop) {
-      setSyncStatus("Start NovaMail with pnpm dev to sync mail");
+      setSyncStatus(t("syncStartHint"));
       return;
     }
-    setSyncStatus("Starting sync…");
+    setSyncStatus(t("syncStarting"));
     try {
       const results = await api.mailSync(null);
       const total = results.reduce((sum, item) => sum + item.messagesFetched, 0);
-      setSyncStatus(`Synced ${total} messages`);
+      setSyncStatus(t("syncedMessages", { count: total }));
       await refresh();
     } catch (error) {
       setSyncStatus((error as AppError).message);
     }
-  }, [desktop, refresh, setSyncStatus]);
+  }, [desktop, refresh, setSyncStatus, t]);
 
   const handleToggleStar = useCallback(async () => {
     if (!messageQuery.data || !desktop) return;
@@ -197,7 +199,10 @@ export function AppShell() {
       e: () => {
         void handleArchive();
       },
-      "#": () => {
+      backspace: () => {
+        void handleDelete();
+      },
+      delete: () => {
         void handleDelete();
       },
       t: () => setTriageOpen(true),
@@ -221,13 +226,13 @@ export function AppShell() {
       setTriageOpen,
     ],
   );
-  useKeyboardShortcuts(shortcuts);
+  useKeyboardShortcuts(triageOpen ? {} : shortcuts);
 
   const commandItems = useMemo(
     () => [
       {
         id: "compose",
-        label: "Compose message",
+        label: t("cmdCompose"),
         hint: "C",
         onSelect: () => {
           setReplyTo(null);
@@ -238,18 +243,18 @@ export function AppShell() {
       },
       {
         id: "triage",
-        label: "Quick Sort inbox",
+        label: t("cmdTriage"),
         hint: "T",
         onSelect: () => setTriageOpen(true),
       },
       {
         id: "contacts",
-        label: "Open address book",
+        label: t("cmdContacts"),
         onSelect: () => setContactsOpen(true),
       },
       {
         id: "sync",
-        label: "Sync all accounts",
+        label: t("cmdSync"),
         hint: "",
         onSelect: () => {
           void handleSync();
@@ -257,18 +262,18 @@ export function AppShell() {
       },
       {
         id: "add-account",
-        label: "Add account",
+        label: t("cmdAddAccount"),
         onSelect: () => setAccountSetupOpen(true),
       },
       {
         id: "settings",
-        label: "Open settings",
+        label: t("cmdSettings"),
         hint: ",",
         onSelect: () => setSettingsOpen(true),
       },
       {
         id: "archive",
-        label: "Archive selected message",
+        label: t("cmdArchive"),
         hint: "E",
         onSelect: () => {
           void handleArchive();
@@ -276,15 +281,15 @@ export function AppShell() {
       },
       {
         id: "delete",
-        label: "Delete selected message",
-        hint: "#",
+        label: t("cmdDelete"),
+        hint: "⌫",
         onSelect: () => {
           void handleDelete();
         },
       },
       {
         id: "forward",
-        label: "Forward selected message",
+        label: t("cmdForward"),
         hint: "F",
         onSelect: () => {
           void handleForward();
@@ -292,7 +297,7 @@ export function AppShell() {
       },
       {
         id: "theme",
-        label: themeDark ? "Switch to light mode" : "Switch to dark mode",
+        label: themeDark ? t("switchToLight") : t("switchToDark"),
         onSelect: () => setTheme(themeDark ? "light" : "dark"),
       },
     ],
@@ -307,6 +312,7 @@ export function AppShell() {
       setSettingsOpen,
       setTheme,
       setTriageOpen,
+      t,
       themeDark,
     ],
   );
@@ -314,8 +320,8 @@ export function AppShell() {
   if (!desktop) {
     return (
       <EmptyState
-        title="NovaMail"
-        description="The mail engine runs inside the Tauri desktop shell. Start it with pnpm dev from the repository root."
+        title={t("shellOnlyTitle")}
+        description={t("shellOnlyDescription")}
       />
     );
   }
@@ -326,15 +332,15 @@ export function AppShell() {
       data-density={density}
     >
       <VisuallyHidden>
-        <h1>NovaMail unified inbox</h1>
+        <h1>{t("unifiedInbox")}</h1>
       </VisuallyHidden>
       <div className="flex items-center gap-3 border-b border-[var(--nova-border)] px-4 py-3">
         <label className="sr-only" htmlFor="global-search">
-          Search mail
+          {t("searchPlaceholder")}
         </label>
         <Input
           id="global-search"
-          placeholder="Search unified inbox"
+          placeholder={t("searchPlaceholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-xl"
@@ -344,7 +350,7 @@ export function AppShell() {
           className="text-xs text-[var(--nova-ink-muted)]"
           onClick={() => setCommandPaletteOpen(true)}
         >
-          Ctrl/Cmd+K
+          {t("commandHint")}
         </button>
       </div>
 
@@ -369,15 +375,15 @@ export function AppShell() {
 
         {accounts.length === 0 ? (
           <EmptyState
-            title="Welcome to NovaMail"
-            description="Add your first account to sync a unified inbox across Gmail, Microsoft 365, Yahoo, iCloud, Proton Bridge, or any IMAP server."
+            title={t("welcomeTitle")}
+            description={t("welcomeDescription")}
             action={
               <button
                 type="button"
                 className="mt-2 text-[var(--nova-accent)]"
                 onClick={() => setAccountSetupOpen(true)}
               >
-                Add account
+                {t("addAccount")}
               </button>
             }
           />
@@ -464,9 +470,10 @@ export function AppShell() {
 }
 
 function AccountCountAnnouncer({ accounts }: { accounts: AccountDto[] }) {
+  const t = useT();
   return (
     <VisuallyHidden>
-      <p>{accounts.length} accounts configured</p>
+      <p>{t("accountsConfigured", { count: accounts.length })}</p>
     </VisuallyHidden>
   );
 }

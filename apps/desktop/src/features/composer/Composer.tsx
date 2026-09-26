@@ -8,6 +8,7 @@ import type {
   MessageDetailDto,
   OutgoingAttachment,
 } from "@/shared/api/types";
+import { useT } from "@/shared/i18n/useT";
 
 interface ComposerProps {
   open: boolean;
@@ -28,6 +29,7 @@ export function Composer({
   onClose,
   onSent,
 }: ComposerProps) {
+  const t = useT();
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
@@ -85,7 +87,7 @@ export function Composer({
   async function handleSend(event: React.FormEvent) {
     event.preventDefault();
     if (!accountId) {
-      setError("Add an account before sending.");
+      setError(t("addAccountBeforeSend"));
       return;
     }
     setBusy(true);
@@ -114,7 +116,7 @@ export function Composer({
       setBody("");
       setAttachments([]);
     } catch (err) {
-      setError((err as AppError).message || "Send failed");
+      setError((err as AppError).message || t("sendFailed"));
     } finally {
       setBusy(false);
     }
@@ -136,16 +138,16 @@ export function Composer({
             id="composer-title"
             className="font-[family-name:var(--nova-font-display)] text-xl"
           >
-            {replyTo ? "Reply" : "New message"}
+            {replyTo ? t("reply") : t("newMessage")}
           </h2>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Close
+            {t("close")}
           </Button>
         </header>
 
         <div className="grid gap-3 overflow-y-auto px-5 py-4">
           <label className="grid gap-1 text-sm">
-            <span>From</span>
+            <span>{t("from")}</span>
             <select
               className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
               value={accountId}
@@ -159,11 +161,11 @@ export function Composer({
             </select>
           </label>
           <label className="grid gap-1 text-sm">
-            <span>To</span>
+            <span>{t("to")}</span>
             <Input required value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
           <label className="grid gap-1 text-sm">
-            <span>Subject</span>
+            <span>{t("subject")}</span>
             <Input
               required
               value={subject}
@@ -171,7 +173,7 @@ export function Composer({
             />
           </label>
           <label className="grid gap-1 text-sm">
-            <span>Message</span>
+            <span>{t("message")}</span>
             <textarea
               required
               value={body}
@@ -180,7 +182,7 @@ export function Composer({
             />
           </label>
           <label className="grid gap-1 text-sm">
-            <span>Attachments</span>
+            <span>{t("attachments")}</span>
             <input
               type="file"
               multiple
@@ -202,7 +204,7 @@ export function Composer({
                         )
                       }
                     >
-                      Remove
+                      {t("remove")}
                     </button>
                   </li>
                 ))}
@@ -218,10 +220,10 @@ export function Composer({
 
         <footer className="flex justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Discard
+            {t("discard")}
           </Button>
           <Button type="submit" disabled={busy}>
-            {busy ? "Sending…" : "Send"}
+            {busy ? t("sending") : t("send")}
           </Button>
         </footer>
       </form>
