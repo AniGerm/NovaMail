@@ -86,9 +86,9 @@
         padding: 6px 10px; font-size: 13px; background: var(--nova-surface);
       }
       .overlay {
-        position: fixed; inset: 0; background: rgba(15, 23, 42, 0.48);
+        position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
         display: none; align-items: center; justify-content: center; padding: 24px;
-        backdrop-filter: blur(4px);
+        backdrop-filter: blur(8px);
       }
       .overlay.show { display: flex; }
       .card {
@@ -99,8 +99,66 @@
         box-shadow: var(--nova-shadow);
         padding: 20px;
       }
+      .triage-shell {
+        width: min(760px, 100%);
+        overflow: hidden;
+        border: 1px solid var(--nova-border);
+        border-radius: var(--nova-radius-lg);
+        box-shadow: var(--nova-shadow);
+        background: linear-gradient(180deg, color-mix(in srgb, var(--nova-accent-soft) 55%, var(--nova-surface)), var(--nova-surface) 38%);
+      }
+      .triage-progress { height: 6px; background: #e8eef6; }
+      .triage-progress > span { display: block; height: 100%; width: 12%; background: var(--nova-accent); }
+      .triage-head { display: flex; justify-content: space-between; gap: 16px; padding: 20px 24px 12px; }
+      .triage-icon {
+        width: 44px; height: 44px; border-radius: var(--nova-radius-md);
+        background: var(--nova-accent); color: #fff;
+        display: grid; place-items: center; font-size: 18px; font-weight: 700;
+      }
+      .triage-body { padding: 0 24px 8px; }
+      .triage-panel {
+        border: 1px solid var(--nova-border);
+        border-radius: var(--nova-radius-md);
+        background: var(--nova-surface);
+        overflow: hidden;
+      }
+      .triage-meta {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--nova-border);
+        background: color-mix(in srgb, var(--nova-accent-soft) 40%, var(--nova-surface));
+      }
+      .pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600;
+      }
+      .pill.accent { background: var(--nova-accent); color: #fff; }
+      .pill.soft { background: var(--nova-surface); border: 1px solid var(--nova-border); color: var(--nova-accent); }
+      .triage-content { padding: 20px; }
+      .snippet-box {
+        margin-top: 18px; padding: 16px;
+        border: 1px solid var(--nova-border);
+        border-radius: var(--nova-radius-md);
+        background: color-mix(in srgb, var(--nova-bg) 70%, var(--nova-surface));
+        line-height: 1.7; font-size: 15px;
+      }
+      .triage-actions {
+        display: grid;
+        grid-template-columns: auto 1fr 1fr;
+        gap: 10px;
+        padding: 16px 24px 20px;
+        border-top: 1px solid var(--nova-border);
+        background: color-mix(in srgb, var(--nova-surface) 92%, var(--nova-bg));
+      }
+      .triage-actions .btn { height: 48px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+      .kbd {
+        margin-left: 4px; border-radius: 4px; padding: 2px 6px; font-size: 11px;
+        border: 1px solid color-mix(in srgb, #fff 30%, transparent);
+        background: color-mix(in srgb, #fff 15%, transparent);
+      }
+      .btn.secondary .kbd { border-color: var(--nova-border); background: var(--nova-surface); color: var(--nova-ink-muted); }
       .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
-      .btn.secondary { background: var(--nova-surface); color: var(--nova-ink); border: 1px solid var(--nova-border); padding: 0 14px; }
+      .btn.secondary { background: var(--nova-surface-2, #eef3f9); color: var(--nova-ink); border: 1px solid var(--nova-border); padding: 0 14px; }
       .btn.danger { background: var(--nova-danger); }
       .topbar {
         position: absolute; left: 240px; right: 0; top: 0; height: 56px;
@@ -180,20 +238,41 @@
     </div>
 
     <div class="overlay" id="triage">
-      <div class="card">
-        <h2 class="h2" style="font-size:22px">Schnellsortierung</h2>
-        <p class="muted">Tasten: B behalten · L löschen · V Vorschau · Esc schließen</p>
-        <p class="muted" style="margin-top:18px">1 / 12</p>
-        <h3 class="h2" style="font-size:26px;margin-top:4px">Fax-Bestätigung: +49 30…</h3>
-        <p class="muted">MFP Empfang &lt;mfp@buero.local&gt; · vor 1 Stunde</p>
-        <p style="margin-top:16px;line-height:1.7">
-          Zustellbestätigung für ein gescanntes Dokument. Behalten, wenn du den Beleg noch brauchst —
-          sonst einfach löschen.
-        </p>
-        <div class="actions">
-          <button class="btn secondary">Vorschau</button>
-          <button class="btn secondary">Im Posteingang behalten</button>
-          <button class="btn danger">Löschen</button>
+      <div class="triage-shell">
+        <div class="triage-progress"><span></span></div>
+        <div class="triage-head">
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <div class="triage-icon">QS</div>
+            <div>
+              <h2 class="h2" style="font-size:24px;margin:0">Schnellsortierung</h2>
+              <p class="muted" style="margin:6px 0 0">Tasten: B behalten · L löschen · V Vorschau · Esc schließen</p>
+            </div>
+          </div>
+          <span class="muted" style="font-size:18px">×</span>
+        </div>
+        <div class="triage-body">
+          <div class="triage-panel">
+            <div class="triage-meta">
+              <span class="pill accent">1 / 12</span>
+              <span class="pill soft">Mit Anhängen</span>
+            </div>
+            <div class="triage-content">
+              <h3 class="h2" style="font-size:26px;margin:0">Fax-Bestätigung: +49 30…</h3>
+              <p class="muted" style="margin-top:10px">
+                <strong style="color:var(--nova-ink)">MFP Empfang</strong>
+                &lt;mfp@buero.local&gt; · vor 1 Stunde
+              </p>
+              <div class="snippet-box">
+                Zustellbestätigung für ein gescanntes Dokument. Behalten, wenn du den Beleg noch brauchst —
+                sonst einfach löschen.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="triage-actions">
+          <button class="btn secondary">Vorschau <span class="kbd">V</span></button>
+          <button class="btn">Behalten <span class="kbd">B</span></button>
+          <button class="btn danger">Löschen <span class="kbd">L</span></button>
         </div>
       </div>
     </div>
