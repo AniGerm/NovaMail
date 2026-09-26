@@ -139,3 +139,15 @@ export interface SendMessageRequest {
   inReplyTo?: string | null;
   references: string[];
 }
+
+export interface SummarizeMessageResponse {
+  messageId: string;
+  summary: string;
+  provider: string;
+}
+
+export interface SuggestReplyMessageResponse {
+  messageId: string;
+  suggestion: string;
+  provider: string;
+}

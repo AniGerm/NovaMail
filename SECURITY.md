@@ -8,8 +8,7 @@
 
 ## Reporting
 
-Email security issues to `security@novamail.app` (placeholder) or open a private GitHub security advisory.
-
+Report vulnerabilities via GitHub Security Advisories on the NovaMail repository.
 Do not file public issues for credential or crypto vulnerabilities.
 
 ## Hardening checklist

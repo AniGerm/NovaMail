@@ -1,10 +1,10 @@
 //! OAuth2 helpers for Gmail / Microsoft / Yahoo.
 //!
-//! Client IDs are injected at runtime via environment or settings so the
-//! open-source tree never ships secrets. The UI opens the authorize URL in
-//! the system browser; the desktop app receives the redirect via a localhost
-//! callback (implemented in the Tauri shell).
+//! Client IDs are injected at runtime via environment so the open-source tree
+//! never ships secrets. Authorize URLs open in the system browser; token
+//! exchange uses the authorization code from the localhost redirect.
 
+use novamail_crypto::OAuthTokens;
 use novamail_ipc::MailProvider;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,14 @@ pub struct OAuthConfig {
     pub scopes: Vec<String>,
     pub authorize_url: String,
     pub token_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthTokenResponse {
+    pub tokens: OAuthTokens,
+    pub token_type: Option<String>,
+    pub scope: Option<String>,
 }
 
 impl OAuthConfig {
@@ -69,8 +77,8 @@ impl OAuthConfig {
                 "OAuth client_id is not configured. Set NOVAMAIL_*_CLIENT_ID.".into(),
             ));
         }
-        let mut url = url::Url::parse(&self.authorize_url)
-            .map_err(|e| MailError::OAuth(e.to_string()))?;
+        let mut url =
+            url::Url::parse(&self.authorize_url).map_err(|e| MailError::OAuth(e.to_string()))?;
         {
             let mut qp = url.query_pairs_mut();
             qp.append_pair("client_id", &self.client_id);
@@ -82,6 +90,130 @@ impl OAuthConfig {
             qp.append_pair("scope", &self.scopes.join(" "));
         }
         Ok(url.into())
+    }
+
+    pub async fn exchange_code(&self, code: &str) -> MailResult<OAuthTokenResponse> {
+        if self.client_id.is_empty() {
+            return Err(MailError::OAuth(
+                "OAuth client_id is not configured. Set NOVAMAIL_*_CLIENT_ID.".into(),
+            ));
+        }
+        if code.trim().is_empty() {
+            return Err(MailError::OAuth("authorization code is empty".into()));
+        }
+
+        let client = reqwest::Client::new();
+        let mut form = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("code", code.to_string()),
+            ("redirect_uri", self.redirect_uri.clone()),
+            ("client_id", self.client_id.clone()),
+        ];
+        if let Some(secret) = &self.client_secret {
+            form.push(("client_secret", secret.clone()));
+        }
+
+        let response = client
+            .post(&self.token_url)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| MailError::OAuth(format!("token request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MailError::OAuth(format!(
+                "token endpoint returned {status}: {body}"
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenJson {
+            access_token: String,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            token_type: Option<String>,
+            scope: Option<String>,
+        }
+
+        let parsed = response
+            .json::<TokenJson>()
+            .await
+            .map_err(|e| MailError::OAuth(format!("invalid token JSON: {e}")))?;
+
+        let expires_at = parsed
+            .expires_in
+            .map(|seconds| chrono::Utc::now().timestamp() + seconds);
+
+        Ok(OAuthTokenResponse {
+            tokens: OAuthTokens {
+                access_token: parsed.access_token,
+                refresh_token: parsed.refresh_token,
+                expires_at,
+            },
+            token_type: parsed.token_type,
+            scope: parsed.scope,
+        })
+    }
+
+    pub async fn refresh_tokens(&self, refresh_token: &str) -> MailResult<OAuthTokenResponse> {
+        if refresh_token.trim().is_empty() {
+            return Err(MailError::OAuth("refresh_token is empty".into()));
+        }
+
+        let client = reqwest::Client::new();
+        let mut form = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token.to_string()),
+            ("client_id", self.client_id.clone()),
+        ];
+        if let Some(secret) = &self.client_secret {
+            form.push(("client_secret", secret.clone()));
+        }
+
+        let response = client
+            .post(&self.token_url)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| MailError::OAuth(format!("refresh request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MailError::OAuth(format!(
+                "refresh endpoint returned {status}: {body}"
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenJson {
+            access_token: String,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+            token_type: Option<String>,
+            scope: Option<String>,
+        }
+
+        let parsed = response
+            .json::<TokenJson>()
+            .await
+            .map_err(|e| MailError::OAuth(format!("invalid refresh JSON: {e}")))?;
+
+        let expires_at = parsed
+            .expires_in
+            .map(|seconds| chrono::Utc::now().timestamp() + seconds);
+
+        Ok(OAuthTokenResponse {
+            tokens: OAuthTokens {
+                access_token: parsed.access_token,
+                refresh_token: parsed.refresh_token.or_else(|| Some(refresh_token.to_string())),
+                expires_at,
+            },
+            token_type: parsed.token_type,
+            scope: parsed.scope,
+        })
     }
 }
 
@@ -103,5 +235,14 @@ mod tests {
         std::env::remove_var("NOVAMAIL_GOOGLE_CLIENT_ID");
         let cfg = OAuthConfig::for_provider(&MailProvider::Gmail).unwrap();
         assert!(cfg.authorize_url_with_state("abc").is_err());
+    }
+
+    #[tokio::test]
+    async fn exchange_rejects_empty_code() {
+        std::env::set_var("NOVAMAIL_GOOGLE_CLIENT_ID", "test-client");
+        let cfg = OAuthConfig::for_provider(&MailProvider::Gmail).unwrap();
+        let err = cfg.exchange_code("").await.unwrap_err();
+        assert!(err.to_string().contains("empty"));
+        std::env::remove_var("NOVAMAIL_GOOGLE_CLIENT_ID");
     }
 }

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Application services and use-cases for NovaMail"
 
 [dependencies]
+ammonia = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 novamail-ai = { workspace = true }

@@ -2,10 +2,15 @@
 
 ## Principles
 
-- Prefer small, reviewable PRs
-- Keep secrets out of the repo
+Follow [`docs/ENGINEERING.md`](docs/ENGINEERING.md) and [ADR 0004](docs/adr/0004-engineering-standards.md):
+
+- No placeholders in product/IPC paths
+- Missing features get a first real implementation
+- No mock mail data in the UI
+- Prefer improving existing modules over creating duplicates
 - Document architectural decisions in `docs/adr/`
 - Add tests for db/mail parsing and pure domain logic
+- Keep secrets out of the repo
 
 ## Development
 

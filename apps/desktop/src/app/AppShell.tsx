@@ -30,6 +30,7 @@ export function AppShell() {
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
+  const [composerBody, setComposerBody] = useState("");
   const desktop = isDesktopShell();
 
   const accountsQuery = useQuery({
@@ -126,11 +127,13 @@ export function AppShell() {
     () => ({
       c: () => {
         setReplyTo(null);
+        setComposerBody("");
         setComposerOpen(true);
       },
       r: () => {
         if (messageQuery.data) {
           setReplyTo(messageQuery.data);
+          setComposerBody("");
           setComposerOpen(true);
         }
       },
@@ -220,6 +223,12 @@ export function AppShell() {
                   }
                 }}
                 onToggleStar={handleToggleStar}
+                onUseSuggestedReply={(suggestion) => {
+                  setComposerBody(suggestion);
+                  if (messageQuery.data) {
+                    setReplyTo(messageQuery.data);
+                  }
+                }}
               />
             </div>
           </>
@@ -238,7 +247,11 @@ export function AppShell() {
         open={composerOpen}
         accounts={accounts}
         replyTo={replyTo}
-        onClose={() => setComposerOpen(false)}
+        initialBody={composerBody}
+        onClose={() => {
+          setComposerOpen(false);
+          setComposerBody("");
+        }}
         onSent={refresh}
       />
     </div>

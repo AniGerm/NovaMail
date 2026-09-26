@@ -5,13 +5,17 @@
 //! documents the public application boundary.
 
 mod account;
+mod ai;
 mod error;
 mod mail;
+mod oauth;
 mod search;
 mod sync;
 
 pub use account::*;
+pub use ai::*;
 pub use error::*;
 pub use mail::*;
+pub use oauth::*;
 pub use search::*;
 pub use sync::*;

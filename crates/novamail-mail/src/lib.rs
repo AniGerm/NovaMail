@@ -13,6 +13,6 @@ mod tls;
 
 pub use error::{MailError, MailResult};
 pub use imap_client::ImapSession;
-pub use oauth::{OAuthConfig, OAuthFlow};
+pub use oauth::{OAuthConfig, OAuthFlow, OAuthTokenResponse};
 pub use smtp_client::SmtpClient;
 pub use sync::{SyncEngine, SyncReport};

@@ -12,6 +12,8 @@ import type {
   ProviderPreset,
   SendMessageRequest,
   SetFlagsRequest,
+  SuggestReplyMessageResponse,
+  SummarizeMessageResponse,
   SyncProgressEvent,
   SyncResult,
 } from "./types";
@@ -54,6 +56,14 @@ export const api = {
     call<void>("messages_send", { request }),
   mailSync: (accountId?: string | null) =>
     call<SyncResult[]>("mail_sync", { request: { accountId: accountId ?? null } }),
+  aiSummarizeMessage: (messageId: string) =>
+    call<SummarizeMessageResponse>("ai_summarize_message", {
+      request: { messageId },
+    }),
+  aiSuggestReply: (messageId: string) =>
+    call<SuggestReplyMessageResponse>("ai_suggest_reply", {
+      request: { messageId },
+    }),
   onSyncProgress: async (
     handler: (event: SyncProgressEvent) => void,
   ): Promise<UnlistenFn> => {

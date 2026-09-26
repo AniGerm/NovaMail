@@ -1,22 +1,31 @@
+use std::sync::Arc;
+
+use novamail_ai::{
+    AiProvider, NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest,
+    SummarizeRequest,
+};
 use novamail_crypto::{AccountCredentials, OAuthTokens, SecretStore};
 use novamail_db::{AccountRecord, Database};
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, ListMessagesRequest,
-    ListMessagesResponse, MailboxDto, MessageDetailDto, ProviderPreset, SearchRequest,
-    SearchResponse, SendMessageRequest, SetFlagsRequest, SyncProgressEvent, SyncRequest,
-    SyncResult,
+    ListMessagesResponse, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
+    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, SearchRequest, SearchResponse,
+    SendMessageRequest, SetFlagsRequest, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
 };
-use novamail_mail::{SmtpClient, SyncEngine};
+use novamail_mail::{OAuthConfig, SmtpClient, SyncEngine};
 use novamail_search::SearchService;
 use uuid::Uuid;
 
 use crate::paths::AppPaths;
+use crate::sanitize::sanitize_html;
 use crate::{CoreError, CoreResult};
 
 pub struct AppState {
     pub paths: AppPaths,
     pub db: Database,
     pub secrets: SecretStore,
+    ai: Arc<dyn AiProvider>,
 }
 
 impl AppState {
@@ -29,7 +38,18 @@ impl AppState {
             paths,
             db,
             secrets,
+            ai: Self::select_ai_provider(),
         })
+    }
+
+    fn select_ai_provider() -> Arc<dyn AiProvider> {
+        // Primary provider talks to local Ollama. Per-request helpers fall back
+        // to NullAiProvider when the daemon is unreachable.
+        Arc::new(OllamaProvider::default())
+    }
+
+    fn offline_ai() -> NullAiProvider {
+        NullAiProvider
     }
 
     pub fn provider_presets(&self) -> Vec<ProviderPreset> {
@@ -148,7 +168,16 @@ impl AppState {
     }
 
     pub fn get_message(&self, message_id: Uuid) -> CoreResult<MessageDetailDto> {
-        Ok(self.db.get_message(message_id)?)
+        let mut detail = self.db.get_message(message_id)?;
+        if let Some(html) = detail.body_html.take() {
+            let cleaned = sanitize_html(&html);
+            detail.body_html = if cleaned.trim().is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            };
+        }
+        Ok(detail)
     }
 
     pub fn set_flags(&self, request: SetFlagsRequest) -> CoreResult<()> {
@@ -203,8 +232,103 @@ impl AppState {
     }
 
     pub fn oauth_authorize_url(&self, provider: novamail_ipc::MailProvider) -> CoreResult<String> {
-        let config = novamail_mail::OAuthConfig::for_provider(&provider)?;
+        let config = OAuthConfig::for_provider(&provider)?;
         let state = novamail_mail::OAuthFlow::new_state();
         Ok(config.authorize_url_with_state(&state)?)
     }
+
+    pub async fn oauth_exchange_code(
+        &self,
+        request: OAuthExchangeRequest,
+    ) -> CoreResult<OAuthExchangeResponse> {
+        let config = OAuthConfig::for_provider(&request.provider)?;
+        let response = config.exchange_code(&request.code).await?;
+        Ok(OAuthExchangeResponse {
+            tokens: OAuthTokensDto {
+                access_token: response.tokens.access_token,
+                refresh_token: response.tokens.refresh_token,
+                expires_at: response.tokens.expires_at,
+            },
+            token_type: response.token_type,
+            scope: response.scope,
+        })
+    }
+
+    pub async fn summarize_message(
+        &self,
+        request: SummarizeMessageRequest,
+    ) -> CoreResult<SummarizeMessageResponse> {
+        let detail = self.get_message(request.message_id)?;
+        let body = detail
+            .body_text
+            .clone()
+            .unwrap_or_else(|| detail.summary.snippet.clone());
+        let result = match self
+            .ai
+            .summarize(SummarizeRequest {
+                subject: detail.summary.subject.clone(),
+                body_text: body.clone(),
+            })
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                tracing::warn!(error = %err, "primary AI provider failed; using offline fallback");
+                Self::offline_ai()
+                    .summarize(SummarizeRequest {
+                        subject: detail.summary.subject,
+                        body_text: body,
+                    })
+                    .await?
+            }
+        };
+        Ok(SummarizeMessageResponse {
+            message_id: request.message_id,
+            summary: result.summary,
+            provider: result.provider,
+        })
+    }
+
+    pub async fn suggest_reply_message(
+        &self,
+        request: SuggestReplyMessageRequest,
+    ) -> CoreResult<SuggestReplyMessageResponse> {
+        let detail = self.get_message(request.message_id)?;
+        let body = detail
+            .body_text
+            .clone()
+            .unwrap_or_else(|| detail.summary.snippet.clone());
+        let ai_request = SuggestReplyRequest {
+            subject: detail.summary.subject.clone(),
+            body_text: body,
+            from_email: detail.summary.from.email.clone(),
+        };
+        let result = match self.ai.suggest_reply(ai_request.clone()).await {
+            Ok(result) => result,
+            Err(err) => {
+                tracing::warn!(error = %err, "primary AI provider failed; using offline fallback");
+                Self::offline_ai().suggest_reply(ai_request).await?
+            }
+        };
+        Ok(SuggestReplyMessageResponse {
+            message_id: request.message_id,
+            suggestion: result.suggestion,
+            provider: result.provider,
+        })
+    }
+
+    pub async fn prioritize_message(&self, message_id: Uuid) -> CoreResult<(f32, String, String)> {
+        let detail = self.get_message(message_id)?;
+        let request = PrioritizeRequest {
+            subject: detail.summary.subject,
+            snippet: detail.summary.snippet,
+            from_email: detail.summary.from.email,
+        };
+        let result = match self.ai.prioritize(request.clone()).await {
+            Ok(result) => result,
+            Err(_) => Self::offline_ai().prioritize(request).await?,
+        };
+        Ok((result.score, result.rationale, result.provider))
+    }
 }
+

@@ -13,6 +13,8 @@ pub enum CoreError {
     Crypto(#[from] novamail_crypto::CryptoError),
     #[error(transparent)]
     Search(#[from] novamail_search::SearchError),
+    #[error(transparent)]
+    Ai(#[from] novamail_ai::AiError),
     #[error("{0}")]
     Message(String),
 }
@@ -25,6 +27,8 @@ impl From<CoreError> for AppError {
             CoreError::Mail(novamail_mail::MailError::Auth(_)) => "auth",
             CoreError::Mail(_) => "mail",
             CoreError::Search(_) => "search",
+            CoreError::Ai(novamail_ai::AiError::Unavailable(_)) => "ai_unavailable",
+            CoreError::Ai(_) => "ai",
             CoreError::Db(_) => "db",
             CoreError::Message(_) => "app",
         };

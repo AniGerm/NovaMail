@@ -32,6 +32,9 @@ pub fn run() {
             commands::messages_send,
             commands::mail_sync,
             commands::oauth_authorize_url,
+            commands::oauth_exchange_code,
+            commands::ai_summarize_message,
+            commands::ai_suggest_reply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");

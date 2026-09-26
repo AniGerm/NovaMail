@@ -76,8 +76,11 @@ See [`.env.example`](.env.example).
 
 ## Docs
 
+- [Engineering standards](docs/ENGINEERING.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [ADR 0001 Architecture](docs/adr/0001-architecture.md)
 - [ADR 0002 Security](docs/adr/0002-security.md)
+- [ADR 0003 No mock mail data](docs/adr/0003-no-mock-mail-data.md)
+- [ADR 0004 Engineering standards](docs/adr/0004-engineering-standards.md)
 - [Security policy](SECURITY.md)

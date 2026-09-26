@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Input } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
@@ -8,19 +8,34 @@ interface ComposerProps {
   open: boolean;
   accounts: AccountDto[];
   replyTo?: MessageDetailDto | null;
+  initialBody?: string;
   onClose: () => void;
   onSent: () => void;
 }
 
-export function Composer({ open, accounts, replyTo, onClose, onSent }: ComposerProps) {
+export function Composer({
+  open,
+  accounts,
+  replyTo,
+  initialBody = "",
+  onClose,
+  onSent,
+}: ComposerProps) {
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
-  const [to, setTo] = useState(replyTo?.summary.from.email ?? "");
-  const [subject, setSubject] = useState(
-    replyTo ? `Re: ${replyTo.summary.subject}` : "",
-  );
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setAccountId((current) => current || accounts[0]?.id || "");
+    setTo(replyTo?.summary.from.email ?? "");
+    setSubject(replyTo ? `Re: ${replyTo.summary.subject}` : "");
+    setBody(initialBody);
+    setError(null);
+  }, [open, replyTo, initialBody, accounts]);
 
   if (!open) return null;
 

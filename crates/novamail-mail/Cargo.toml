@@ -27,6 +27,7 @@ uuid = { workspace = true }
 webpki-roots = { workspace = true }
 oauth2 = { workspace = true }
 url = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

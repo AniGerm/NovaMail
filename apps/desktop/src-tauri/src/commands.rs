@@ -1,8 +1,9 @@
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, ListMessagesRequest,
-    ListMessagesResponse, MailProvider, MailboxDto, MessageDetailDto, ProviderPreset,
-    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SyncProgressEvent,
-    SyncRequest, SyncResult,
+    ListMessagesResponse, MailProvider, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
+    OAuthExchangeResponse, ProviderPreset, SearchRequest, SearchResponse, SendMessageRequest,
+    SetFlagsRequest, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -121,4 +122,40 @@ pub fn oauth_authorize_url(
     provider: MailProvider,
 ) -> Result<String, AppError> {
     state.app.oauth_authorize_url(provider).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn oauth_exchange_code(
+    state: State<'_, DesktopState>,
+    request: OAuthExchangeRequest,
+) -> Result<OAuthExchangeResponse, AppError> {
+    state
+        .app
+        .oauth_exchange_code(request)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_summarize_message(
+    state: State<'_, DesktopState>,
+    request: SummarizeMessageRequest,
+) -> Result<SummarizeMessageResponse, AppError> {
+    state
+        .app
+        .summarize_message(request)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_suggest_reply(
+    state: State<'_, DesktopState>,
+    request: SuggestReplyMessageRequest,
+) -> Result<SuggestReplyMessageResponse, AppError> {
+    state
+        .app
+        .suggest_reply_message(request)
+        .await
+        .map_err(map_err)
 }

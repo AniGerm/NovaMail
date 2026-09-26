@@ -3,6 +3,7 @@
 mod app;
 mod error;
 mod paths;
+mod sanitize;
 
 pub use app::AppState;
 pub use error::{CoreError, CoreResult};
