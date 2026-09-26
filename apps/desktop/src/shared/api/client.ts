@@ -12,8 +12,10 @@ import type {
   LdapSearchRequest,
   ListMessagesRequest,
   ListMessagesResponse,
+  ListThreadsResponse,
   MailboxDto,
   MessageDetailDto,
+  MessageSummaryDto,
   OutgoingAttachment,
   ProviderPreset,
   RuleDto,
@@ -73,6 +75,10 @@ export const api = {
     call<MailboxDto[]>("mailboxes_list", { accountId: accountId ?? null }),
   messagesList: (request: ListMessagesRequest) =>
     call<ListMessagesResponse>("messages_list", { request }),
+  threadsList: (request: ListMessagesRequest) =>
+    call<ListThreadsResponse>("threads_list", { request }),
+  messagesListByThread: (threadId: string) =>
+    call<MessageSummaryDto[]>("messages_list_by_thread", { threadId }),
   messagesGet: (messageId: string) =>
     call<MessageDetailDto>("messages_get", { messageId }),
   messagesSetFlags: (request: SetFlagsRequest) =>

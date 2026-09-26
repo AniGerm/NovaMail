@@ -29,6 +29,11 @@ impl SearchService {
             limit: request.limit,
             offset: request.offset,
             query: Some(request.query),
+            unread_only: false,
+            starred_only: false,
+            has_attachments: false,
+            sort_by: Default::default(),
+            sort_dir: Default::default(),
         })?;
         Ok(SearchResponse { messages, total })
     }

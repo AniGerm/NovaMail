@@ -63,6 +63,24 @@ pub struct ThreadDto {
     pub snippet: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageSortBy {
+    #[default]
+    Date,
+    Subject,
+    From,
+    Attachments,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesRequest {
@@ -73,12 +91,46 @@ pub struct ListMessagesRequest {
     pub limit: u32,
     pub offset: u32,
     pub query: Option<String>,
+    #[serde(default)]
+    pub unread_only: bool,
+    #[serde(default)]
+    pub starred_only: bool,
+    #[serde(default)]
+    pub has_attachments: bool,
+    #[serde(default)]
+    pub sort_by: MessageSortBy,
+    #[serde(default)]
+    pub sort_dir: SortDirection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesResponse {
     pub messages: Vec<MessageSummaryDto>,
+    pub total: u32,
+}
+
+/// One conversation row for the threaded inbox view.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadListItemDto {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub subject: String,
+    pub snippet: String,
+    pub last_message_at: i64,
+    pub message_count: u32,
+    pub unread_count: u32,
+    pub has_attachments: bool,
+    pub participants: Vec<AddressDto>,
+    pub latest_from: AddressDto,
+    pub account_email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ListThreadsResponse {
+    pub threads: Vec<ThreadListItemDto>,
     pub total: u32,
 }
 

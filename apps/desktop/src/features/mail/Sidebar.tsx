@@ -15,8 +15,11 @@ import { useT } from "@/shared/i18n/useT";
 
 interface SidebarProps {
   accounts: AccountDto[];
+  selectedAccountId: string | null;
   syncStatus: string | null;
   themeDark: boolean;
+  onSelectUnified: () => void;
+  onSelectAccount: (accountId: string) => void;
   onCompose: () => void;
   onSync: () => void;
   onAddAccount: () => void;
@@ -28,8 +31,11 @@ interface SidebarProps {
 
 export function Sidebar({
   accounts,
+  selectedAccountId,
   syncStatus,
   themeDark,
+  onSelectUnified,
+  onSelectAccount,
   onCompose,
   onSync,
   onAddAccount,
@@ -68,7 +74,12 @@ export function Sidebar({
       <nav className="mt-4 flex flex-1 flex-col gap-1 px-2">
         <button
           type="button"
-          className="flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+          onClick={onSelectUnified}
+          className={
+            selectedAccountId === null
+              ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+              : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          }
         >
           <Inbox size={18} />
           {t("unifiedInbox")}
@@ -110,12 +121,19 @@ export function Sidebar({
               </li>
             ) : (
               accounts.map((account) => (
-                <li
-                  key={account.id}
-                  className="flex items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-2 text-sm"
-                >
-                  <span className="truncate">{account.name}</span>
-                  <Badge>{account.provider}</Badge>
+                <li key={account.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectAccount(account.id)}
+                    className={
+                      selectedAccountId === account.id
+                        ? "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-2 py-2 text-left text-sm text-[var(--nova-accent)]"
+                        : "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--nova-surface-2)]"
+                    }
+                  >
+                    <span className="truncate">{account.name}</span>
+                    <Badge>{account.provider}</Badge>
+                  </button>
                 </li>
               ))
             )}

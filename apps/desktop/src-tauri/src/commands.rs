@@ -1,12 +1,12 @@
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
     CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
-    ListMessagesResponse, MailProvider, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
-    OAuthExchangeResponse, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
-    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
-    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
-    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto,
+    MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto,
+    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -69,6 +69,25 @@ pub fn messages_list(
     request: ListMessagesRequest,
 ) -> Result<ListMessagesResponse, AppError> {
     state.app.list_messages(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn threads_list(
+    state: State<'_, DesktopState>,
+    request: ListMessagesRequest,
+) -> Result<ListThreadsResponse, AppError> {
+    state.app.list_threads(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_list_by_thread(
+    state: State<'_, DesktopState>,
+    thread_id: Uuid,
+) -> Result<Vec<MessageSummaryDto>, AppError> {
+    state
+        .app
+        .list_messages_by_thread(thread_id)
+        .map_err(map_err)
 }
 
 #[tauri::command]

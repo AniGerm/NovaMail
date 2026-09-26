@@ -10,12 +10,12 @@ use novamail_db::{AccountRecord, Database};
 use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
     CardDavServerStatus, ContactDto, LabelDto, LdapSearchRequest, ListMessagesRequest,
-    ListMessagesResponse, MailboxDto, MessageDetailDto, OAuthExchangeRequest,
-    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
-    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
-    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
-    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    ListMessagesResponse, ListThreadsResponse, MailboxDto, MessageDetailDto, MessageSummaryDto,
+    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
+    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{OAuthConfig, Pop3Client, SmtpClient, SyncEngine};
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
@@ -175,6 +175,14 @@ impl AppState {
     pub fn list_messages(&self, request: ListMessagesRequest) -> CoreResult<ListMessagesResponse> {
         let (messages, total) = self.db.list_messages(&request)?;
         Ok(ListMessagesResponse { messages, total })
+    }
+
+    pub fn list_threads(&self, request: ListMessagesRequest) -> CoreResult<ListThreadsResponse> {
+        Ok(self.db.list_threads(&request)?)
+    }
+
+    pub fn list_messages_by_thread(&self, thread_id: Uuid) -> CoreResult<Vec<MessageSummaryDto>> {
+        Ok(self.db.list_messages_by_thread(thread_id)?)
     }
 
     pub fn get_message(&self, message_id: Uuid) -> CoreResult<MessageDetailDto> {

@@ -41,6 +41,8 @@ pub fn run() {
             commands::accounts_remove,
             commands::mailboxes_list,
             commands::messages_list,
+            commands::threads_list,
+            commands::messages_list_by_thread,
             commands::messages_get,
             commands::messages_set_flags,
             commands::messages_search,

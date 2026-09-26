@@ -91,6 +91,9 @@ export interface MailboxDto {
   totalCount: number;
 }
 
+export type MessageSortBy = "date" | "subject" | "from" | "attachments";
+export type SortDirection = "asc" | "desc";
+
 export interface ListMessagesRequest {
   mailboxId?: string | null;
   accountId?: string | null;
@@ -98,10 +101,34 @@ export interface ListMessagesRequest {
   limit: number;
   offset: number;
   query?: string | null;
+  unreadOnly?: boolean;
+  starredOnly?: boolean;
+  hasAttachments?: boolean;
+  sortBy?: MessageSortBy;
+  sortDir?: SortDirection;
 }
 
 export interface ListMessagesResponse {
   messages: MessageSummaryDto[];
+  total: number;
+}
+
+export interface ThreadListItemDto {
+  id: string;
+  accountId: string;
+  subject: string;
+  snippet: string;
+  lastMessageAt: number;
+  messageCount: number;
+  unreadCount: number;
+  hasAttachments: boolean;
+  participants: AddressDto[];
+  latestFrom: AddressDto;
+  accountEmail: string;
+}
+
+export interface ListThreadsResponse {
+  threads: ThreadListItemDto[];
   total: number;
 }
 

@@ -6,7 +6,12 @@ import { CommandPalette, EmptyState, Input, VisuallyHidden } from "@novamail/ui"
 import { AccountSetup } from "@/features/accounts/AccountSetup";
 import { Composer } from "@/features/composer/Composer";
 import { ContactsDialog } from "@/features/contacts/ContactsDialog";
-import { MessageList } from "@/features/mail/MessageList";
+import {
+  MessageList,
+  buildListRequest,
+  defaultInboxFilters,
+  type InboxFilters,
+} from "@/features/mail/MessageList";
 import { QuickTriage } from "@/features/mail/QuickTriage";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
@@ -46,6 +51,8 @@ export function AppShell() {
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
   const [composerBody, setComposerBody] = useState("");
   const [composerSubject, setComposerSubject] = useState<string | undefined>();
+  const [inboxFilters, setInboxFilters] =
+    useState<InboxFilters>(defaultInboxFilters);
   const desktop = isDesktopShell();
 
   const accountsQuery = useQuery({
@@ -54,18 +61,30 @@ export function AppShell() {
     queryFn: () => api.accountsList(),
   });
 
-  const messagesQuery = useQuery({
-    queryKey: ["messages", "unified", searchQuery],
+  const mailboxesQuery = useQuery({
+    queryKey: ["mailboxes", inboxFilters.accountId],
     enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
-    queryFn: () =>
-      api.messagesList({
-        unified: true,
-        limit: 200,
-        offset: 0,
-        query: searchQuery || null,
-        mailboxId: null,
-        accountId: null,
-      }),
+    queryFn: () => api.mailboxesList(inboxFilters.accountId),
+  });
+
+  const listRequest = useMemo(
+    () => buildListRequest(inboxFilters, searchQuery),
+    [inboxFilters, searchQuery],
+  );
+
+  const messagesQuery = useQuery({
+    queryKey: ["messages", "flat", listRequest],
+    enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
+    queryFn: () => api.messagesList(listRequest),
+  });
+
+  const threadsQuery = useQuery({
+    queryKey: ["messages", "threads", listRequest],
+    enabled:
+      desktop &&
+      (accountsQuery.data?.length ?? 0) > 0 &&
+      inboxFilters.viewMode === "threads",
+    queryFn: () => api.threadsList(listRequest),
   });
 
   const messageQuery = useQuery({
@@ -103,6 +122,7 @@ export function AppShell() {
   const refresh = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+      queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
       queryClient.invalidateQueries({ queryKey: ["messages"] }),
     ]);
   }, [queryClient]);
@@ -159,7 +179,13 @@ export function AppShell() {
   }, [desktop, selectedMessageId, setComposerOpen]);
 
   const messages = messagesQuery.data?.messages ?? [];
+  const threads = threadsQuery.data?.threads ?? [];
   const accounts = accountsQuery.data ?? [];
+  const mailboxes = mailboxesQuery.data ?? [];
+  const listTotal =
+    inboxFilters.viewMode === "threads"
+      ? (threadsQuery.data?.total ?? threads.length)
+      : (messagesQuery.data?.total ?? messages.length);
 
   const navigateList = useCallback(
     (delta: number) => {
@@ -170,6 +196,14 @@ export function AppShell() {
     },
     [messages, selectMessage, selectedMessageId],
   );
+
+  const handleSelectAccountFilter = useCallback((accountId: string | null) => {
+    setInboxFilters((prev) => ({
+      ...prev,
+      accountId,
+      mailboxId: null,
+    }));
+  }, []);
 
   const themeDark =
     theme === "dark" ||
@@ -357,8 +391,11 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           accounts={accounts}
+          selectedAccountId={inboxFilters.accountId}
           syncStatus={syncStatus}
           themeDark={themeDark}
+          onSelectUnified={() => handleSelectAccountFilter(null)}
+          onSelectAccount={handleSelectAccountFilter}
           onCompose={() => {
             setReplyTo(null);
             setComposerBody("");
@@ -389,12 +426,17 @@ export function AppShell() {
           />
         ) : (
           <>
-            <div className="w-[360px] shrink-0">
+            <div className="w-[380px] shrink-0">
               <MessageList
                 messages={messages}
+                threads={threads}
                 selectedId={selectedMessageId}
                 onSelect={selectMessage}
-                total={messagesQuery.data?.total ?? messages.length}
+                total={listTotal}
+                filters={inboxFilters}
+                onFiltersChange={setInboxFilters}
+                accounts={accounts}
+                mailboxes={mailboxes}
               />
             </div>
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">

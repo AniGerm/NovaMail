@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use novamail_ipc::{
-    AccountDto, AddressDto, AuthType, ListMessagesRequest, MailProvider, MailboxDto,
-    MessageDetailDto, MessageSummaryDto,
+    AccountDto, AddressDto, AuthType, ListMessagesRequest, ListThreadsResponse, MailProvider,
+    MailboxDto, MessageDetailDto, MessageSortBy, MessageSummaryDto, SortDirection,
+    ThreadListItemDto,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -387,37 +388,8 @@ impl Database {
         let conn = self.conn.lock();
         let limit = req.limit.max(1).min(500) as i64;
         let offset = req.offset as i64;
-
-        let mut where_parts = Vec::new();
-        let mut bind_ids: Vec<String> = Vec::new();
-
-        if req.unified {
-            where_parts.push(
-                "(mb.role = 'inbox' OR lower(mb.name) = 'inbox' OR mb.name = 'INBOX')".into(),
-            );
-            where_parts.push(format!("(m.flags & {FLAG_ARCHIVED}) = 0"));
-        } else if let Some(mailbox_id) = req.mailbox_id {
-            where_parts.push("m.mailbox_id = ?1".into());
-            bind_ids.push(mailbox_id.to_string());
-        } else if let Some(account_id) = req.account_id {
-            where_parts.push("m.account_id = ?1".into());
-            bind_ids.push(account_id.to_string());
-        }
-
-        if let Some(query) = &req.query {
-            if !query.trim().is_empty() {
-                where_parts.push(format!(
-                    "m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH '{}')",
-                    escape_fts(query)
-                ));
-            }
-        }
-
-        let where_sql = if where_parts.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", where_parts.join(" AND "))
-        };
+        let (where_sql, bind_ids) = message_filters_sql(req);
+        let order_sql = message_order_sql(&req.sort_by, &req.sort_dir);
 
         let count_sql = format!(
             r#"
@@ -447,7 +419,7 @@ impl Database {
                 JOIN mailboxes mb ON mb.id = m.mailbox_id
                 JOIN accounts a ON a.id = m.account_id
                 {where_sql}
-                ORDER BY m.date DESC
+                ORDER BY {order_sql}
                 LIMIT ?1 OFFSET ?2
                 "#
             )
@@ -462,7 +434,7 @@ impl Database {
                 JOIN mailboxes mb ON mb.id = m.mailbox_id
                 JOIN accounts a ON a.id = m.account_id
                 {where_sql}
-                ORDER BY m.date DESC
+                ORDER BY {order_sql}
                 LIMIT ?2 OFFSET ?3
                 "#
             )
@@ -480,6 +452,161 @@ impl Database {
             messages.push(row?);
         }
         Ok((messages, total))
+    }
+
+    pub fn list_threads(&self, req: &ListMessagesRequest) -> DbResult<ListThreadsResponse> {
+        let conn = self.conn.lock();
+        let limit = req.limit.max(1).min(500) as i64;
+        let offset = req.offset as i64;
+        let (where_sql, bind_ids) = message_filters_sql(req);
+        let dir = match req.sort_dir {
+            SortDirection::Asc => "ASC",
+            SortDirection::Desc => "DESC",
+        };
+        let order_sql = match req.sort_by {
+            MessageSortBy::Subject => format!("subject COLLATE NOCASE {dir}"),
+            MessageSortBy::From => format!("latest_from_json COLLATE NOCASE {dir}"),
+            MessageSortBy::Attachments => {
+                format!("has_attachments {dir}, last_message_at DESC")
+            }
+            MessageSortBy::Date => format!("last_message_at {dir}"),
+        };
+
+        let count_sql = format!(
+            r#"
+            SELECT COUNT(DISTINCT m.thread_id)
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            {where_sql}
+            "#
+        );
+        let total: u32 = if bind_ids.is_empty() {
+            conn.query_row(&count_sql, [], |row| row.get::<_, i64>(0))
+                .map(|v| v as u32)?
+        } else {
+            conn.query_row(&count_sql, params![bind_ids[0]], |row| row.get::<_, i64>(0))
+                .map(|v| v as u32)?
+        };
+
+        let list_sql = if bind_ids.is_empty() {
+            format!(
+                r#"
+                SELECT
+                  m.thread_id,
+                  m.account_id,
+                  MAX(m.date) AS last_message_at,
+                  COUNT(*) AS message_count,
+                  SUM(CASE WHEN (m.flags & {FLAG_SEEN}) = 0 THEN 1 ELSE 0 END) AS unread_count,
+                  MAX(m.has_attachments) AS has_attachments,
+                  (
+                    SELECT m2.subject FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS subject,
+                  (
+                    SELECT m2.snippet FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS snippet,
+                  (
+                    SELECT m2.from_json FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS latest_from_json,
+                  (
+                    SELECT a2.email FROM messages m2
+                    JOIN accounts a2 ON a2.id = m2.account_id
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS account_email,
+                  COALESCE((
+                    SELECT t.participants_json FROM threads t WHERE t.id = m.thread_id
+                  ), '[]') AS participants_json
+                FROM messages m
+                JOIN mailboxes mb ON mb.id = m.mailbox_id
+                {where_sql}
+                GROUP BY m.thread_id, m.account_id
+                ORDER BY {order_sql}
+                LIMIT ?1 OFFSET ?2
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                SELECT
+                  m.thread_id,
+                  m.account_id,
+                  MAX(m.date) AS last_message_at,
+                  COUNT(*) AS message_count,
+                  SUM(CASE WHEN (m.flags & {FLAG_SEEN}) = 0 THEN 1 ELSE 0 END) AS unread_count,
+                  MAX(m.has_attachments) AS has_attachments,
+                  (
+                    SELECT m2.subject FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS subject,
+                  (
+                    SELECT m2.snippet FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS snippet,
+                  (
+                    SELECT m2.from_json FROM messages m2
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS latest_from_json,
+                  (
+                    SELECT a2.email FROM messages m2
+                    JOIN accounts a2 ON a2.id = m2.account_id
+                    WHERE m2.thread_id = m.thread_id
+                    ORDER BY m2.date DESC LIMIT 1
+                  ) AS account_email,
+                  COALESCE((
+                    SELECT t.participants_json FROM threads t WHERE t.id = m.thread_id
+                  ), '[]') AS participants_json
+                FROM messages m
+                JOIN mailboxes mb ON mb.id = m.mailbox_id
+                {where_sql}
+                GROUP BY m.thread_id, m.account_id
+                ORDER BY {order_sql}
+                LIMIT ?2 OFFSET ?3
+                "#
+            )
+        };
+
+        let mut stmt = conn.prepare(&list_sql)?;
+        let rows = if bind_ids.is_empty() {
+            stmt.query_map(params![limit, offset], map_thread_list_item)?
+        } else {
+            stmt.query_map(params![bind_ids[0], limit, offset], map_thread_list_item)?
+        };
+        let mut threads = Vec::new();
+        for row in rows {
+            threads.push(row?);
+        }
+        Ok(ListThreadsResponse { threads, total })
+    }
+
+    pub fn list_messages_by_thread(&self, thread_id: Uuid) -> DbResult<Vec<MessageSummaryDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+              m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
+              m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
+              a.email
+            FROM messages m
+            JOIN accounts a ON a.id = m.account_id
+            WHERE m.thread_id = ?1
+            ORDER BY m.date ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![thread_id.to_string()], map_message_summary)?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
     }
 
     pub fn set_flags(
@@ -1103,6 +1230,91 @@ fn map_message_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSumma
     })
 }
 
+fn map_thread_list_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreadListItemDto> {
+    let latest_from: AddressDto = serde_json::from_str(&row.get::<_, String>(8)?)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let participants: Vec<AddressDto> = serde_json::from_str(&row.get::<_, String>(10)?)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    Ok(ThreadListItemDto {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        account_id: parse_uuid(row.get::<_, String>(1)?)?,
+        last_message_at: row.get(2)?,
+        message_count: row.get::<_, i64>(3)? as u32,
+        unread_count: row.get::<_, i64>(4)? as u32,
+        has_attachments: row.get::<_, i64>(5)? != 0,
+        subject: row.get(6)?,
+        snippet: row.get(7)?,
+        latest_from,
+        account_email: row.get(9)?,
+        participants,
+    })
+}
+
+/// Build WHERE clause and at most one UUID bind (`?1`) for list/thread queries.
+fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
+    let mut where_parts = Vec::new();
+    let mut bind_ids: Vec<String> = Vec::new();
+
+    if req.unified {
+        where_parts.push(
+            "(mb.role = 'inbox' OR lower(mb.name) = 'inbox' OR mb.name = 'INBOX')".into(),
+        );
+        where_parts.push(format!("(m.flags & {FLAG_ARCHIVED}) = 0"));
+        if let Some(mailbox_id) = req.mailbox_id {
+            where_parts.push("m.mailbox_id = ?1".into());
+            bind_ids.push(mailbox_id.to_string());
+        } else if let Some(account_id) = req.account_id {
+            where_parts.push("m.account_id = ?1".into());
+            bind_ids.push(account_id.to_string());
+        }
+    } else if let Some(mailbox_id) = req.mailbox_id {
+        where_parts.push("m.mailbox_id = ?1".into());
+        bind_ids.push(mailbox_id.to_string());
+    } else if let Some(account_id) = req.account_id {
+        where_parts.push("m.account_id = ?1".into());
+        bind_ids.push(account_id.to_string());
+    }
+
+    if req.unread_only {
+        where_parts.push(format!("(m.flags & {FLAG_SEEN}) = 0"));
+    }
+    if req.starred_only {
+        where_parts.push(format!("(m.flags & {FLAG_STARRED}) != 0"));
+    }
+    if req.has_attachments {
+        where_parts.push("m.has_attachments != 0".into());
+    }
+
+    if let Some(query) = &req.query {
+        if !query.trim().is_empty() {
+            where_parts.push(format!(
+                "m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH '{}')",
+                escape_fts(query)
+            ));
+        }
+    }
+
+    let where_sql = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
+    (where_sql, bind_ids)
+}
+
+fn message_order_sql(sort_by: &MessageSortBy, sort_dir: &SortDirection) -> String {
+    let dir = match sort_dir {
+        SortDirection::Asc => "ASC",
+        SortDirection::Desc => "DESC",
+    };
+    match sort_by {
+        MessageSortBy::Subject => format!("m.subject COLLATE NOCASE {dir}"),
+        MessageSortBy::From => format!("m.from_json COLLATE NOCASE {dir}"),
+        MessageSortBy::Attachments => format!("m.has_attachments {dir}, m.date DESC"),
+        MessageSortBy::Date => format!("m.date {dir}"),
+    }
+}
+
 fn parse_uuid(value: String) -> rusqlite::Result<Uuid> {
     Uuid::parse_str(&value).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
 }
@@ -1269,6 +1481,11 @@ mod tests {
                 limit: 50,
                 offset: 0,
                 query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Desc,
             })
             .unwrap();
 
@@ -1276,6 +1493,24 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].subject, "Hello B");
         assert!(messages[0].unread);
+
+        let threads = db
+            .list_threads(&ListMessagesRequest {
+                mailbox_id: None,
+                account_id: None,
+                unified: true,
+                limit: 50,
+                offset: 0,
+                query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Desc,
+            })
+            .unwrap();
+        assert_eq!(threads.total, 2);
+        assert_eq!(threads.threads.len(), 2);
 
         db.set_flags(messages[0].id, Some(false), Some(true))
             .unwrap();
