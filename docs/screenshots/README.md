@@ -1,14 +1,14 @@
-# NovaMail screenshots
+# NovaMail Screenshots
 
-Example UI captures for the README and docs.
+Beispiel-UI im aktuellen Design (Dunkelblau/Weiß, Deutsch).
 
-| File | View |
-|------|------|
-| `inbox.png` | Unified inbox + attachments in reading pane |
-| `quick-sort.png` | Yahoo-style Keep / Delete triage |
-| `contacts-carddav.png` | Address book + CardDAV status |
+| Datei | Ansicht |
+|------|---------|
+| `inbox.png` | Posteingang mit Anhängen |
+| `quick-sort.png` | Schnellsortierung (Behalten / Löschen / Vorschau) |
+| `contacts-carddav.png` | Adressbuch + CardDAV |
 
-`preview.html` is a static design-system preview used for reproducible captures:
+Neu erzeugen:
 
 ```bash
 ./scripts/capture-screenshots.sh
