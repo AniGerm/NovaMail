@@ -28,3 +28,14 @@ novamail-core          use-cases
 - Server state: TanStack Query over Tauri commands
 - UI state: Zustand (selection, theme, composer)
 - Keyboard: `@novamail/hooks` shortcut map (`c`, `r`, `/`, `Ctrl/Cmd+K`)
+
+## AI + HTML safety
+
+- Primary provider: Ollama (`novamail-ai::OllamaProvider`)
+- Offline fallback: `NullAiProvider` (deterministic heuristics)
+- Commands: `ai_summarize_message`, `ai_suggest_reply`
+- `AppState::get_message` sanitizes HTML with ammonia before IPC (ADR 0005)
+
+## Engineering rules
+
+See [`ENGINEERING.md`](ENGINEERING.md) and ADR 0004.
