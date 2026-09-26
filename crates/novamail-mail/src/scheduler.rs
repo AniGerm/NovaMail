@@ -39,48 +39,69 @@ impl SyncScheduler {
         }
     }
 
-    pub fn spawn<F>(self, mut on_progress: F) -> tokio::task::JoinHandle<()>
+    /// Start the periodic sync loop on a dedicated Tokio runtime thread.
+    /// Safe to call from Tauri's sync `setup` hook (no ambient runtime required).
+    pub fn spawn<F>(self, mut on_progress: F) -> std::thread::JoinHandle<()>
     where
         F: FnMut(SyncProgressEvent) + Send + 'static,
     {
-        tokio::spawn(async move {
-            loop {
+        std::thread::Builder::new()
+            .name("novamail-sync-scheduler".into())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
                 {
-                    let mut guard = self.running.lock().await;
-                    if *guard {
-                        // previous cycle still running — skip overlap
-                    } else {
-                        *guard = true;
-                        drop(guard);
-                        let engine = SyncEngine::new(
-                            self.db.clone(),
-                            self.secrets.clone(),
-                            &self.blobs_dir,
-                        );
-                        let accounts = match self.db.list_accounts() {
-                            Ok(list) => list,
-                            Err(err) => {
-                                warn!(error = %err, "scheduler failed to list accounts");
+                    Ok(rt) => rt,
+                    Err(err) => {
+                        warn!(error = %err, "failed to build scheduler runtime");
+                        return;
+                    }
+                };
+                runtime.block_on(async move {
+                    loop {
+                        {
+                            let mut guard = self.running.lock().await;
+                            if *guard {
+                                // previous cycle still running — skip overlap
+                            } else {
+                                *guard = true;
+                                drop(guard);
+                                let engine = SyncEngine::new(
+                                    self.db.clone(),
+                                    self.secrets.clone(),
+                                    &self.blobs_dir,
+                                );
+                                let accounts = match self.db.list_accounts() {
+                                    Ok(list) => list,
+                                    Err(err) => {
+                                        warn!(error = %err, "scheduler failed to list accounts");
+                                        *self.running.lock().await = false;
+                                        tokio::time::sleep(self.interval).await;
+                                        continue;
+                                    }
+                                };
+                                for account in accounts {
+                                    info!(account = %account.email, "scheduled sync starting");
+                                    if let Err(err) = engine
+                                        .sync_account(account.id, |event| on_progress(event))
+                                        .await
+                                    {
+                                        warn!(
+                                            account = %account.email,
+                                            error = %err,
+                                            "scheduled sync failed"
+                                        );
+                                    }
+                                }
                                 *self.running.lock().await = false;
-                                tokio::time::sleep(self.interval).await;
-                                continue;
-                            }
-                        };
-                        for account in accounts {
-                            info!(account = %account.email, "scheduled sync starting");
-                            if let Err(err) = engine
-                                .sync_account(account.id, |event| on_progress(event))
-                                .await
-                            {
-                                warn!(account = %account.email, error = %err, "scheduled sync failed");
                             }
                         }
-                        *self.running.lock().await = false;
+                        tokio::time::sleep(self.interval).await;
                     }
-                }
-                tokio::time::sleep(self.interval).await;
-            }
-        })
+                });
+            })
+            .expect("failed to spawn sync scheduler thread")
     }
 
     pub async fn run_once<F>(&self, request: SyncRequest, on_progress: F) -> crate::MailResult<u32>
