@@ -28,3 +28,12 @@ pub struct SuggestReplyMessageResponse {
     pub suggestion: String,
     pub provider: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageAiInsights {
+    pub message_id: Uuid,
+    pub summary: Option<String>,
+    pub reply_suggestion: Option<String>,
+    pub provider: Option<String>,
+}

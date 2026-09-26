@@ -4,15 +4,25 @@ use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
-use novamail_crypto::AccountCredentials;
+use novamail_crypto::{AccountCredentials, SecretStore};
 use novamail_db::AccountRecord;
 use novamail_ipc::{AddressDto, SendMessageRequest};
 
+use crate::credentials::ensure_fresh_credentials;
 use crate::{MailError, MailResult};
 
 pub struct SmtpClient;
 
 impl SmtpClient {
+    pub async fn send_with_secrets(
+        account: &AccountRecord,
+        secrets: &SecretStore,
+        request: &SendMessageRequest,
+    ) -> MailResult<()> {
+        let credentials = ensure_fresh_credentials(account, secrets).await?;
+        Self::send(account, &credentials, request).await
+    }
+
     pub async fn send(
         account: &AccountRecord,
         credentials: &AccountCredentials,

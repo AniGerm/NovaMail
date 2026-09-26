@@ -177,8 +177,13 @@ export const en: Translations = {
     "Stopped — start so phones, printers, and fax share the same address book.",
   cardDavDeviceHint:
     "Other devices connect to this CardDAV URL on the main PC (same LAN or VPN). That keeps one shared address book — no copying backup files around.",
+  cardDavUsername: "Username",
+  cardDavPassword: "Password (Basic auth)",
+  cardDavAuthHint:
+    "The server rejects unauthenticated access. Enter both values on the phone/printer.",
   stopCardDav: "Stop CardDAV",
   startCardDav: "Start CardDAV",
+  aiCachedHint: "Prepared in the background",
   addContact: "Add contact",
   editContact: "Edit contact",
   emailsComma: "Emails (comma-separated)",

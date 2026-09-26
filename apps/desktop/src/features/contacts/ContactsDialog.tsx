@@ -471,7 +471,7 @@ export function ContactsDialog({
                   })
                 : t("cardDavStopped")}
             </p>
-            {carddav?.running && carddav.addressbookUrl ? (
+            {carddav?.addressbookUrl ? (
               <Input
                 readOnly
                 value={carddav.addressbookUrl}
@@ -479,6 +479,29 @@ export function ContactsDialog({
                 aria-label="CardDAV URL"
               />
             ) : null}
+            {carddav?.username ? (
+              <label className="grid gap-1 text-xs">
+                <span>{t("cardDavUsername")}</span>
+                <Input
+                  readOnly
+                  value={carddav.username}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+              </label>
+            ) : null}
+            {carddav?.password ? (
+              <label className="grid gap-1 text-xs">
+                <span>{t("cardDavPassword")}</span>
+                <Input
+                  readOnly
+                  value={carddav.password}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+              </label>
+            ) : null}
+            <p className="text-xs text-[var(--nova-ink-muted)]">
+              {t("cardDavAuthHint")}
+            </p>
             <p className="text-xs text-[var(--nova-ink-muted)]">
               {t("cardDavDeviceHint")}
             </p>

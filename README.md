@@ -18,7 +18,9 @@ NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **Rea
 - Quick Sort triage (Keep / Delete / Preview + hotkeys `T`, `K`, `D`, Space)
 - Signatures, labels, and rules in Settings
 - POP3 connectivity test
-- Local AI summarize + suggest reply (Ollama, offline fallback)
+- Local AI summarize + suggest reply (Ollama `qwen2.5:1.5b`, background insights + offline fallback)
+- CardDAV shared address book with Basic auth (LAN devices)
+- IMAP flag/archive/delete sync + OAuth token refresh
 - Command palette, settings (theme/density/high contrast)
 - Keyboard shortcuts (`c`, `r`, `f`, `e`, `#`, `t`, `j`/`k`, `/`, `Ctrl/Cmd+K`)
 - HTML sanitization, CI, Linux packaging script

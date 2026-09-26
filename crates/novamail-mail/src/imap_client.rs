@@ -62,6 +62,27 @@ impl LiveImap {
         }
     }
 
+    pub async fn uid_store(&mut self, uid: &str, query: &str) -> MailResult<()> {
+        match self {
+            LiveImap::Tls(s) => s.uid_store(uid, query).await,
+            LiveImap::Plain(s) => s.uid_store(uid, query).await,
+        }
+    }
+
+    pub async fn uid_move(&mut self, uid: &str, mailbox: &str) -> MailResult<()> {
+        match self {
+            LiveImap::Tls(s) => s.uid_move(uid, mailbox).await,
+            LiveImap::Plain(s) => s.uid_move(uid, mailbox).await,
+        }
+    }
+
+    pub async fn uid_expunge(&mut self, uid: &str) -> MailResult<()> {
+        match self {
+            LiveImap::Tls(s) => s.uid_expunge(uid).await,
+            LiveImap::Plain(s) => s.uid_expunge(uid).await,
+        }
+    }
+
     pub async fn logout(self) -> MailResult<()> {
         match self {
             LiveImap::Tls(s) => s.logout().await,
@@ -137,6 +158,31 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
             }
         }
         Ok(out)
+    }
+
+    pub async fn uid_store(&mut self, uid: &str, query: &str) -> MailResult<()> {
+        let stream = self
+            .session
+            .uid_store(uid, query)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))?;
+        crate::remote_actions::drain_fetches(stream).await
+    }
+
+    pub async fn uid_move(&mut self, uid: &str, mailbox: &str) -> MailResult<()> {
+        self.session
+            .uid_mv(uid, mailbox)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))
+    }
+
+    pub async fn uid_expunge(&mut self, uid: &str) -> MailResult<()> {
+        let stream = self
+            .session
+            .uid_expunge(uid)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))?;
+        crate::remote_actions::drain_fetches(stream).await
     }
 
     pub async fn logout(mut self) -> MailResult<()> {

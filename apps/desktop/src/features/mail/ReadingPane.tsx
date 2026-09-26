@@ -35,6 +35,24 @@ export function ReadingPane({
     setSummary(null);
     setSummaryProvider(null);
     setAiError(null);
+    const id = message?.summary.id;
+    if (!id) return;
+    let cancelled = false;
+    void api
+      .aiMessageInsights(id)
+      .then((insights) => {
+        if (cancelled) return;
+        if (insights.summary) {
+          setSummary(insights.summary);
+          setSummaryProvider(insights.provider ?? "cache");
+        }
+      })
+      .catch(() => {
+        /* insights optional */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [message?.summary.id]);
 
   if (!message) {

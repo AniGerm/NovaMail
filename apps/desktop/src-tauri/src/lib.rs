@@ -53,6 +53,7 @@ pub fn run() {
             commands::oauth_wait_callback,
             commands::ai_summarize_message,
             commands::ai_suggest_reply,
+            commands::ai_message_insights,
             commands::messages_archive,
             commands::messages_delete,
             commands::messages_forward_draft,

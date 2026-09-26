@@ -272,6 +272,53 @@ impl Database {
         .map_err(Into::into)
     }
 
+    pub fn get_mailbox(&self, mailbox_id: Uuid) -> DbResult<MailboxRecord> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            r#"
+            SELECT id, account_id, name, role, uidvalidity, uidnext, unread_count, total_count
+            FROM mailboxes WHERE id = ?1
+            "#,
+            params![mailbox_id.to_string()],
+            map_mailbox_row,
+        )
+        .optional()?
+        .ok_or_else(|| DbError::NotFound(format!("mailbox {mailbox_id}")))
+    }
+
+    pub fn find_mailbox_by_role(
+        &self,
+        account_id: Uuid,
+        role: &str,
+    ) -> DbResult<Option<MailboxRecord>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            r#"
+            SELECT id, account_id, name, role, uidvalidity, uidnext, unread_count, total_count
+            FROM mailboxes
+            WHERE account_id = ?1 AND lower(coalesce(role, '')) = lower(?2)
+            LIMIT 1
+            "#,
+            params![account_id.to_string(), role],
+            map_mailbox_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn get_message_uid(&self, message_id: Uuid) -> DbResult<Option<u32>> {
+        let conn = self.conn.lock();
+        let uid: Option<i64> = conn
+            .query_row(
+                "SELECT uid FROM messages WHERE id = ?1",
+                params![message_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| DbError::NotFound(format!("message {message_id}")))?;
+        Ok(uid.map(|u| u as u32))
+    }
+
     pub fn list_mailboxes(&self, account_id: Option<Uuid>) -> DbResult<Vec<MailboxDto>> {
         let conn = self.conn.lock();
         let mut out = Vec::new();
@@ -1186,6 +1233,55 @@ impl Database {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    pub fn upsert_ai_insight(
+        &self,
+        message_id: Uuid,
+        kind: &str,
+        payload_json: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now().timestamp();
+        // Keep one row per (message, kind).
+        conn.execute(
+            "DELETE FROM ai_insights WHERE message_id = ?1 AND kind = ?2",
+            params![message_id.to_string(), kind],
+        )?;
+        conn.execute(
+            r#"
+            INSERT INTO ai_insights (id, message_id, kind, payload_json, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                id.to_string(),
+                message_id.to_string(),
+                kind,
+                payload_json,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_ai_insight(&self, message_id: Uuid, kind: &str) -> DbResult<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            r#"
+            SELECT payload_json FROM ai_insights
+            WHERE message_id = ?1 AND kind = ?2
+            ORDER BY created_at DESC LIMIT 1
+            "#,
+            params![message_id.to_string(), kind],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn has_ai_insight(&self, message_id: Uuid, kind: &str) -> DbResult<bool> {
+        Ok(self.get_ai_insight(message_id, kind)?.is_some())
     }
 }
 

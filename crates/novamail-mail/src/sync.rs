@@ -8,6 +8,7 @@ use novamail_db::Database;
 use novamail_ipc::SyncProgressEvent;
 use uuid::Uuid;
 
+use crate::credentials::ensure_fresh_credentials;
 use crate::imap_client::LiveImap;
 use crate::parse::parse_rfc822;
 use crate::{MailError, MailResult};
@@ -17,6 +18,8 @@ pub struct SyncReport {
     pub account_id: Uuid,
     pub mailboxes_synced: u32,
     pub messages_fetched: u32,
+    /// Local message IDs that were newly inserted in this sync (for AI queue).
+    pub new_message_ids: Vec<Uuid>,
 }
 
 pub struct SyncEngine {
@@ -43,16 +46,18 @@ impl SyncEngine {
         F: FnMut(SyncProgressEvent) + Send,
     {
         let account = self.db.get_account(account_id)?;
-        let credentials = self.secrets.load_credentials(account_id)?;
+        let credentials = ensure_fresh_credentials(&account, &self.secrets).await?;
 
         let mut imap = LiveImap::connect(&account, &credentials).await?;
         let mailboxes = imap.list_mailboxes().await?;
         let mut mailboxes_synced = 0u32;
         let mut messages_fetched = 0u32;
+        let mut new_message_ids = Vec::new();
 
         for (name, role) in mailboxes {
             let should_sync = role.as_deref() == Some("inbox")
                 || role.as_deref() == Some("sent")
+                || role.as_deref() == Some("archive")
                 || name.eq_ignore_ascii_case("INBOX");
             if !should_sync {
                 continue;
@@ -71,9 +76,10 @@ impl SyncEngine {
                 .sync_mailbox(&mut imap, account_id, &name, role.as_deref(), &mut on_progress)
                 .await
             {
-                Ok(fetched) => {
+                Ok((fetched, mut new_ids)) => {
                     messages_fetched += fetched;
                     mailboxes_synced += 1;
+                    new_message_ids.append(&mut new_ids);
                     on_progress(SyncProgressEvent {
                         account_id,
                         mailbox_name: name,
@@ -101,6 +107,7 @@ impl SyncEngine {
             account_id,
             mailboxes_synced,
             messages_fetched,
+            new_message_ids,
         })
     }
 
@@ -111,7 +118,7 @@ impl SyncEngine {
         name: &str,
         role: Option<&str>,
         on_progress: &mut F,
-    ) -> MailResult<u32>
+    ) -> MailResult<(u32, Vec<Uuid>)>
     where
         F: FnMut(SyncProgressEvent) + Send,
     {
@@ -139,12 +146,18 @@ impl SyncEngine {
             record
         };
 
-        let window = 100u32;
+        // Office-friendly window: recent mail stays local without full mailbox download.
+        let window = 500u32;
         let from_uid = uidnext.saturating_sub(window).max(1);
         let fetched_msgs = imap.fetch_uid_range(from_uid, None).await?;
         let mut count = 0u32;
+        let mut new_ids = Vec::new();
 
         for fetched in fetched_msgs {
+            let existed = self
+                .db
+                .find_message_id_by_uid(mailbox.id, fetched.uid)?
+                .is_some();
             let parsed = parse_rfc822(&fetched.raw, fetched.flags_seen, fetched.flags_flagged)?;
             let thread_id = self.resolve_thread(account_id, &parsed)?;
 
@@ -183,6 +196,9 @@ impl SyncEngine {
                 .db
                 .find_message_id_by_uid(mailbox.id, fetched.uid)?
                 .unwrap_or(local_id);
+            if !existed {
+                new_ids.push(message_id);
+            }
 
             if !parsed.attachments.is_empty() {
                 std::fs::create_dir_all(&self.blobs_dir)?;
@@ -218,7 +234,7 @@ impl SyncEngine {
         }
 
         self.db.refresh_mailbox_counts(mailbox.id)?;
-        Ok(count)
+        Ok((count, new_ids))
     }
 
     fn resolve_thread(

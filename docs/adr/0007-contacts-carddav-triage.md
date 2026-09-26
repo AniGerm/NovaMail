@@ -15,8 +15,9 @@ round-trips, iCloud setup, and a Yahoo-style keep/delete triage flow.
    serves `/addressbooks/novamail/` as vCard 3.0 resources backed by SQLite so
    phones, printers, fax MFPs, and other LAN devices share one address book on
    the main NovaMail PC. The UI advertises the machine’s LAN IP (not `0.0.0.0`).
-   Encrypted `.nmbak` backups are for config migration between NovaMail installs,
-   not day-to-day contact sync.
+   Access requires **HTTP Basic auth** (username `novamail` + generated password
+   stored in settings). Encrypted `.nmbak` backups are for config migration
+   between NovaMail installs, not day-to-day contact sync.
 2. **LDAP/LDAPS sync** pulls `inetOrgPerson` entries (mail, phone, fax, address,
    photo, org/title) and upserts them by `ldap_dn`; CardDAV then redistributes
    those contacts. The contacts UI also supports fuzzy search, photos, fax,

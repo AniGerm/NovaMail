@@ -17,14 +17,17 @@ use novamail_ipc::{
     ContactDto, ContactsBookSettings, ExportBackupRequest, ExportBackupResponse,
     ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
     LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
-    ListThreadsResponse, MailboxDto, MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest,
-    OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto, SearchRequest, SearchResponse,
-    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
+    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
+    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
     SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
     UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
-use novamail_mail::{OAuthConfig, Pop3Client, SmtpClient, SyncEngine};
+use novamail_mail::{
+    archive_remote, delete_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
+    SyncEngine,
+};
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
 use uuid::Uuid;
@@ -205,9 +208,20 @@ impl AppState {
         Ok(detail)
     }
 
-    pub fn set_flags(&self, request: SetFlagsRequest) -> CoreResult<()> {
+    pub async fn set_flags(&self, request: SetFlagsRequest) -> CoreResult<()> {
         self.db
             .set_flags(request.message_id, request.unread, request.starred)?;
+        if let Err(err) = set_flags_remote(
+            &self.db,
+            &self.secrets,
+            request.message_id,
+            request.unread,
+            request.starred,
+        )
+        .await
+        {
+            tracing::warn!(error = %err, "IMAP flag sync failed; local flags kept");
+        }
         Ok(())
     }
 
@@ -240,23 +254,25 @@ impl AppState {
         };
 
         let mut results = Vec::new();
+        let mut new_ids = Vec::new();
         for account_id in account_ids {
             let report = engine
                 .sync_account(account_id, |event| on_progress(event))
                 .await?;
+            new_ids.extend(report.new_message_ids.iter().copied());
             results.push(SyncResult {
                 account_id: report.account_id,
                 mailboxes_synced: report.mailboxes_synced,
                 messages_fetched: report.messages_fetched,
             });
         }
+        self.enqueue_ai_insights(&new_ids);
         Ok(results)
     }
 
     pub async fn send_message(&self, request: SendMessageRequest) -> CoreResult<()> {
         let account = self.db.get_account(request.account_id)?;
-        let credentials = self.secrets.load_credentials(request.account_id)?;
-        SmtpClient::send(&account, &credentials, &request).await?;
+        SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
         Ok(())
     }
 
@@ -294,8 +310,11 @@ impl AppState {
         .await?)
     }
 
-    pub fn archive_message(&self, message_id: Uuid) -> CoreResult<()> {
+    pub async fn archive_message(&self, message_id: Uuid) -> CoreResult<()> {
         self.db.archive_message(message_id)?;
+        if let Err(err) = archive_remote(&self.db, &self.secrets, message_id).await {
+            tracing::warn!(error = %err, "IMAP archive failed; local archive kept");
+        }
         Ok(())
     }
 
@@ -329,7 +348,10 @@ impl AppState {
         })
     }
 
-    pub fn delete_message(&self, message_id: Uuid) -> CoreResult<()> {
+    pub async fn delete_message(&self, message_id: Uuid) -> CoreResult<()> {
+        if let Err(err) = delete_remote(&self.db, &self.secrets, message_id).await {
+            tracing::warn!(error = %err, "IMAP delete failed; removing local copy anyway");
+        }
         let detail = self.get_message(message_id)?;
         for attachment in detail.attachments {
             let _ = std::fs::remove_file(attachment.path);
@@ -395,6 +417,7 @@ impl AppState {
     }
 
     pub async fn start_carddav(&self) -> CoreResult<CardDavServerStatus> {
+        self.ensure_carddav_credentials()?;
         Ok(self.carddav.start().await?)
     }
 
@@ -402,8 +425,31 @@ impl AppState {
         Ok(self.carddav.stop())
     }
 
-    pub fn carddav_status(&self) -> CardDavServerStatus {
-        self.carddav.status()
+    pub fn carddav_status(&self) -> CoreResult<CardDavServerStatus> {
+        self.ensure_carddav_credentials()?;
+        Ok(self.carddav.status())
+    }
+
+    fn ensure_carddav_credentials(&self) -> CoreResult<()> {
+        const USER_KEY: &str = "carddav.username";
+        const PASS_KEY: &str = "carddav.password";
+        let username = match self.db.get_setting(USER_KEY)? {
+            Some(u) if !u.trim().is_empty() => u,
+            _ => {
+                self.db.set_setting(USER_KEY, "novamail")?;
+                "novamail".into()
+            }
+        };
+        let password = match self.db.get_setting(PASS_KEY)? {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => {
+                let generated = Uuid::new_v4().simple().to_string();
+                self.db.set_setting(PASS_KEY, &generated)?;
+                generated
+            }
+        };
+        self.carddav.set_credentials(username, password);
+        Ok(())
     }
 
     pub async fn ldap_search(&self, request: LdapSearchRequest) -> CoreResult<Vec<ContactDto>> {
@@ -867,10 +913,140 @@ impl AppState {
         &self.secrets
     }
 
+    pub fn get_message_ai_insights(&self, message_id: Uuid) -> CoreResult<MessageAiInsights> {
+        let summary = self
+            .db
+            .get_ai_insight(message_id, "summary")?
+            .and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|v| v.get("text")?.as_str().map(|s| s.to_string()))
+            });
+        let reply_suggestion = self
+            .db
+            .get_ai_insight(message_id, "reply")?
+            .and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|v| v.get("text")?.as_str().map(|s| s.to_string()))
+            });
+        let provider = self
+            .db
+            .get_ai_insight(message_id, "summary")?
+            .or(self.db.get_ai_insight(message_id, "reply")?)
+            .and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|v| v.get("provider")?.as_str().map(|s| s.to_string()))
+            });
+        Ok(MessageAiInsights {
+            message_id,
+            summary,
+            reply_suggestion,
+            provider,
+        })
+    }
+
+    fn enqueue_ai_insights(&self, message_ids: &[Uuid]) {
+        if message_ids.is_empty() {
+            return;
+        }
+        // Cap backlog so a large first sync does not saturate the CPU for hours.
+        let ids: Vec<Uuid> = message_ids.iter().copied().take(25).collect();
+        let db = self.db.clone();
+        let ai = self.ai.clone();
+        tokio::spawn(async move {
+            static AI_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+            let _guard = AI_LOCK.lock().await;
+            for message_id in ids {
+                if let Err(err) = Self::generate_and_store_insights(&db, ai.as_ref(), message_id).await
+                {
+                    tracing::debug!(%message_id, error = %err, "background AI insight skipped");
+                }
+            }
+        });
+    }
+
+    async fn generate_and_store_insights(
+        db: &Database,
+        ai: &dyn AiProvider,
+        message_id: Uuid,
+    ) -> CoreResult<()> {
+        if db.has_ai_insight(message_id, "summary")? && db.has_ai_insight(message_id, "reply")? {
+            return Ok(());
+        }
+        let detail = db.get_message(message_id)?;
+        let body = detail
+            .body_text
+            .clone()
+            .unwrap_or_else(|| detail.summary.snippet.clone());
+
+        if !db.has_ai_insight(message_id, "summary")? {
+            let result = match ai
+                .summarize(SummarizeRequest {
+                    subject: detail.summary.subject.clone(),
+                    body_text: body.clone(),
+                })
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    Self::offline_ai()
+                        .summarize(SummarizeRequest {
+                            subject: detail.summary.subject.clone(),
+                            body_text: body.clone(),
+                        })
+                        .await?
+                }
+            };
+            let payload = serde_json::json!({
+                "text": result.summary,
+                "provider": result.provider,
+            });
+            db.upsert_ai_insight(message_id, "summary", &payload.to_string())?;
+        }
+
+        if !db.has_ai_insight(message_id, "reply")? {
+            let ai_request = SuggestReplyRequest {
+                subject: detail.summary.subject.clone(),
+                body_text: body,
+                from_email: detail.summary.from.email.clone(),
+            };
+            let result = match ai.suggest_reply(ai_request.clone()).await {
+                Ok(r) => r,
+                Err(_) => Self::offline_ai().suggest_reply(ai_request).await?,
+            };
+            let payload = serde_json::json!({
+                "text": result.suggestion,
+                "provider": result.provider,
+            });
+            db.upsert_ai_insight(message_id, "reply", &payload.to_string())?;
+        }
+        Ok(())
+    }
+
     pub async fn summarize_message(
         &self,
         request: SummarizeMessageRequest,
     ) -> CoreResult<SummarizeMessageResponse> {
+        if let Some(cached) = self.db.get_ai_insight(request.message_id, "summary")? {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cached) {
+                if let (Some(text), provider) = (
+                    value.get("text").and_then(|v| v.as_str()),
+                    value
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("cache"),
+                ) {
+                    return Ok(SummarizeMessageResponse {
+                        message_id: request.message_id,
+                        summary: text.to_string(),
+                        provider: provider.to_string(),
+                    });
+                }
+            }
+        }
+
         let detail = self.get_message(request.message_id)?;
         let body = detail
             .body_text
@@ -895,6 +1071,13 @@ impl AppState {
                     .await?
             }
         };
+        let payload = serde_json::json!({
+            "text": result.summary,
+            "provider": result.provider,
+        });
+        let _ = self
+            .db
+            .upsert_ai_insight(request.message_id, "summary", &payload.to_string());
         Ok(SummarizeMessageResponse {
             message_id: request.message_id,
             summary: result.summary,
@@ -906,6 +1089,24 @@ impl AppState {
         &self,
         request: SuggestReplyMessageRequest,
     ) -> CoreResult<SuggestReplyMessageResponse> {
+        if let Some(cached) = self.db.get_ai_insight(request.message_id, "reply")? {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cached) {
+                if let (Some(text), provider) = (
+                    value.get("text").and_then(|v| v.as_str()),
+                    value
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("cache"),
+                ) {
+                    return Ok(SuggestReplyMessageResponse {
+                        message_id: request.message_id,
+                        suggestion: text.to_string(),
+                        provider: provider.to_string(),
+                    });
+                }
+            }
+        }
+
         let detail = self.get_message(request.message_id)?;
         let body = detail
             .body_text
@@ -923,6 +1124,13 @@ impl AppState {
                 Self::offline_ai().suggest_reply(ai_request).await?
             }
         };
+        let payload = serde_json::json!({
+            "text": result.suggestion,
+            "provider": result.provider,
+        });
+        let _ = self
+            .db
+            .upsert_ai_insight(request.message_id, "reply", &payload.to_string());
         Ok(SuggestReplyMessageResponse {
             message_id: request.message_id,
             suggestion: result.suggestion,

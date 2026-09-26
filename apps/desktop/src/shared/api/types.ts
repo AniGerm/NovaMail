@@ -264,6 +264,8 @@ export interface CardDavServerStatus {
   listenUrl: string;
   addressbookUrl: string;
   contactCount: number;
+  username: string;
+  password: string;
 }
 
 export interface LdapSearchRequest {
@@ -319,6 +321,13 @@ export interface SignatureDto {
   name: string;
   bodyText: string;
   isDefault: boolean;
+}
+
+export interface MessageAiInsights {
+  messageId: string;
+  summary?: string | null;
+  replySuggestion?: string | null;
+  provider?: string | null;
 }
 
 export interface ExportBackupRequest {

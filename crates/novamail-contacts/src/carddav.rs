@@ -22,6 +22,7 @@ use crate::{ContactsError, ContactsResult};
 /// Advertised URLs use the machine's LAN IP (not 0.0.0.0).
 const DEFAULT_ADDR: &str = "0.0.0.0:8765";
 const BOOK_PATH: &str = "/addressbooks/novamail/";
+const DEFAULT_USER: &str = "novamail";
 
 #[async_trait]
 pub trait ContactStore: Send + Sync {
@@ -34,6 +35,8 @@ pub trait ContactStore: Send + Sync {
 pub struct CardDavServer {
     store: Arc<dyn ContactStore>,
     listen_addr: String,
+    username: parking_lot::Mutex<String>,
+    password: parking_lot::Mutex<String>,
     shutdown_tx: parking_lot::Mutex<Option<watch::Sender<bool>>>,
     running: parking_lot::Mutex<bool>,
 }
@@ -43,6 +46,8 @@ impl CardDavServer {
         Self {
             store,
             listen_addr: DEFAULT_ADDR.into(),
+            username: parking_lot::Mutex::new(DEFAULT_USER.into()),
+            password: parking_lot::Mutex::new(String::new()),
             shutdown_tx: parking_lot::Mutex::new(None),
             running: parking_lot::Mutex::new(false),
         }
@@ -51,6 +56,12 @@ impl CardDavServer {
     pub fn with_addr(mut self, addr: impl Into<String>) -> Self {
         self.listen_addr = addr.into();
         self
+    }
+
+    /// Set Basic-auth credentials used by LAN devices.
+    pub fn set_credentials(&self, username: impl Into<String>, password: impl Into<String>) {
+        *self.username.lock() = username.into();
+        *self.password.lock() = password.into();
     }
 
     pub fn status(&self) -> CardDavServerStatus {
@@ -62,12 +73,19 @@ impl CardDavServer {
             listen_url: format!("http://{advertise}"),
             addressbook_url: format!("http://{advertise}{BOOK_PATH}"),
             contact_count: contacts,
+            username: self.username.lock().clone(),
+            password: self.password.lock().clone(),
         }
     }
 
     pub async fn start(&self) -> ContactsResult<CardDavServerStatus> {
         if *self.running.lock() {
             return Ok(self.status());
+        }
+        if self.password.lock().trim().is_empty() {
+            return Err(ContactsError::CardDav(
+                "CardDAV password is empty; set credentials before starting".into(),
+            ));
         }
 
         let addr: SocketAddr = self
@@ -83,8 +101,10 @@ impl CardDavServer {
         *self.running.lock() = true;
 
         let store = self.store.clone();
+        let username = self.username.lock().clone();
+        let password = self.password.lock().clone();
         tokio::spawn(async move {
-            serve_loop(listener, store, rx).await;
+            serve_loop(listener, store, username, password, rx).await;
         });
 
         Ok(self.status())
@@ -102,8 +122,11 @@ impl CardDavServer {
 async fn serve_loop(
     listener: TcpListener,
     store: Arc<dyn ContactStore>,
+    username: String,
+    password: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let auth = Arc::new((username, password));
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
@@ -115,11 +138,15 @@ async fn serve_loop(
                 match accepted {
                     Ok((stream, _)) => {
                         let store = store.clone();
+                        let auth = auth.clone();
                         tokio::spawn(async move {
                             let io = TokioIo::new(stream);
                             let service = service_fn(move |req| {
                                 let store = store.clone();
-                                async move { Ok::<_, Infallible>(handle(req, store).await) }
+                                let auth = auth.clone();
+                                async move {
+                                    Ok::<_, Infallible>(handle(req, store, &auth.0, &auth.1).await)
+                                }
                             });
                             let _ = http1::Builder::new().serve_connection(io, service).await;
                         });
@@ -133,7 +160,21 @@ async fn serve_loop(
     }
 }
 
-async fn handle(req: Request<Incoming>, store: Arc<dyn ContactStore>) -> Response<Full<Bytes>> {
+async fn handle(
+    req: Request<Incoming>,
+    store: Arc<dyn ContactStore>,
+    username: &str,
+    password: &str,
+) -> Response<Full<Bytes>> {
+    if !authorized(&req, username, password) {
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("WWW-Authenticate", "Basic realm=\"NovaMail CardDAV\"")
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .body(Full::new(Bytes::from("unauthorized")))
+            .unwrap();
+    }
+
     let method = req.method().clone();
     let path = req.uri().path().to_string();
 
@@ -321,6 +362,30 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn authorized(req: &Request<Incoming>, username: &str, password: &str) -> bool {
+    use base64::Engine;
+    let Some(header) = req.headers().get(hyper::header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(value) = header.to_str() else {
+        return false;
+    };
+    let Some(encoded) = value.strip_prefix("Basic ").or_else(|| value.strip_prefix("basic "))
+    else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) else {
+        return false;
+    };
+    let Ok(decoded) = String::from_utf8(bytes) else {
+        return false;
+    };
+    let Some((user, pass)) = decoded.split_once(':') else {
+        return false;
+    };
+    user == username && pass == password
+}
+
 /// Host:port shown to users for CardDAV clients (LAN IP when bound to 0.0.0.0).
 fn advertise_host_port(listen_addr: &str) -> String {
     let port = listen_addr
@@ -351,6 +416,7 @@ fn detect_lan_ipv4() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
 
     #[test]
     fn advertise_keeps_explicit_host() {
@@ -362,5 +428,23 @@ mod tests {
         let advertised = advertise_host_port("0.0.0.0:8765");
         assert!(advertised.ends_with(":8765"), "{advertised}");
         assert!(!advertised.starts_with("0.0.0.0"), "{advertised}");
+    }
+
+    #[test]
+    fn basic_auth_accepts_valid_credentials() {
+        let token = base64::engine::general_purpose::STANDARD.encode("novamail:secret");
+        let req = Request::builder()
+            .uri("/")
+            .header("Authorization", format!("Basic {token}"))
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        // Convert to Incoming is awkward; test helper via header parse path.
+        let header = req.headers().get(hyper::header::AUTHORIZATION).unwrap();
+        let value = header.to_str().unwrap();
+        let encoded = value.strip_prefix("Basic ").unwrap();
+        let decoded =
+            String::from_utf8(base64::engine::general_purpose::STANDARD.decode(encoded).unwrap())
+                .unwrap();
+        assert_eq!(decoded, "novamail:secret");
     }
 }

@@ -17,7 +17,9 @@ impl Default for OllamaProvider {
     fn default() -> Self {
         Self::new(
             std::env::var("NOVAMAIL_OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".into()),
-            std::env::var("NOVAMAIL_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".into()),
+            // Small multilingual instruct model — CPU-friendly for background insights.
+            std::env::var("NOVAMAIL_OLLAMA_MODEL")
+                .unwrap_or_else(|_| "qwen2.5:1.5b".into()),
         )
     }
 }
@@ -35,6 +37,10 @@ impl OllamaProvider {
     }
 
     async fn generate(&self, prompt: &str) -> AiResult<String> {
+        self.generate_with_limit(prompt, 192).await
+    }
+
+    async fn generate_with_limit(&self, prompt: &str, num_predict: u32) -> AiResult<String> {
         #[derive(Serialize)]
         struct RequestBody<'a> {
             model: &'a str,
@@ -47,6 +53,7 @@ impl OllamaProvider {
         struct Options {
             temperature: f32,
             num_predict: u32,
+            num_ctx: u32,
         }
 
         #[derive(Deserialize)]
@@ -64,7 +71,8 @@ impl OllamaProvider {
                 stream: false,
                 options: Options {
                     temperature: 0.2,
-                    num_predict: 512,
+                    num_predict,
+                    num_ctx: 4096,
                 },
             })
             .send()
@@ -104,28 +112,28 @@ impl AiProvider for OllamaProvider {
 
     async fn summarize(&self, request: SummarizeRequest) -> AiResult<SummarizeResponse> {
         let prompt = format!(
-            "Summarize the following email in at most 3 concise sentences. \
-             Reply with the summary only.\n\nSubject: {}\n\n{}",
+            "Summarize this work email in at most 2 short sentences (German or English, \
+             matching the email language). Reply with the summary only.\n\nSubject: {}\n\n{}",
             request.subject,
-            truncate(&request.body_text, 8_000)
+            truncate(&request.body_text, 3_500)
         );
         Ok(SummarizeResponse {
-            summary: self.generate(&prompt).await?,
-            provider: self.name().into(),
+            summary: self.generate_with_limit(&prompt, 128).await?,
+            provider: format!("{}:{}", self.name(), self.model),
         })
     }
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse> {
         let prompt = format!(
-            "Draft a short professional reply to this email. \
-             Reply with the email body only, no commentary.\n\nFrom: {}\nSubject: {}\n\n{}",
+            "Draft a short professional reply (3-6 sentences). Match the email language \
+             (German or English). Reply with the email body only.\n\nFrom: {}\nSubject: {}\n\n{}",
             request.from_email,
             request.subject,
-            truncate(&request.body_text, 8_000)
+            truncate(&request.body_text, 3_500)
         );
         Ok(SuggestReplyResponse {
-            suggestion: self.generate(&prompt).await?,
-            provider: self.name().into(),
+            suggestion: self.generate_with_limit(&prompt, 200).await?,
+            provider: format!("{}:{}", self.name(), self.model),
         })
     }
 
@@ -151,6 +159,46 @@ impl AiProvider for OllamaProvider {
 
 fn truncate(input: &str, max_chars: usize) -> String {
     input.chars().take(max_chars).collect()
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn qwen_summarizes_german_office_mail() {
+        let provider = OllamaProvider::default();
+        // Skip when Ollama isn't running in CI.
+        if reqwest::Client::new()
+            .get(format!("{}/api/tags", provider.base_url))
+            .send()
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let result = provider
+            .summarize(SummarizeRequest {
+                subject: "Termin verschieben".into(),
+                body_text: "Hallo Team,\n\nkönnen wir das Meeting von Dienstag auf Donnerstag 14 Uhr verschieben? Bitte kurz rückmelden.\n\nViele Grüße\nAnna".into(),
+            })
+            .await
+            .expect("qwen summarize");
+        assert!(!result.summary.trim().is_empty());
+        assert!(result.provider.contains("qwen") || result.provider.contains("ollama"));
+        println!("summary={}", result.summary);
+
+        let reply = provider
+            .suggest_reply(SuggestReplyRequest {
+                subject: "Termin verschieben".into(),
+                body_text: "Hallo Team,\n\nkönnen wir das Meeting von Dienstag auf Donnerstag 14 Uhr verschieben?\n\nViele Grüße\nAnna".into(),
+                from_email: "anna@example.com".into(),
+            })
+            .await
+            .expect("qwen reply");
+        assert!(!reply.suggestion.trim().is_empty());
+        println!("reply={}", reply.suggestion);
+    }
 }
 
 fn parse_priority_json(raw: &str) -> Option<PrioritizeResponse> {

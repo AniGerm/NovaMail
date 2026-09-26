@@ -175,8 +175,13 @@ export const de = {
     "Gestoppt — starten, damit Handy, Drucker und Fax dasselbe Telefonbuch nutzen.",
   cardDavDeviceHint:
     "Weitere Geräte verbinden sich mit dieser CardDAV-URL am Hauptrechner (gleiches LAN oder VPN). So bleibt ein gemeinsames Telefonbuch — ohne Backup-Datei hin- und herzukopieren.",
+  cardDavUsername: "Benutzername",
+  cardDavPassword: "Passwort (Basic-Auth)",
+  cardDavAuthHint:
+    "Ohne Benutzername/Passwort lehnt der Server Zugriffe ab. Trage beides am Telefon/Drucker ein.",
   stopCardDav: "CardDAV stoppen",
   startCardDav: "CardDAV starten",
+  aiCachedHint: "Bereits im Hintergrund vorbereitet",
   addContact: "Kontakt hinzufügen",
   editContact: "Kontakt bearbeiten",
   emailsComma: "E-Mails (kommagetrennt)",

@@ -3,10 +3,10 @@ use novamail_ipc::{
     CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
     ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
     LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
-    ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto, MessageSummaryDto,
-    OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto, SearchRequest,
-    SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto,
+    MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto,
+    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
     SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
     UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
@@ -101,11 +101,11 @@ pub fn messages_get(
 }
 
 #[tauri::command]
-pub fn messages_set_flags(
+pub async fn messages_set_flags(
     state: State<'_, DesktopState>,
     request: SetFlagsRequest,
 ) -> Result<(), AppError> {
-    state.app.set_flags(request).map_err(map_err)
+    state.app.set_flags(request).await.map_err(map_err)
 }
 
 #[tauri::command]
@@ -197,19 +197,19 @@ pub async fn oauth_wait_callback(
 }
 
 #[tauri::command]
-pub fn messages_archive(
+pub async fn messages_archive(
     state: State<'_, DesktopState>,
     message_id: Uuid,
 ) -> Result<(), AppError> {
-    state.app.archive_message(message_id).map_err(map_err)
+    state.app.archive_message(message_id).await.map_err(map_err)
 }
 
 #[tauri::command]
-pub fn messages_delete(
+pub async fn messages_delete(
     state: State<'_, DesktopState>,
     message_id: Uuid,
 ) -> Result<(), AppError> {
-    state.app.delete_message(message_id).map_err(map_err)
+    state.app.delete_message(message_id).await.map_err(map_err)
 }
 
 #[tauri::command]
@@ -277,7 +277,18 @@ pub fn carddav_stop(state: State<'_, DesktopState>) -> Result<CardDavServerStatu
 
 #[tauri::command]
 pub fn carddav_status(state: State<'_, DesktopState>) -> Result<CardDavServerStatus, AppError> {
-    Ok(state.app.carddav_status())
+    state.app.carddav_status().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_message_insights(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<MessageAiInsights, AppError> {
+    state
+        .app
+        .get_message_ai_insights(message_id)
+        .map_err(map_err)
 }
 
 #[tauri::command]

@@ -11,6 +11,7 @@ import type {
   ContactsBookSettings,
   ExportBackupResponse,
   ImportBackupResult,
+  MessageAiInsights,
   LabelDto,
   LdapSearchRequest,
   LdapSyncRequest,
@@ -103,6 +104,8 @@ export const api = {
     call<SuggestReplyMessageResponse>("ai_suggest_reply", {
       request: { messageId },
     }),
+  aiMessageInsights: (messageId: string) =>
+    call<MessageAiInsights>("ai_message_insights", { messageId }),
   messagesArchive: (messageId: string) =>
     call<void>("messages_archive", { messageId }),
   messagesForwardDraft: (messageId: string) =>

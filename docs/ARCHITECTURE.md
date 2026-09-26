@@ -31,9 +31,10 @@ novamail-core          use-cases
 
 ## AI + HTML safety
 
-- Primary provider: Ollama (`novamail-ai::OllamaProvider`)
+- Primary provider: Ollama (`novamail-ai::OllamaProvider`), default model `qwen2.5:1.5b`
 - Offline fallback: `NullAiProvider` (deterministic heuristics)
-- Commands: `ai_summarize_message`, `ai_suggest_reply`
+- Background queue after sync writes `ai_insights` (summary + reply draft)
+- Commands: `ai_summarize_message`, `ai_suggest_reply`, `ai_message_insights`
 - `AppState::get_message` sanitizes HTML with ammonia before IPC (ADR 0005)
 
 ## Engineering rules

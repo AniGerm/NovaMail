@@ -181,4 +181,8 @@ pub struct CardDavServerStatus {
     pub listen_url: String,
     pub addressbook_url: String,
     pub contact_count: u32,
+    /// Fixed CardDAV username for Basic auth (phones/printers).
+    pub username: String,
+    /// Shared password; shown in UI so devices can authenticate.
+    pub password: String,
 }
