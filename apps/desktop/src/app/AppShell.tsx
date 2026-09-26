@@ -20,6 +20,7 @@ import { api, isDesktopShell } from "@/shared/api/client";
 import type { AccountDto, AppError, MessageDetailDto } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
+import { nextThemeMode, type ThemeMode } from "@/shared/theme/resolveTheme";
 
 export function AppShell() {
   const t = useT();
@@ -205,11 +206,9 @@ export function AppShell() {
     }));
   }, []);
 
-  const themeDark =
-    theme === "dark" ||
-    (theme === "system" &&
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const cycleTheme = useCallback(() => {
+    setTheme(nextThemeMode(theme as ThemeMode));
+  }, [setTheme, theme]);
 
   const shortcuts = useMemo(
     () => ({
@@ -331,11 +330,17 @@ export function AppShell() {
       },
       {
         id: "theme",
-        label: themeDark ? t("switchToLight") : t("switchToDark"),
-        onSelect: () => setTheme(themeDark ? "light" : "dark"),
+        label:
+          theme === "light"
+            ? t("switchToDark")
+            : theme === "dark"
+              ? t("switchToAuto")
+              : t("switchToLight"),
+        onSelect: () => cycleTheme(),
       },
     ],
     [
+      cycleTheme,
       handleArchive,
       handleDelete,
       handleForward,
@@ -344,10 +349,9 @@ export function AppShell() {
       setComposerOpen,
       setContactsOpen,
       setSettingsOpen,
-      setTheme,
       setTriageOpen,
       t,
-      themeDark,
+      theme,
     ],
   );
 
@@ -393,7 +397,7 @@ export function AppShell() {
           accounts={accounts}
           selectedAccountId={inboxFilters.accountId}
           syncStatus={syncStatus}
-          themeDark={themeDark}
+          themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
           onCompose={() => {
@@ -404,26 +408,29 @@ export function AppShell() {
           }}
           onSync={handleSync}
           onAddAccount={() => setAccountSetupOpen(true)}
-          onToggleTheme={() => setTheme(themeDark ? "light" : "dark")}
+          onToggleTheme={cycleTheme}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenContacts={() => setContactsOpen(true)}
           onOpenTriage={() => setTriageOpen(true)}
         />
 
         {accounts.length === 0 ? (
-          <EmptyState
-            title={t("welcomeTitle")}
-            description={t("welcomeDescription")}
-            action={
-              <button
-                type="button"
-                className="mt-2 text-[var(--nova-accent)]"
-                onClick={() => setAccountSetupOpen(true)}
-              >
-                {t("addAccount")}
-              </button>
-            }
-          />
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+            <EmptyState
+              className="w-full"
+              title={t("welcomeTitle")}
+              description={t("welcomeDescription")}
+              action={
+                <button
+                  type="button"
+                  className="mt-2 text-[var(--nova-accent)]"
+                  onClick={() => setAccountSetupOpen(true)}
+                >
+                  {t("addAccount")}
+                </button>
+              }
+            />
+          </div>
         ) : (
           <>
             <div className="w-[380px] shrink-0">

@@ -58,6 +58,14 @@ export const de = {
   navigation: "Navigation",
   switchToLight: "Hellmodus",
   switchToDark: "Dunkelmodus",
+  switchToAuto: "Automatik (System / Abend)",
+  themeSystemHint:
+    "Automatik folgt der Systemhelligkeit. Ist keine verfügbar, wechselt NovaMail ab ca. 19 Uhr in den Dunkelmodus.",
+  search: "Suche",
+  confirmDeleteContactTitle: "Kontakt löschen?",
+  confirmDeleteContactBody:
+    "„{name}“ wirklich löschen? Dieser Schritt kann nicht rückgängig gemacht werden.",
+  contactDeleted: "Kontakt gelöscht.",
   newMessage: "Neue Nachricht",
   close: "Schließen",
   from: "Von",
@@ -92,7 +100,7 @@ export const de = {
   settingsTitle: "Einstellungen",
   settingsDescription: "Darstellung, Sprache, Signaturen, Labels und Regeln.",
   theme: "Design",
-  themeSystem: "System",
+  themeSystem: "Automatik",
   themeLight: "Hell",
   themeDark: "Dunkel",
   density: "Dichte",
@@ -175,7 +183,7 @@ export const de = {
   notes: "Notizen",
   saveContact: "Kontakt speichern",
   contactSaved: "Kontakt gespeichert.",
-  fuzzySearchContacts: "Fuzzy-Suche…",
+  fuzzySearchContacts: "Suche",
   ldapLookup: "LDAP-Suche",
   ldapSyncTitle: "LDAP-Synchronisation",
   ldapSyncDescription:

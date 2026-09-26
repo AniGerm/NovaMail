@@ -60,6 +60,14 @@ export const en: Translations = {
   navigation: "Navigation",
   switchToLight: "Switch to light mode",
   switchToDark: "Switch to dark mode",
+  switchToAuto: "Automatic (system / evening)",
+  themeSystemHint:
+    "Automatic follows system appearance. If unavailable, NovaMail switches to dark around 7 pm.",
+  search: "Search",
+  confirmDeleteContactTitle: "Delete contact?",
+  confirmDeleteContactBody:
+    "Really delete “{name}”? This cannot be undone.",
+  contactDeleted: "Contact deleted.",
   newMessage: "New message",
   close: "Close",
   from: "From",
@@ -94,7 +102,7 @@ export const en: Translations = {
   settingsTitle: "Settings",
   settingsDescription: "Appearance, language, signatures, labels, and mail rules.",
   theme: "Theme",
-  themeSystem: "System",
+  themeSystem: "Automatic",
   themeLight: "Light",
   themeDark: "Dark",
   density: "Density",
@@ -177,7 +185,7 @@ export const en: Translations = {
   notes: "Notes",
   saveContact: "Save contact",
   contactSaved: "Contact saved.",
-  fuzzySearchContacts: "Fuzzy search…",
+  fuzzySearchContacts: "Search",
   ldapLookup: "LDAP lookup",
   ldapSyncTitle: "LDAP sync",
   ldapSyncDescription:

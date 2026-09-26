@@ -90,7 +90,7 @@ export function SettingsDialog({
           </select>
         </label>
 
-        <div className="flex gap-2" aria-hidden>
+        <div className="grid grid-cols-4 gap-2 px-0.5 py-1" aria-hidden>
           {(
             [
               ["navy", "#1e3a5f", "#d7e4f4"],
@@ -104,12 +104,13 @@ export function SettingsDialog({
               type="button"
               title={id}
               onClick={() => setColorScheme(id)}
-              className="h-9 flex-1 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)]"
+              className="h-7 w-full rounded-[6px] border border-[var(--nova-border)]"
               style={{
                 background: `linear-gradient(135deg, ${soft} 55%, ${accent})`,
-                outline:
-                  colorScheme === id ? "2px solid var(--nova-accent)" : undefined,
-                outlineOffset: 2,
+                boxShadow:
+                  colorScheme === id
+                    ? "0 0 0 2px var(--nova-surface), 0 0 0 4px var(--nova-accent)"
+                    : undefined,
               }}
             />
           ))}
@@ -126,6 +127,9 @@ export function SettingsDialog({
             <option value="light">{t("themeLight")}</option>
             <option value="dark">{t("themeDark")}</option>
           </select>
+          <span className="text-xs text-[var(--nova-ink-muted)]">
+            {t("themeSystemHint")}
+          </span>
         </label>
         <label className="grid gap-1">
           <span>{t("density")}</span>

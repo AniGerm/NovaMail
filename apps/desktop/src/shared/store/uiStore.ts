@@ -3,9 +3,11 @@ import { persist } from "zustand/middleware";
 
 import type { Locale } from "@/shared/i18n";
 import type { ColorSchemeId } from "@/shared/theme/schemes";
+import type { ThemeMode } from "@/shared/theme/resolveTheme";
 
-type ThemeMode = "light" | "dark" | "system";
 type Density = "comfortable" | "compact";
+
+export type { ThemeMode };
 
 interface UiState {
   theme: ThemeMode;

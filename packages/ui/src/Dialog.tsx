@@ -27,7 +27,7 @@ export function Dialog({
     >
       <div
         className={cn(
-          "flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
+          "relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
           className,
         )}
       >

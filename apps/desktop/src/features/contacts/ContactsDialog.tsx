@@ -198,6 +198,10 @@ export function ContactsDialog({
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   async function refresh(nextQuery = query) {
     const [list, status, ldap, book] = await Promise.all([
@@ -537,7 +541,7 @@ export function ContactsDialog({
             <div className="flex items-center gap-2">
               <Input
                 className="min-w-0 flex-1"
-                placeholder={t("fuzzySearchContacts")}
+                placeholder={t("search")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -940,17 +944,19 @@ export function ContactsDialog({
                     size="sm"
                     variant="ghost"
                     disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      try {
-                        await api.contactsDelete(draft.id!);
-                        startNew();
-                        await refresh();
-                      } catch (err) {
-                        setError((err as AppError).message);
-                      } finally {
-                        setBusy(false);
-                      }
+                    onClick={() => {
+                      const name =
+                        formatContactName(
+                          {
+                            displayName: draft.displayName,
+                            givenName: draft.givenName,
+                            familyName: draft.familyName,
+                          },
+                          bookSettings.nameOrder,
+                        ) || t("contactFallback");
+                      setPendingDelete({ id: draft.id!, name });
+                      setError(null);
+                      setStatusInfo(null);
                     }}
                   >
                     {t("delete")}
@@ -972,6 +978,61 @@ export function ContactsDialog({
           </div>
         </div>
       )}
+
+      {pendingDelete ? (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-[rgba(14,17,20,0.45)] p-4 backdrop-blur-sm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="contact-delete-title"
+        >
+          <div className="w-full max-w-sm rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-5 shadow-[var(--nova-shadow)]">
+            <h3
+              id="contact-delete-title"
+              className="font-[family-name:var(--nova-font-display)] text-lg"
+            >
+              {t("confirmDeleteContactTitle")}
+            </h3>
+            <p className="mt-2 text-sm text-[var(--nova-ink-muted)]">
+              {t("confirmDeleteContactBody", { name: pendingDelete.name })}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setPendingDelete(null)}
+              >
+                {t("cancel")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await api.contactsDelete(pendingDelete.id);
+                    setPendingDelete(null);
+                    startNew();
+                    await refresh();
+                    setStatusInfo(t("contactDeleted"));
+                  } catch (err) {
+                    setError((err as AppError).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {t("delete")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <DialogActions>
         <Button onClick={onClose}>{t("done")}</Button>
       </DialogActions>

@@ -5,6 +5,7 @@ import {
   Settings2,
   Moon,
   Sun,
+  Monitor,
   BookUser,
   Zap,
 } from "lucide-react";
@@ -12,12 +13,13 @@ import { Badge, Button, IconButton } from "@novamail/ui";
 
 import type { AccountDto } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
+import type { ThemeMode } from "@/shared/theme/resolveTheme";
 
 interface SidebarProps {
   accounts: AccountDto[];
   selectedAccountId: string | null;
   syncStatus: string | null;
-  themeDark: boolean;
+  themeMode: ThemeMode;
   onSelectUnified: () => void;
   onSelectAccount: (accountId: string) => void;
   onCompose: () => void;
@@ -33,7 +35,7 @@ export function Sidebar({
   accounts,
   selectedAccountId,
   syncStatus,
-  themeDark,
+  themeMode,
   onSelectUnified,
   onSelectAccount,
   onCompose,
@@ -45,6 +47,21 @@ export function Sidebar({
   onOpenTriage,
 }: SidebarProps) {
   const t = useT();
+  const themeLabel =
+    themeMode === "light"
+      ? t("switchToDark")
+      : themeMode === "dark"
+        ? t("switchToAuto")
+        : t("switchToLight");
+  const themeIcon =
+    themeMode === "light" ? (
+      <Moon size={18} />
+    ) : themeMode === "dark" ? (
+      <Monitor size={18} />
+    ) : (
+      <Sun size={18} />
+    );
+
   return (
     <aside
       aria-label={t("navigation")}
@@ -58,11 +75,8 @@ export function Sidebar({
             </p>
             <p className="text-xs text-[var(--nova-ink-muted)]">{t("tagline")}</p>
           </div>
-          <IconButton
-            label={themeDark ? t("switchToLight") : t("switchToDark")}
-            onClick={onToggleTheme}
-          >
-            {themeDark ? <Sun size={18} /> : <Moon size={18} />}
+          <IconButton label={themeLabel} onClick={onToggleTheme}>
+            {themeIcon}
           </IconButton>
         </div>
         <Button className="w-full" onClick={onCompose}>
