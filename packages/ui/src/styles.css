@@ -222,3 +222,42 @@ input[type="radio"]:focus-visible {
 .nova-slide-in {
   animation: nova-slide-in 200ms ease-out;
 }
+
+/* Composer rich-text surface */
+.nova-rich-editor {
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.nova-rich-editor p {
+  margin: 0 0 0.65em;
+}
+
+.nova-rich-editor p:last-child {
+  margin-bottom: 0;
+}
+
+.nova-rich-editor ul,
+.nova-rich-editor ol {
+  margin: 0.35em 0 0.65em;
+  padding-left: 1.4em;
+}
+
+.nova-rich-editor ul {
+  list-style: disc;
+}
+
+.nova-rich-editor ol {
+  list-style: decimal;
+}
+
+.nova-rich-editor li {
+  margin: 0.15em 0;
+}
+
+.nova-rich-editor blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.85em;
+  border-left: 3px solid color-mix(in srgb, var(--nova-accent) 45%, var(--nova-border));
+  color: var(--nova-ink-muted);
+}

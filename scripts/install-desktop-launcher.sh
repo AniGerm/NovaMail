@@ -16,6 +16,13 @@ DOCK_DIR="${HOME}/.config/plank/dock1/launchers"
 DOCK_SETTINGS="${HOME}/.config/plank/dock1/settings"
 DESKTOP_HOME="${HOME}/Desktop"
 
+# German spellcheck dictionary for the composer (best-effort).
+if command -v apt-get >/dev/null 2>&1; then
+  if [[ ! -f /usr/share/hunspell/de_DE.dic ]]; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq hunspell-de-de >/dev/null 2>&1 || true
+  fi
+fi
+
 chmod +x "$LAUNCHER"
 mkdir -p "$DESKTOP_DIR" "$BIN_DIR" "$DESKTOP_HOME" "$DOCK_DIR" \
   "${ICON_DIR}/256x256/apps" \

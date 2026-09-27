@@ -3,6 +3,11 @@ import { Paperclip } from "lucide-react";
 import { Button, Input, Select } from "@novamail/ui";
 
 import { RecipientField } from "@/features/composer/RecipientField";
+import {
+  htmlToPlain,
+  plainToHtml,
+  RichTextEditor,
+} from "@/features/composer/RichTextEditor";
 import { api } from "@/shared/api/client";
 import type {
   AccountDto,
@@ -57,7 +62,8 @@ export function Composer({
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("<p><br></p>");
+  const [bodyText, setBodyText] = useState("");
   const [attachments, setAttachments] = useState<OutgoingAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +77,9 @@ export function Composer({
       initialSubject ??
         (replyTo ? `Re: ${replyTo.summary.subject}` : ""),
     );
-    setBody(initialBody);
+    const html = plainToHtml(initialBody);
+    setBodyHtml(html);
+    setBodyText(htmlToPlain(html));
     setAttachments([]);
     setError(null);
 
@@ -81,7 +89,13 @@ export function Composer({
         .then((sigs) => {
           const def = sigs.find((s) => s.isDefault) ?? sigs[0];
           if (def && !initialBody) {
-            setBody((current) => (current ? current : `\n\n${def.bodyText}`));
+            setBodyHtml((current) => {
+              const plain = htmlToPlain(current);
+              if (plain.trim()) return current;
+              const next = plainToHtml(`\n\n${def.bodyText}`);
+              setBodyText(htmlToPlain(next));
+              return next;
+            });
           }
         })
         .catch(() => undefined);
@@ -115,6 +129,10 @@ export function Composer({
       setError(t("addAccountBeforeSend"));
       return;
     }
+    if (!bodyText.trim()) {
+      setError(t("messageEmpty"));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -128,8 +146,8 @@ export function Composer({
         cc: [],
         bcc: [],
         subject,
-        bodyText: body,
-        bodyHtml: null,
+        bodyText,
+        bodyHtml,
         inReplyTo: replyTo?.messageId ?? null,
         references: replyTo
           ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
@@ -138,7 +156,8 @@ export function Composer({
       });
       onSent();
       onClose();
-      setBody("");
+      setBodyHtml("<p><br></p>");
+      setBodyText("");
       setAttachments([]);
     } catch (err) {
       setError((err as AppError).message || t("sendFailed"));
@@ -198,15 +217,14 @@ export function Composer({
               onChange={(e) => setSubject(e.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-sm">
-            <span>{t("message")}</span>
-            <textarea
-              required
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className="min-h-[220px] resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2"
-            />
-          </label>
+          <RichTextEditor
+            required
+            valueHtml={bodyHtml}
+            onChange={(html, plain) => {
+              setBodyHtml(html);
+              setBodyText(plain);
+            }}
+          />
           <div className="grid gap-1 text-sm">
             <span>{t("attachments")}</span>
             <input
