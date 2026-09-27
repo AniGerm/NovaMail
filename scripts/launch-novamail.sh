@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch NovaMail in the Cloud Desktop / local Linux shell.
-set -euo pipefail
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -15,7 +15,7 @@ if [[ -d "${HOME}/.nvm/versions/node" ]]; then
 fi
 if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
   # shellcheck disable=SC1091
-  source "${HOME}/.nvm/nvm.sh"
+  source "${HOME}/.nvm/nvm.sh" || true
 fi
 
 export DISPLAY="${DISPLAY:-:1}"
@@ -27,13 +27,11 @@ LOG_FILE="${LOG_DIR}/launcher.log"
 
 # Prefer the already-built debug binary (embeds apps/desktop/dist).
 # Note: a plain `cargo build` does NOT load Vite — only `tauri dev` sets cfg(dev).
-# Starting Vite alone next to a cargo-built binary still shows the embedded (possibly stale) UI.
 BIN="${ROOT}/target/debug/novamail-desktop"
 DESKTOP_DIR="${ROOT}/apps/desktop"
 DIST_JS="$(ls -1t "${DESKTOP_DIR}/dist/assets"/index-*.js 2>/dev/null | head -1 || true)"
 
 frontend_stale() {
-  # Rebuild when there is no dist, or any desktop src file is newer than the bundle.
   [[ -n "$DIST_JS" && -f "$DIST_JS" ]] || return 0
   if find "${DESKTOP_DIR}/src" "${DESKTOP_DIR}/index.html" "${DESKTOP_DIR}/public" \
       -type f -newer "$DIST_JS" 2>/dev/null | grep -q .; then
@@ -49,15 +47,28 @@ binary_stale() {
   return 1
 }
 
+# Avoid stacking multiple instances (looks like a hang / crash on second launch).
+if pgrep -f "${BIN}" >/dev/null 2>&1; then
+  echo "NovaMail already running — focusing existing window." >>"$LOG_FILE"
+  if command -v wmctrl >/dev/null 2>&1; then
+    wmctrl -a NovaMail 2>/dev/null || true
+  fi
+  exit 0
+fi
+
 if frontend_stale; then
   echo "Rebuilding desktop frontend (src newer than dist)..." >>"$LOG_FILE"
-  (cd "$DESKTOP_DIR" && pnpm build) >>"$LOG_FILE" 2>&1
+  if ! (cd "$DESKTOP_DIR" && pnpm build) >>"$LOG_FILE" 2>&1; then
+    echo "Frontend rebuild failed — launching existing binary if present." >>"$LOG_FILE"
+  fi
   DIST_JS="$(ls -1t "${DESKTOP_DIR}/dist/assets"/index-*.js 2>/dev/null | head -1 || true)"
 fi
 
 if binary_stale; then
   echo "Rebuilding novamail-desktop (dist newer than binary)..." >>"$LOG_FILE"
-  cargo build -p novamail-desktop >>"$LOG_FILE" 2>&1
+  if ! cargo build -p novamail-desktop >>"$LOG_FILE" 2>&1; then
+    echo "Binary rebuild failed — launching existing binary if present." >>"$LOG_FILE"
+  fi
 fi
 
 if [[ -x "$BIN" ]]; then

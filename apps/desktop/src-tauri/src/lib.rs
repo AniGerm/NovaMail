@@ -18,6 +18,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Notification plugin: init is best-effort — some hosts lack a notification bus.
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let state = DesktopState::new()?;
