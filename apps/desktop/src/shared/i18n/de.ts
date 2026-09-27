@@ -277,6 +277,34 @@ export const de = {
   failedAddAccount: "Konto konnte nicht hinzugefügt werden",
   oauthFailed: "OAuth-Anmeldung fehlgeschlagen",
   contactFallback: "Kontakt",
+  aiSetupTitle: "Lokale KI nutzen?",
+  aiSetupDescription:
+    "NovaMail kann Mails lokal zusammenfassen und Antwortvorschläge erzeugen (über Ollama). Alles bleibt auf diesem Gerät.",
+  aiSetupYes: "Ja, KI aktivieren",
+  aiSetupNo: "Nein, ohne KI fortfahren",
+  aiSetupContinue: "Weiter",
+  aiSetupCpuHint:
+    "Keine NVIDIA-GPU gefunden. Empfohlen für CPU: qwen2.5:1.5b (klein und sparsam).",
+  aiSetupGpuHint:
+    "NVIDIA-GPU oder bereits installierte Ollama-Modelle gefunden. Wähle dein Standardmodell.",
+  aiSetupOllamaMissing:
+    "Ollama scheint noch nicht erreichbar. Du kannst das Modell trotzdem festlegen und Ollama später starten.",
+  aiSetupModelLabel: "Standardmodell",
+  aiSetupRecommended: "Empfohlen",
+  aiSettingsTitle: "Lokale KI",
+  aiSettingsDescription:
+    "Zusammenfassungen und Antwortvorschläge über lokales Ollama. Jederzeit ein- oder ausschaltbar.",
+  aiSettingsEnabled: "KI aktivieren",
+  aiSettingsModel: "Standardmodell",
+  aiSettingsBaseUrl: "Ollama-URL",
+  aiSettingsSave: "KI-Einstellungen speichern",
+  aiSettingsSaved: "KI-Einstellungen gespeichert",
+  aiSettingsRefresh: "Status aktualisieren",
+  aiRuntimeGpuYes: "NVIDIA-GPU erkannt",
+  aiRuntimeGpuNo: "Keine NVIDIA-GPU erkannt (CPU)",
+  aiRuntimeOllamaYes: "Ollama erreichbar",
+  aiRuntimeOllamaNo: "Ollama nicht erreichbar",
+  aiDisabledHint: "KI ist deaktiviert. Aktiviere sie in den Einstellungen.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

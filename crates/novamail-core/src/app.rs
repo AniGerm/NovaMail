@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use novamail_ai::{
-    AiProvider, NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest,
-    SummarizeRequest,
+    allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
+    list_ollama_models, recommended_model, AiProvider, NullAiProvider, OllamaProvider,
+    PrioritizeRequest, SuggestReplyRequest, SummarizeRequest, CPU_DEFAULT_MODEL,
 };
+use parking_lot::RwLock;
 use novamail_contacts::{search_ldap, CardDavServer};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use novamail_crypto::{
@@ -12,11 +14,11 @@ use novamail_crypto::{
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AttachmentDto,
-    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
-    ContactDto, ContactsBookSettings, ExportBackupRequest, ExportBackupResponse,
-    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
-    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiRuntimeStatus, AiSettings,
+    AttachmentDto, BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload,
+    CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
+    ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
+    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
     OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
     SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
@@ -42,7 +44,7 @@ pub struct AppState {
     pub paths: AppPaths,
     pub db: Database,
     pub secrets: SecretStore,
-    ai: Arc<dyn AiProvider>,
+    ai: RwLock<Arc<dyn AiProvider>>,
     carddav: CardDavServer,
 }
 
@@ -54,23 +56,88 @@ impl AppState {
         let secrets = SecretStore::with_memory_fallback(true);
         let store = DbContactStore::new(db.clone());
         let carddav = CardDavServer::new(store);
+        let settings = Self::load_ai_settings(&db);
         Ok(Self {
             paths,
             db,
             secrets,
-            ai: Self::select_ai_provider(),
+            ai: RwLock::new(Self::provider_from_settings(&settings)),
             carddav,
         })
     }
 
-    fn select_ai_provider() -> Arc<dyn AiProvider> {
-        // Primary provider talks to local Ollama. Per-request helpers fall back
-        // to NullAiProvider when the daemon is unreachable.
-        Arc::new(OllamaProvider::default())
+    fn load_ai_settings(db: &Database) -> AiSettings {
+        match db.get_setting("ai.settings") {
+            Ok(Some(raw)) => serde_json::from_str(&raw).unwrap_or_else(|_| AiSettings {
+                enabled: true,
+                model: default_ollama_model(),
+                base_url: default_ollama_url(),
+                onboarding_completed: true,
+            }),
+            _ => AiSettings {
+                enabled: false,
+                model: default_ollama_model(),
+                base_url: default_ollama_url(),
+                onboarding_completed: false,
+            },
+        }
+    }
+
+    fn provider_from_settings(settings: &AiSettings) -> Arc<dyn AiProvider> {
+        if settings.enabled {
+            Arc::new(OllamaProvider::new(
+                settings.base_url.clone(),
+                settings.model.clone(),
+            ))
+        } else {
+            Arc::new(NullAiProvider)
+        }
+    }
+
+    fn ai_provider(&self) -> Arc<dyn AiProvider> {
+        self.ai.read().clone()
     }
 
     fn offline_ai() -> NullAiProvider {
         NullAiProvider
+    }
+
+    pub fn ai_settings(&self) -> CoreResult<AiSettings> {
+        Ok(Self::load_ai_settings(&self.db))
+    }
+
+    pub fn set_ai_settings(&self, mut settings: AiSettings) -> CoreResult<AiSettings> {
+        if settings.model.trim().is_empty() {
+            settings.model = CPU_DEFAULT_MODEL.to_string();
+        }
+        if settings.base_url.trim().is_empty() {
+            settings.base_url = default_ollama_url();
+        }
+        settings.model = settings.model.trim().to_string();
+        settings.base_url = settings.base_url.trim_end_matches('/').to_string();
+        let raw =
+            serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?;
+        self.db.set_setting("ai.settings", &raw)?;
+        *self.ai.write() = Self::provider_from_settings(&settings);
+        Ok(settings)
+    }
+
+    pub async fn ai_runtime_status(&self) -> CoreResult<AiRuntimeStatus> {
+        let settings = self.ai_settings()?;
+        let nvidia_gpu = detect_nvidia_gpu();
+        let (ollama_reachable, models) = match list_ollama_models(&settings.base_url).await {
+            Ok(list) => (true, list),
+            Err(_) => (false, Vec::new()),
+        };
+        let recommended = recommended_model(nvidia_gpu, &models);
+        let allow_pick = allow_model_pick(nvidia_gpu, &models);
+        Ok(AiRuntimeStatus {
+            ollama_reachable,
+            nvidia_gpu,
+            models,
+            recommended_model: recommended,
+            allow_model_pick: allow_pick,
+        })
     }
 
     pub fn provider_presets(&self) -> Vec<ProviderPreset> {
@@ -946,10 +1013,14 @@ impl AppState {
         if message_ids.is_empty() {
             return;
         }
+        let settings = Self::load_ai_settings(&self.db);
+        if !settings.enabled || !settings.onboarding_completed {
+            return;
+        }
         // Cap backlog so a large first sync does not saturate the CPU for hours.
         let ids: Vec<Uuid> = message_ids.iter().copied().take(25).collect();
         let db = self.db.clone();
-        let ai = self.ai.clone();
+        let ai = self.ai_provider();
         tokio::spawn(async move {
             static AI_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
             let _guard = AI_LOCK.lock().await;
@@ -1061,8 +1132,8 @@ impl AppState {
             .body_text
             .clone()
             .unwrap_or_else(|| detail.summary.snippet.clone());
-        let result = match self
-            .ai
+        let ai = self.ai_provider();
+        let result = match ai
             .summarize(SummarizeRequest {
                 subject: detail.summary.subject.clone(),
                 body_text: body.clone(),
@@ -1155,7 +1226,8 @@ impl AppState {
             facts: facts.clone(),
             style: None,
         };
-        let result = match self.ai.suggest_reply_variants(ai_request.clone()).await {
+        let ai = self.ai_provider();
+        let result = match ai.suggest_reply_variants(ai_request.clone()).await {
             Ok(result) => result,
             Err(err) => {
                 tracing::warn!(error = %err, "primary AI provider failed; using offline fallback");
@@ -1256,7 +1328,8 @@ impl AppState {
             snippet: detail.summary.snippet,
             from_email: detail.summary.from.email,
         };
-        let result = match self.ai.prioritize(request.clone()).await {
+        let ai = self.ai_provider();
+        let result = match ai.prioritize(request.clone()).await {
             Ok(result) => result,
             Err(_) => Self::offline_ai().prioritize(request).await?,
         };

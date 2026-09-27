@@ -11,6 +11,8 @@ import type {
   ContactsBookSettings,
   ExportBackupResponse,
   ImportBackupResult,
+  AiRuntimeStatus,
+  AiSettings,
   MessageAiInsights,
   SuggestRepliesMessageResponse,
   LabelDto,
@@ -111,6 +113,10 @@ export const api = {
     }),
   aiMessageInsights: (messageId: string) =>
     call<MessageAiInsights>("ai_message_insights", { messageId }),
+  aiGetSettings: () => call<AiSettings>("ai_get_settings"),
+  aiSetSettings: (settings: AiSettings) =>
+    call<AiSettings>("ai_set_settings", { settings }),
+  aiRuntimeStatus: () => call<AiRuntimeStatus>("ai_runtime_status"),
   messagesArchive: (messageId: string) =>
     call<void>("messages_archive", { messageId }),
   messagesForwardDraft: (messageId: string) =>

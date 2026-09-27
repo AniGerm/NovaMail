@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, DialogActions, Input } from "@novamail/ui";
 
-import { api } from "@/shared/api/client";
-import type { AccountDto, AppError, LabelDto, RuleDto, SignatureDto } from "@/shared/api/types";
+import { api, isDesktopShell } from "@/shared/api/client";
+import type {
+  AccountDto,
+  AiRuntimeStatus,
+  AiSettings,
+  AppError,
+  LabelDto,
+  RuleDto,
+  SignatureDto,
+} from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import type { Locale } from "@/shared/i18n";
 import type { ColorSchemeId } from "@/shared/theme/schemes";
@@ -77,6 +85,15 @@ export function SettingsDialog({
   const importFileRef = useRef<File | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiSettings, setAiSettings] = useState<AiSettings>({
+    enabled: false,
+    model: "qwen2.5:1.5b",
+    baseUrl: "http://127.0.0.1:11434",
+    onboardingCompleted: false,
+  });
+  const [aiRuntime, setAiRuntime] = useState<AiRuntimeStatus | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiStatus, setAiStatus] = useState<string | null>(null);
 
   async function refreshExtras() {
     const [sigs, labs, rls] = await Promise.all([
@@ -89,16 +106,49 @@ export function SettingsDialog({
     setRules(rls);
   }
 
+  async function refreshAi() {
+    if (!isDesktopShell()) return;
+    const [settings, runtime] = await Promise.all([
+      api.aiGetSettings(),
+      api.aiRuntimeStatus(),
+    ]);
+    setAiSettings(settings);
+    setAiRuntime(runtime);
+  }
+
   useEffect(() => {
     if (!open) return;
     setSigName(t("defaultSignatureName"));
     setBackupPassphrase("");
     setBackupPassphraseConfirm("");
     setBackupStatus(null);
+    setAiStatus(null);
     setImportFileName(null);
     importFileRef.current = null;
     refreshExtras().catch((err) => setError((err as AppError).message));
+    refreshAi().catch((err) => setError((err as AppError).message));
   }, [open, t]);
+
+  async function handleSaveAi() {
+    setError(null);
+    setAiStatus(null);
+    setAiBusy(true);
+    try {
+      const saved = await api.aiSetSettings({
+        ...aiSettings,
+        model: aiSettings.model.trim() || "qwen2.5:1.5b",
+        baseUrl: aiSettings.baseUrl.trim() || "http://127.0.0.1:11434",
+        onboardingCompleted: true,
+      });
+      setAiSettings(saved);
+      setAiStatus(t("aiSettingsSaved"));
+      await refreshAi();
+    } catch (err) {
+      setError((err as AppError).message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   async function handleExportBackup() {
     setError(null);
@@ -274,6 +324,103 @@ export function SettingsDialog({
           />
           {t("highContrast")}
         </label>
+
+        <section className="grid gap-2">
+          <h3 className="font-medium">{t("aiSettingsTitle")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("aiSettingsDescription")}
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={aiSettings.enabled}
+              onChange={(e) =>
+                setAiSettings((prev) => ({ ...prev, enabled: e.target.checked }))
+              }
+            />
+            {t("aiSettingsEnabled")}
+          </label>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {aiRuntime?.nvidiaGpu ? t("aiRuntimeGpuYes") : t("aiRuntimeGpuNo")}
+            {" · "}
+            {aiRuntime?.ollamaReachable
+              ? t("aiRuntimeOllamaYes")
+              : t("aiRuntimeOllamaNo")}
+          </p>
+          <label className="grid gap-1 text-sm">
+            <span>{t("aiSettingsModel")}</span>
+            {aiRuntime && aiRuntime.models.length > 0 ? (
+              <select
+                className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+                value={aiSettings.model}
+                disabled={!aiSettings.enabled}
+                onChange={(e) =>
+                  setAiSettings((prev) => ({ ...prev, model: e.target.value }))
+                }
+              >
+                {Array.from(
+                  new Set([
+                    ...aiRuntime.models,
+                    aiSettings.model,
+                    aiRuntime.recommendedModel,
+                    "qwen2.5:1.5b",
+                  ]),
+                ).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                    {name === aiRuntime.recommendedModel
+                      ? ` (${t("aiSetupRecommended")})`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                value={aiSettings.model}
+                disabled={!aiSettings.enabled}
+                onChange={(e) =>
+                  setAiSettings((prev) => ({ ...prev, model: e.target.value }))
+                }
+              />
+            )}
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>{t("aiSettingsBaseUrl")}</span>
+            <Input
+              value={aiSettings.baseUrl}
+              disabled={!aiSettings.enabled}
+              onChange={(e) =>
+                setAiSettings((prev) => ({ ...prev, baseUrl: e.target.value }))
+              }
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={aiBusy}
+              onClick={() => void handleSaveAi()}
+            >
+              {aiBusy ? t("working") : t("aiSettingsSave")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={aiBusy}
+              onClick={() => {
+                void refreshAi()
+                  .then(() => setAiStatus(null))
+                  .catch((err) => setError((err as AppError).message));
+              }}
+            >
+              {t("aiSettingsRefresh")}
+            </Button>
+          </div>
+          {aiStatus ? (
+            <p className="text-xs text-[var(--nova-ink-muted)]">{aiStatus}</p>
+          ) : null}
+        </section>
 
         <section className="grid gap-2">
           <h3 className="font-medium">{t("backupTitle")}</h3>

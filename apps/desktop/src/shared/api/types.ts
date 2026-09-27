@@ -332,6 +332,21 @@ export interface MessageAiInsights {
   provider?: string | null;
 }
 
+export interface AiSettings {
+  enabled: boolean;
+  model: string;
+  baseUrl: string;
+  onboardingCompleted: boolean;
+}
+
+export interface AiRuntimeStatus {
+  ollamaReachable: boolean;
+  nvidiaGpu: boolean;
+  models: string[];
+  recommendedModel: string;
+  allowModelPick: boolean;
+}
+
 export interface SuggestRepliesMessageResponse {
   messageId: string;
   variants: string[];

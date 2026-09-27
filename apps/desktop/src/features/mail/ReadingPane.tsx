@@ -13,6 +13,7 @@ type ReplyVariant = "a" | "b" | "own";
 
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
+  aiEnabled?: boolean;
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
@@ -21,6 +22,7 @@ interface ReadingPaneProps {
 
 export function ReadingPane({
   message,
+  aiEnabled = true,
   onReply,
   onForward,
   onToggleStar,
@@ -269,84 +271,88 @@ export function ReadingPane({
           )}
         </section>
 
-        <section
-          aria-label={t("replyAssistTitle")}
-          className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] px-4 py-4"
-        >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-sm font-medium">{t("replyAssistTitle")}</p>
-            {!summary ? (
+        {aiEnabled ? (
+          <section
+            aria-label={t("replyAssistTitle")}
+            className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] px-4 py-4"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">{t("replyAssistTitle")}</p>
+              {!summary ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={aiBusy}
+                  onClick={() => void handleSummarize()}
+                >
+                  <Sparkles size={14} />
+                  {aiBusy ? t("working") : t("summarize")}
+                </Button>
+              ) : null}
+            </div>
+            {summary ? (
+              <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
+                <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
+                {summary}
+              </p>
+            ) : null}
+            <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
+              {t("replyAssistSimpleHint")}
+            </p>
+            <div className="mb-3 flex flex-wrap gap-2">
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
-                disabled={aiBusy}
-                onClick={() => void handleSummarize()}
+                variant={activeVariant === "a" ? "primary" : "secondary"}
+                disabled={aiBusy || sendBusy}
+                onClick={() => void selectVariant("a")}
               >
-                <Sparkles size={14} />
-                {aiBusy ? t("working") : t("summarize")}
+                {t("replyVariantAShort")}
               </Button>
-            ) : null}
-          </div>
-          {summary ? (
-            <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
-              <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
-              {summary}
-            </p>
-          ) : null}
-          <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
-            {t("replyAssistSimpleHint")}
-          </p>
-          <div className="mb-3 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={activeVariant === "a" ? "primary" : "secondary"}
-              disabled={aiBusy || sendBusy}
-              onClick={() => void selectVariant("a")}
-            >
-              {t("replyVariantAShort")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={activeVariant === "b" ? "primary" : "secondary"}
-              disabled={aiBusy || sendBusy}
-              onClick={() => void selectVariant("b")}
-            >
-              {t("replyVariantBShort")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={activeVariant === "own" ? "primary" : "ghost"}
-              disabled={aiBusy || sendBusy}
-              onClick={selectOwn}
-            >
-              {t("replyOwn")}
-            </Button>
-          </div>
-          <label className="grid gap-1.5">
-            <span className="sr-only">{t("replyDraftPlaceholder")}</span>
-            <textarea
-              ref={draftRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={t("replyDraftPlaceholder")}
-              rows={6}
-              className="w-full resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2.5 text-[15px] leading-6 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--nova-accent)_25%,transparent)]"
-            />
-          </label>
-          <div className="mt-3 flex justify-end">
-            <Button
-              type="button"
-              disabled={aiBusy || sendBusy || !draft.trim()}
-              onClick={() => void handleSendReply()}
-            >
-              {sendBusy ? t("working") : t("send")}
-            </Button>
-          </div>
-        </section>
+              <Button
+                type="button"
+                size="sm"
+                variant={activeVariant === "b" ? "primary" : "secondary"}
+                disabled={aiBusy || sendBusy}
+                onClick={() => void selectVariant("b")}
+              >
+                {t("replyVariantBShort")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activeVariant === "own" ? "primary" : "ghost"}
+                disabled={aiBusy || sendBusy}
+                onClick={selectOwn}
+              >
+                {t("replyOwn")}
+              </Button>
+            </div>
+            <label className="grid gap-1.5">
+              <span className="sr-only">{t("replyDraftPlaceholder")}</span>
+              <textarea
+                ref={draftRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={t("replyDraftPlaceholder")}
+                rows={6}
+                className="w-full resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2.5 text-[15px] leading-6 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--nova-accent)_25%,transparent)]"
+              />
+            </label>
+            <div className="mt-3 flex justify-end">
+              <Button
+                type="button"
+                disabled={aiBusy || sendBusy || !draft.trim()}
+                onClick={() => void handleSendReply()}
+              >
+                {sendBusy ? t("working") : t("send")}
+              </Button>
+            </div>
+          </section>
+        ) : (
+          <p className="text-sm text-[var(--nova-ink-muted)]">{t("aiDisabledHint")}</p>
+        )}
       </div>
     </article>
   );

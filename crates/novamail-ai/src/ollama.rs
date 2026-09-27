@@ -16,10 +16,9 @@ pub struct OllamaProvider {
 impl Default for OllamaProvider {
     fn default() -> Self {
         Self::new(
-            std::env::var("NOVAMAIL_OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".into()),
+            crate::runtime::default_ollama_url(),
             // Small multilingual instruct model — CPU-friendly for background insights.
-            std::env::var("NOVAMAIL_OLLAMA_MODEL")
-                .unwrap_or_else(|_| "qwen2.5:1.5b".into()),
+            crate::runtime::default_ollama_model(),
         )
     }
 }

@@ -1,15 +1,15 @@
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AppError, AttachmentDto,
-    CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
-    ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
-    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
-    ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto,
-    MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RuleDto,
-    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
-    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
-    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiRuntimeStatus, AiSettings,
+    AppError, AttachmentDto, CardDavServerStatus, ContactDto, ContactsBookSettings,
+    ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
+    LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
+    ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
+    MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
+    ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest,
+    SetMessageLabelsRequest, SignatureDto, SuggestRepliesMessageRequest,
+    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -302,6 +302,26 @@ pub fn ai_message_insights(
         .app
         .get_message_ai_insights(message_id)
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_get_settings(state: State<'_, DesktopState>) -> Result<AiSettings, AppError> {
+    state.app.ai_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_set_settings(
+    state: State<'_, DesktopState>,
+    settings: AiSettings,
+) -> Result<AiSettings, AppError> {
+    state.app.set_ai_settings(settings).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_runtime_status(
+    state: State<'_, DesktopState>,
+) -> Result<AiRuntimeStatus, AppError> {
+    state.app.ai_runtime_status().await.map_err(map_err)
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@ import { useKeyboardShortcuts } from "@novamail/hooks";
 import { CommandPalette, EmptyState, Input, VisuallyHidden } from "@novamail/ui";
 
 import { AccountSetup } from "@/features/accounts/AccountSetup";
+import { AiSetupDialog } from "@/features/ai/AiSetupDialog";
 import { Composer } from "@/features/composer/Composer";
 import { ContactsDialog } from "@/features/contacts/ContactsDialog";
 import {
@@ -17,7 +18,7 @@ import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
-import type { AccountDto, AppError, MessageDetailDto } from "@/shared/api/types";
+import type { AccountDto, AiSettings, AppError, MessageDetailDto } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 import { nextThemeMode, type ThemeMode } from "@/shared/theme/resolveTheme";
@@ -92,6 +93,12 @@ export function AppShell() {
     queryKey: ["message", selectedMessageId],
     enabled: desktop && Boolean(selectedMessageId),
     queryFn: () => api.messagesGet(selectedMessageId!),
+  });
+
+  const aiSettingsQuery = useQuery({
+    queryKey: ["ai-settings"],
+    enabled: desktop,
+    queryFn: () => api.aiGetSettings(),
   });
 
   useEffect(() => {
@@ -449,6 +456,7 @@ export function AppShell() {
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
               <ReadingPane
                 message={messageQuery.data}
+                aiEnabled={Boolean(aiSettingsQuery.data?.enabled)}
                 onReply={() => {
                   setComposerBody("");
                   if (messageQuery.data) {
@@ -470,6 +478,17 @@ export function AppShell() {
         )}
       </div>
 
+      <AiSetupDialog
+        open={
+          desktop &&
+          Boolean(aiSettingsQuery.data) &&
+          !aiSettingsQuery.data?.onboardingCompleted
+        }
+        onCompleted={(settings: AiSettings) => {
+          queryClient.setQueryData(["ai-settings"], settings);
+          void queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
+        }}
+      />
       <AccountSetup
         open={accountSetupOpen}
         onClose={() => setAccountSetupOpen(false)}
@@ -493,7 +512,10 @@ export function AppShell() {
       />
       <SettingsDialog
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          void queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
+        }}
         accounts={accounts}
       />
       <ContactsDialog open={contactsOpen} onClose={() => setContactsOpen(false)} />

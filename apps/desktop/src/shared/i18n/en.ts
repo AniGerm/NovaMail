@@ -279,4 +279,32 @@ export const en: Translations = {
   failedAddAccount: "Failed to add account",
   oauthFailed: "OAuth sign-in failed",
   contactFallback: "Contact",
+  aiSetupTitle: "Use local AI?",
+  aiSetupDescription:
+    "NovaMail can summarize mail and draft replies locally via Ollama. Everything stays on this device.",
+  aiSetupYes: "Yes, enable AI",
+  aiSetupNo: "No, continue without AI",
+  aiSetupContinue: "Continue",
+  aiSetupCpuHint:
+    "No NVIDIA GPU found. Recommended for CPU: qwen2.5:1.5b (small and efficient).",
+  aiSetupGpuHint:
+    "NVIDIA GPU or installed Ollama models found. Choose your default model.",
+  aiSetupOllamaMissing:
+    "Ollama does not seem reachable yet. You can still pick a model and start Ollama later.",
+  aiSetupModelLabel: "Default model",
+  aiSetupRecommended: "Recommended",
+  aiSettingsTitle: "Local AI",
+  aiSettingsDescription:
+    "Summaries and reply drafts via local Ollama. Toggle anytime.",
+  aiSettingsEnabled: "Enable AI",
+  aiSettingsModel: "Default model",
+  aiSettingsBaseUrl: "Ollama URL",
+  aiSettingsSave: "Save AI settings",
+  aiSettingsSaved: "AI settings saved",
+  aiSettingsRefresh: "Refresh status",
+  aiRuntimeGpuYes: "NVIDIA GPU detected",
+  aiRuntimeGpuNo: "No NVIDIA GPU detected (CPU)",
+  aiRuntimeOllamaYes: "Ollama reachable",
+  aiRuntimeOllamaNo: "Ollama not reachable",
+  aiDisabledHint: "AI is disabled. Enable it in Settings.",
 };
