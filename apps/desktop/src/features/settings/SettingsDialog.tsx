@@ -11,6 +11,9 @@ import type {
   RuleDto,
   SignatureDto,
 } from "@/shared/api/types";
+
+const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
+const AI_CPU_MODEL = "qwen2.5:1.5b";
 import { useT } from "@/shared/i18n/useT";
 import type { Locale } from "@/shared/i18n";
 import type { ColorSchemeId } from "@/shared/theme/schemes";
@@ -87,13 +90,16 @@ export function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     enabled: false,
-    model: "qwen3:4b-instruct",
+    model: AI_DEFAULT_MODEL,
     baseUrl: "http://127.0.0.1:11434",
     onboardingCompleted: false,
   });
   const [aiRuntime, setAiRuntime] = useState<AiRuntimeStatus | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [pullRef, setPullRef] = useState("");
+  const [pullBusy, setPullBusy] = useState(false);
+  const [pullStatus, setPullStatus] = useState<string | null>(null);
 
   async function refreshExtras() {
     const [sigs, labs, rls] = await Promise.all([
@@ -136,7 +142,7 @@ export function SettingsDialog({
     try {
       const saved = await api.aiSetSettings({
         ...aiSettings,
-        model: aiSettings.model.trim() || "qwen3:4b-instruct",
+        model: aiSettings.model.trim() || AI_DEFAULT_MODEL,
         baseUrl: aiSettings.baseUrl.trim() || "http://127.0.0.1:11434",
         onboardingCompleted: true,
       });
@@ -147,6 +153,42 @@ export function SettingsDialog({
       setError((err as AppError).message);
     } finally {
       setAiBusy(false);
+    }
+  }
+
+  async function handlePullModel(raw?: string) {
+    const target = (raw ?? pullRef).trim();
+    if (!target) {
+      setError(t("aiPullFailed"));
+      return;
+    }
+    setError(null);
+    setPullBusy(true);
+    setPullStatus(t("aiPullBusy"));
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await api.onAiPullProgress((event) => {
+        if (event.total && event.completed != null) {
+          const pct = Math.min(
+            100,
+            Math.round((event.completed / event.total) * 100),
+          );
+          setPullStatus(`${event.status} · ${pct}%`);
+        } else {
+          setPullStatus(event.status);
+        }
+      });
+      const result = await api.aiPullModel(target);
+      setPullRef(result.model);
+      setAiSettings((prev) => ({ ...prev, model: result.model, enabled: true }));
+      setPullStatus(t("aiPullDone", { model: result.model }));
+      await refreshAi();
+    } catch (err) {
+      setError((err as AppError).message || t("aiPullFailed"));
+      setPullStatus(null);
+    } finally {
+      unlisten?.();
+      setPullBusy(false);
     }
   }
 
@@ -360,17 +402,17 @@ export function SettingsDialog({
               >
                 {Array.from(
                   new Set([
-                    "qwen3:4b-instruct",
-                    "qwen2.5:1.5b",
+                    AI_DEFAULT_MODEL,
+                    AI_CPU_MODEL,
                     ...aiRuntime.models,
                     aiSettings.model,
                     aiRuntime.recommendedModel,
                   ]),
                 ).map((name) => (
                   <option key={name} value={name}>
-                    {name === "qwen3:4b-instruct"
+                    {name === AI_DEFAULT_MODEL
                       ? `${name} (${t("aiSetupRecommended")})`
-                      : name === "qwen2.5:1.5b"
+                      : name === AI_CPU_MODEL
                         ? `${name} (${t("aiSetupLowSpec")})`
                         : name === aiRuntime.recommendedModel
                           ? `${name} (${t("aiSetupRecommended")})`
@@ -398,11 +440,54 @@ export function SettingsDialog({
               }
             />
           </label>
+          <div className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] p-3">
+            <p className="text-sm font-medium">{t("aiPullTitle")}</p>
+            <p className="text-xs text-[var(--nova-ink-muted)]">
+              {t("aiPullDescription")}
+            </p>
+            <Input
+              value={pullRef}
+              disabled={pullBusy}
+              placeholder={t("aiPullPlaceholder")}
+              onChange={(e) => setPullRef(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={pullBusy || !pullRef.trim()}
+                onClick={() => void handlePullModel()}
+              >
+                {pullBusy ? t("aiPullBusy") : t("aiPullButton")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={pullBusy}
+                onClick={() => void handlePullModel(AI_DEFAULT_MODEL)}
+              >
+                {t("aiPullQuickDefault")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={pullBusy}
+                onClick={() => void handlePullModel(AI_CPU_MODEL)}
+              >
+                {t("aiPullQuickLowSpec")}
+              </Button>
+            </div>
+            {pullStatus ? (
+              <p className="text-xs text-[var(--nova-ink-muted)]">{pullStatus}</p>
+            ) : null}
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
-              disabled={aiBusy}
+              disabled={aiBusy || pullBusy}
               onClick={() => void handleSaveAi()}
             >
               {aiBusy ? t("working") : t("aiSettingsSave")}
@@ -411,7 +496,7 @@ export function SettingsDialog({
               type="button"
               size="sm"
               variant="ghost"
-              disabled={aiBusy}
+              disabled={aiBusy || pullBusy}
               onClick={() => {
                 void refreshAi()
                   .then(() => setAiStatus(null))

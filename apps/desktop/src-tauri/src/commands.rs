@@ -1,6 +1,7 @@
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiRuntimeStatus, AiSettings,
-    AppError, AttachmentDto, CardDavServerStatus, ContactDto, ContactsBookSettings,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiPullModelRequest,
+    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
+    CardDavServerStatus, ContactDto, ContactsBookSettings,
     ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
     ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
@@ -322,6 +323,21 @@ pub async fn ai_runtime_status(
     state: State<'_, DesktopState>,
 ) -> Result<AiRuntimeStatus, AppError> {
     state.app.ai_runtime_status().await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_pull_model(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    request: AiPullModelRequest,
+) -> Result<AiPullModelResponse, AppError> {
+    state
+        .app
+        .ai_pull_model(request, |event: AiPullProgressEvent| {
+            let _ = app.emit("ai://pull-progress", &event);
+        })
+        .await
+        .map_err(map_err)
 }
 
 #[tauri::command]

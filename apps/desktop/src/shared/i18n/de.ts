@@ -306,6 +306,17 @@ export const de = {
   aiRuntimeOllamaYes: "Ollama erreichbar",
   aiRuntimeOllamaNo: "Ollama nicht erreichbar",
   aiDisabledHint: "KI ist deaktiviert. Aktiviere sie in den Einstellungen.",
+  aiPullTitle: "Modell herunterladen",
+  aiPullDescription:
+    "Ollama-Name (z. B. qwen3:4b-instruct) oder Hugging-Face-Link einfügen. NovaMail lädt über dein lokales Ollama.",
+  aiPullPlaceholder:
+    "qwen3:4b-instruct  oder  https://huggingface.co/org/model",
+  aiPullButton: "Herunterladen",
+  aiPullBusy: "Download läuft…",
+  aiPullDone: "Modell bereit: {model}",
+  aiPullFailed: "Download fehlgeschlagen",
+  aiPullQuickDefault: "Standard laden",
+  aiPullQuickLowSpec: "Low-Spec laden",
 } as const;
 
 export type TranslationKey = keyof typeof de;

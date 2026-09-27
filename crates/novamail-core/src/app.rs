@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use novamail_ai::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
-    list_ollama_models, recommended_model, AiProvider, NullAiProvider, OllamaProvider,
-    PrioritizeRequest, SuggestReplyRequest, SummarizeRequest, DEFAULT_MODEL,
+    list_ollama_models, normalize_model_ref, pull_ollama_model, recommended_model, AiProvider,
+    NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest, SummarizeRequest,
+    DEFAULT_MODEL,
 };
 use parking_lot::RwLock;
 use novamail_contacts::{search_ldap, CardDavServer};
@@ -14,8 +15,9 @@ use novamail_crypto::{
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiRuntimeStatus, AiSettings,
-    AttachmentDto, BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiPullModelRequest,
+    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
+    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload,
     CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
     ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
     LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
@@ -138,6 +140,33 @@ impl AppState {
             recommended_model: recommended,
             allow_model_pick: allow_pick,
         })
+    }
+
+    /// Pull a model (Ollama library name or Hugging Face / Ollama URL) via local Ollama.
+    pub async fn ai_pull_model<F>(
+        &self,
+        request: AiPullModelRequest,
+        mut on_progress: F,
+    ) -> CoreResult<AiPullModelResponse>
+    where
+        F: FnMut(AiPullProgressEvent) + Send,
+    {
+        let settings = self.ai_settings()?;
+        let model_ref = normalize_model_ref(&request.model)
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        let pulled = pull_ollama_model(&settings.base_url, &model_ref, |progress| {
+            on_progress(AiPullProgressEvent {
+                model: model_ref.clone(),
+                status: progress.status,
+                digest: progress.digest,
+                total: progress.total,
+                completed: progress.completed,
+                done: progress.done,
+            });
+        })
+        .await
+        .map_err(|e| CoreError::Message(e.to_string()))?;
+        Ok(AiPullModelResponse { model: pulled })
     }
 
     pub fn provider_presets(&self) -> Vec<ProviderPreset> {

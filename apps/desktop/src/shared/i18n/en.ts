@@ -308,4 +308,15 @@ export const en: Translations = {
   aiRuntimeOllamaYes: "Ollama reachable",
   aiRuntimeOllamaNo: "Ollama not reachable",
   aiDisabledHint: "AI is disabled. Enable it in Settings.",
+  aiPullTitle: "Download model",
+  aiPullDescription:
+    "Paste an Ollama name (e.g. qwen3:4b-instruct) or a Hugging Face link. NovaMail pulls it through your local Ollama.",
+  aiPullPlaceholder:
+    "qwen3:4b-instruct  or  https://huggingface.co/org/model",
+  aiPullButton: "Download",
+  aiPullBusy: "Downloading…",
+  aiPullDone: "Model ready: {model}",
+  aiPullFailed: "Download failed",
+  aiPullQuickDefault: "Pull default",
+  aiPullQuickLowSpec: "Pull low-spec",
 };

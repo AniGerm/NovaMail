@@ -64,6 +64,7 @@ pub fn run() {
             commands::ai_get_settings,
             commands::ai_set_settings,
             commands::ai_runtime_status,
+            commands::ai_pull_model,
             commands::messages_archive,
             commands::messages_delete,
             commands::messages_forward_draft,

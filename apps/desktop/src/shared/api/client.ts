@@ -11,6 +11,8 @@ import type {
   ContactsBookSettings,
   ExportBackupResponse,
   ImportBackupResult,
+  AiPullModelResponse,
+  AiPullProgressEvent,
   AiRuntimeStatus,
   AiSettings,
   MessageAiInsights,
@@ -117,6 +119,16 @@ export const api = {
   aiSetSettings: (settings: AiSettings) =>
     call<AiSettings>("ai_set_settings", { settings }),
   aiRuntimeStatus: () => call<AiRuntimeStatus>("ai_runtime_status"),
+  aiPullModel: (model: string) =>
+    call<AiPullModelResponse>("ai_pull_model", { request: { model } }),
+  onAiPullProgress: async (
+    handler: (event: AiPullProgressEvent) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<AiPullProgressEvent>("ai://pull-progress", (event) => {
+      handler(event.payload);
+    });
+  },
   messagesArchive: (messageId: string) =>
     call<void>("messages_archive", { messageId }),
   messagesForwardDraft: (messageId: string) =>

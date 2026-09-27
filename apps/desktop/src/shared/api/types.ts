@@ -347,6 +347,19 @@ export interface AiRuntimeStatus {
   allowModelPick: boolean;
 }
 
+export interface AiPullModelResponse {
+  model: string;
+}
+
+export interface AiPullProgressEvent {
+  model: string;
+  status: string;
+  digest?: string | null;
+  total?: number | null;
+  completed?: number | null;
+  done: boolean;
+}
+
 export interface SuggestRepliesMessageResponse {
   messageId: string;
   variants: string[];
