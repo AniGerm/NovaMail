@@ -3,7 +3,7 @@ use std::sync::Arc;
 use novamail_ai::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
     list_ollama_models, recommended_model, AiProvider, NullAiProvider, OllamaProvider,
-    PrioritizeRequest, SuggestReplyRequest, SummarizeRequest, CPU_DEFAULT_MODEL,
+    PrioritizeRequest, SuggestReplyRequest, SummarizeRequest, DEFAULT_MODEL,
 };
 use parking_lot::RwLock;
 use novamail_contacts::{search_ldap, CardDavServer};
@@ -108,7 +108,7 @@ impl AppState {
 
     pub fn set_ai_settings(&self, mut settings: AiSettings) -> CoreResult<AiSettings> {
         if settings.model.trim().is_empty() {
-            settings.model = CPU_DEFAULT_MODEL.to_string();
+            settings.model = DEFAULT_MODEL.to_string();
         }
         if settings.base_url.trim().is_empty() {
             settings.base_url = default_ollama_url();

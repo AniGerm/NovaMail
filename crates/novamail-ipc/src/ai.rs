@@ -17,7 +17,7 @@ impl Default for AiSettings {
         Self {
             // Until onboarding runs, keep AI off so we do not surprise new installs.
             enabled: false,
-            model: "qwen2.5:1.5b".into(),
+            model: "qwen3:4b-instruct".into(),
             base_url: "http://127.0.0.1:11434".into(),
             onboarding_completed: false,
         }

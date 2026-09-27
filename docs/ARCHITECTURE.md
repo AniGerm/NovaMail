@@ -31,7 +31,7 @@ novamail-core          use-cases
 
 ## AI + HTML safety
 
-- Primary provider: Ollama (`novamail-ai::OllamaProvider`), default model `qwen2.5:1.5b`
+- Primary provider: Ollama (`novamail-ai::OllamaProvider`), default `qwen3:4b-instruct`, low-spec/CPU `qwen2.5:1.5b`
 - Offline fallback: `NullAiProvider` (deterministic heuristics)
 - After manual or scheduled sync: mail rules run, then concurrency-1 AI queue
   writes `ai_insights` (summary + reply_a/reply_b)

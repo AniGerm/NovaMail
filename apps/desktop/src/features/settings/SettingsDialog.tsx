@@ -87,7 +87,7 @@ export function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     enabled: false,
-    model: "qwen2.5:1.5b",
+    model: "qwen3:4b-instruct",
     baseUrl: "http://127.0.0.1:11434",
     onboardingCompleted: false,
   });
@@ -136,7 +136,7 @@ export function SettingsDialog({
     try {
       const saved = await api.aiSetSettings({
         ...aiSettings,
-        model: aiSettings.model.trim() || "qwen2.5:1.5b",
+        model: aiSettings.model.trim() || "qwen3:4b-instruct",
         baseUrl: aiSettings.baseUrl.trim() || "http://127.0.0.1:11434",
         onboardingCompleted: true,
       });
@@ -360,17 +360,21 @@ export function SettingsDialog({
               >
                 {Array.from(
                   new Set([
+                    "qwen3:4b-instruct",
+                    "qwen2.5:1.5b",
                     ...aiRuntime.models,
                     aiSettings.model,
                     aiRuntime.recommendedModel,
-                    "qwen2.5:1.5b",
                   ]),
                 ).map((name) => (
                   <option key={name} value={name}>
-                    {name}
-                    {name === aiRuntime.recommendedModel
-                      ? ` (${t("aiSetupRecommended")})`
-                      : ""}
+                    {name === "qwen3:4b-instruct"
+                      ? `${name} (${t("aiSetupRecommended")})`
+                      : name === "qwen2.5:1.5b"
+                        ? `${name} (${t("aiSetupLowSpec")})`
+                        : name === aiRuntime.recommendedModel
+                          ? `${name} (${t("aiSetupRecommended")})`
+                          : name}
                   </option>
                 ))}
               </select>

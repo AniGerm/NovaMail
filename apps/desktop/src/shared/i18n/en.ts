@@ -286,9 +286,10 @@ export const en: Translations = {
   aiSetupNo: "No, continue without AI",
   aiSetupContinue: "Continue",
   aiSetupCpuHint:
-    "No NVIDIA GPU found. Recommended for CPU: qwen2.5:1.5b (small and efficient).",
+    "No NVIDIA GPU found. Low-spec/CPU: qwen2.5:1.5b. With a GPU we recommend qwen3:4b-instruct.",
   aiSetupGpuHint:
-    "NVIDIA GPU or installed Ollama models found. Choose your default model.",
+    "Default: qwen3:4b-instruct (better quality). Low-spec/CPU alternative: qwen2.5:1.5b.",
+  aiSetupLowSpec: "Low-spec / CPU",
   aiSetupOllamaMissing:
     "Ollama does not seem reachable yet. You can still pick a model and start Ollama later.",
   aiSetupModelLabel: "Default model",

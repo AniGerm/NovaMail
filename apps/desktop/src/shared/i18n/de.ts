@@ -284,9 +284,10 @@ export const de = {
   aiSetupNo: "Nein, ohne KI fortfahren",
   aiSetupContinue: "Weiter",
   aiSetupCpuHint:
-    "Keine NVIDIA-GPU gefunden. Empfohlen für CPU: qwen2.5:1.5b (klein und sparsam).",
+    "Keine NVIDIA-GPU gefunden. Low-Spec/CPU: qwen2.5:1.5b. Mit GPU empfehlen wir qwen3:4b-instruct.",
   aiSetupGpuHint:
-    "NVIDIA-GPU oder bereits installierte Ollama-Modelle gefunden. Wähle dein Standardmodell.",
+    "Standard: qwen3:4b-instruct (bessere Qualität). Low-Spec/CPU-Alternative: qwen2.5:1.5b.",
+  aiSetupLowSpec: "Low-Spec / CPU",
   aiSetupOllamaMissing:
     "Ollama scheint noch nicht erreichbar. Du kannst das Modell trotzdem festlegen und Ollama später starten.",
   aiSetupModelLabel: "Standardmodell",

@@ -15,5 +15,6 @@ pub use provider::{
 };
 pub use runtime::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
-    list_ollama_models, ollama_reachable, recommended_model, CPU_DEFAULT_MODEL,
+    list_ollama_models, ollama_reachable, recommended_model, suggested_models, CPU_DEFAULT_MODEL,
+    DEFAULT_MODEL,
 };

@@ -7,7 +7,10 @@ use serde::Deserialize;
 
 use crate::provider::{AiError, AiResult};
 
-/// CPU-friendly default used when no NVIDIA GPU is available.
+/// Default when a GPU (or richer local install) is available — better reply quality.
+pub const DEFAULT_MODEL: &str = "qwen3:4b-instruct";
+
+/// Low-spec / CPU-friendly fallback.
 pub const CPU_DEFAULT_MODEL: &str = "qwen2.5:1.5b";
 
 pub fn default_ollama_url() -> String {
@@ -15,7 +18,7 @@ pub fn default_ollama_url() -> String {
 }
 
 pub fn default_ollama_model() -> String {
-    std::env::var("NOVAMAIL_OLLAMA_MODEL").unwrap_or_else(|_| CPU_DEFAULT_MODEL.into())
+    std::env::var("NOVAMAIL_OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into())
 }
 
 /// Best-effort NVIDIA GPU detection (nvidia-smi or Linux driver node).
@@ -28,8 +31,7 @@ pub fn detect_nvidia_gpu() -> bool {
     {
         return true;
     }
-    Path::new("/proc/driver/nvidia/version").exists()
-        || Path::new("/dev/nvidia0").exists()
+    Path::new("/proc/driver/nvidia/version").exists() || Path::new("/dev/nvidia0").exists()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,18 +82,39 @@ pub fn allow_model_pick(nvidia_gpu: bool, installed_models: &[String]) -> bool {
     nvidia_gpu || !installed_models.is_empty()
 }
 
+fn model_matches(installed: &[String], needle: &str) -> bool {
+    installed
+        .iter()
+        .any(|m| m == needle || m.starts_with(&format!("{needle}-")) || m.starts_with(needle))
+}
+
 pub fn recommended_model(nvidia_gpu: bool, installed_models: &[String]) -> String {
     if !nvidia_gpu {
         return CPU_DEFAULT_MODEL.to_string();
     }
-    if installed_models.iter().any(|m| m == CPU_DEFAULT_MODEL || m.starts_with("qwen2.5:1.5b"))
+    if model_matches(installed_models, DEFAULT_MODEL)
+        || model_matches(installed_models, "qwen3:4b")
     {
-        return CPU_DEFAULT_MODEL.to_string();
+        // Prefer instruct over thinking alias when both exist.
+        if model_matches(installed_models, DEFAULT_MODEL) {
+            return DEFAULT_MODEL.to_string();
+        }
+        if let Some(hit) = installed_models
+            .iter()
+            .find(|m| m.starts_with("qwen3:4b-instruct"))
+        {
+            return hit.clone();
+        }
     }
-    installed_models
-        .first()
-        .cloned()
-        .unwrap_or_else(|| CPU_DEFAULT_MODEL.to_string())
+    if let Some(first) = installed_models.first() {
+        return first.clone();
+    }
+    DEFAULT_MODEL.to_string()
+}
+
+/// Suggested catalog shown in setup/settings even if not yet pulled.
+pub fn suggested_models() -> &'static [&'static str] {
+    &[DEFAULT_MODEL, CPU_DEFAULT_MODEL]
 }
 
 #[cfg(test)]
@@ -105,9 +128,13 @@ mod tests {
     }
 
     #[test]
-    fn gpu_or_installed_allows_pick() {
+    fn gpu_path_recommends_qwen3_4b() {
+        assert_eq!(recommended_model(true, &[]), DEFAULT_MODEL);
         assert!(allow_model_pick(true, &[]));
-        assert!(allow_model_pick(false, &["llama3:8b".into()]));
+        assert_eq!(
+            recommended_model(true, &["qwen3:4b-instruct".into(), "mistral:7b".into()]),
+            DEFAULT_MODEL
+        );
         assert_eq!(
             recommended_model(true, &["mistral:7b".into()]),
             "mistral:7b"

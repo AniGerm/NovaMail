@@ -5,6 +5,7 @@ import { api, isDesktopShell } from "@/shared/api/client";
 import type { AiRuntimeStatus, AiSettings, AppError } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 
+const DEFAULT_MODEL = "qwen3:4b-instruct";
 const CPU_MODEL = "qwen2.5:1.5b";
 
 interface AiSetupDialogProps {
@@ -18,7 +19,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<AiRuntimeStatus | null>(null);
-  const [model, setModel] = useState(CPU_MODEL);
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434");
 
   useEffect(() => {
@@ -31,7 +32,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
     void api
       .aiGetSettings()
       .then((settings) => {
-        setModel(settings.model || CPU_MODEL);
+        setModel(settings.model || DEFAULT_MODEL);
         setBaseUrl(settings.baseUrl || "http://127.0.0.1:11434");
       })
       .catch(() => undefined);
@@ -43,7 +44,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
     try {
       const status = await api.aiRuntimeStatus();
       setRuntime(status);
-      setModel(status.recommendedModel || CPU_MODEL);
+      setModel(status.recommendedModel || DEFAULT_MODEL);
       return status;
     } catch (err) {
       setError((err as AppError).message);
@@ -68,7 +69,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
     try {
       const settings = await api.aiSetSettings({
         enabled,
-        model: nextModel.trim() || CPU_MODEL,
+        model: nextModel.trim() || DEFAULT_MODEL,
         baseUrl: baseUrl.trim() || "http://127.0.0.1:11434",
         onboardingCompleted: true,
       });
@@ -81,12 +82,13 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
   }
 
   async function chooseNo() {
-    await save(false, CPU_MODEL);
+    await save(false, DEFAULT_MODEL);
   }
 
   async function chooseYes() {
     const status = runtime ?? (await loadRuntime());
     if (!status.allowModelPick) {
+      // CPU / low-spec path: lock to the small model.
       await save(true, status.recommendedModel || CPU_MODEL);
       return;
     }
@@ -97,9 +99,10 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
 
   const modelOptions = Array.from(
     new Set([
-      ...(runtime?.models ?? []),
-      runtime?.recommendedModel || CPU_MODEL,
+      DEFAULT_MODEL,
       CPU_MODEL,
+      ...(runtime?.models ?? []),
+      runtime?.recommendedModel || DEFAULT_MODEL,
     ]),
   );
 
@@ -165,10 +168,13 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
               >
                 {modelOptions.map((name) => (
                   <option key={name} value={name}>
-                    {name}
-                    {name === runtime?.recommendedModel
-                      ? ` (${t("aiSetupRecommended")})`
-                      : ""}
+                    {name === DEFAULT_MODEL
+                      ? `${name} (${t("aiSetupRecommended")})`
+                      : name === CPU_MODEL
+                        ? `${name} (${t("aiSetupLowSpec")})`
+                        : name === runtime?.recommendedModel
+                          ? `${name} (${t("aiSetupRecommended")})`
+                          : name}
                   </option>
                 ))}
               </select>

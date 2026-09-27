@@ -11,7 +11,8 @@ NovaMail needs AI assist (summaries, reply drafts) without sending mail to third
 ## Decision
 
 1. Primary AI provider is **Ollama** over `http://127.0.0.1:11434` (`/api/generate`),
-   default model **`qwen2.5:1.5b`** (override with `NOVAMAIL_OLLAMA_MODEL`).
+   default model **`qwen3:4b-instruct`** (GPU / quality), low-spec/CPU
+   **`qwen2.5:1.5b`** (override with `NOVAMAIL_OLLAMA_MODEL`).
 2. If Ollama is unreachable, fall back to **NullAiProvider** (deterministic extractive/heuristic helpers) and report the provider name to the UI.
 3. After IMAP sync, a concurrency-1 background job precomputes summary + reply
    drafts into `ai_insights` so the reading pane can show them without waiting.
