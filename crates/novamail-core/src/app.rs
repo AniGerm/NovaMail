@@ -1961,6 +1961,7 @@ impl AppState {
             enabled: settings.enabled,
             auto_move: settings.auto_move,
             threshold: settings.threshold,
+            strict_heuristics: settings.strict_heuristics,
             trained_spam,
             trained_ham,
         })
@@ -1971,6 +1972,7 @@ impl AppState {
             enabled: dto.enabled,
             auto_move: dto.auto_move,
             threshold: dto.threshold.clamp(0.4, 0.99),
+            strict_heuristics: dto.strict_heuristics,
         };
         self.db.set_setting(
             SPAM_SETTINGS_KEY,

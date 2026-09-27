@@ -388,6 +388,8 @@ export interface SpamSettingsDto {
   enabled: boolean;
   autoMove: boolean;
   threshold: number;
+  /** Sonderzeichen, Schriftmischung, Obfuskation, URL-Dichte */
+  strictHeuristics: boolean;
   trainedSpam: number;
   trainedHam: number;
 }

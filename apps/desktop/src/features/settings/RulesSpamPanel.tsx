@@ -388,6 +388,16 @@ export function RulesSpamPanel({ accounts }: { accounts: AccountDto[] }) {
             />
             <span>{t("spamAutoMove")}</span>
           </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={spam.strictHeuristics}
+              onChange={(e) =>
+                setSpam({ ...spam, strictHeuristics: e.target.checked })
+              }
+            />
+            <span>{t("spamStrictHeuristics")}</span>
+          </label>
           <label className="grid gap-1">
             <span>
               {t("spamThreshold")}: {Math.round(spam.threshold * 100)}%

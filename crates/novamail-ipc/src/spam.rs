@@ -7,8 +7,15 @@ pub struct SpamSettingsDto {
     pub enabled: bool,
     pub auto_move: bool,
     pub threshold: f32,
+    /// Local content checks: special chars, script mixing, obfuscation, URLs.
+    #[serde(default = "default_true")]
+    pub strict_heuristics: bool,
     pub trained_spam: u32,
     pub trained_ham: u32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -247,9 +247,11 @@ export const en: Translations = {
   trash: "Trash",
   spamTitle: "Spam filter",
   spamDescription:
-    "Local heuristics plus Bayesian learning (no cloud). Server filters like Rspamd need your own mail server — here NovaMail learns from your spam/ham marks.",
+    "Local Bayesian learning plus text checks (special chars, script mixing, invisible characters, obfuscation, URL density) — no cloud. Rspamd/SpamAssassin need a mail server; crates like bayespam/mailrs-bayes do similar Bayes scoring.",
   spamEnabled: "Spam filter on",
   spamAutoMove: "Auto-move detected spam into Spam",
+  spamStrictHeuristics:
+    "Strict text checks (special chars, consistency, obfuscation)",
   spamThreshold: "Sensitivity",
   spamTrained: "Trained: {spam} spam · {ham} ham",
   spamSave: "Save spam settings",

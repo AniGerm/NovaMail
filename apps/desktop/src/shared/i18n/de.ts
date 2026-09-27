@@ -245,9 +245,11 @@ export const de = {
   trash: "Papierkorb",
   spamTitle: "Spam-Filter",
   spamDescription:
-    "Lokaler Filter aus Heuristiken und Bayes-Lernen (ohne Cloud). Server-Filter wie Rspamd brauchen einen eigenen Mailserver — hier lernt NovaMail von deinen Spam-/Ham-Markierungen.",
+    "Lokal: Bayes-Lernen plus Textprüfung (Sonderzeichen, Schriftmischung, unsichtbare Zeichen, Obfuskation, URL-Dichte) — ohne Cloud. Rspamd/SpamAssassin brauchen einen eigenen Mailserver; Libraries wie bayespam/mailrs-bayes machen ähnliches Bayes-Scoring.",
   spamEnabled: "Spam-Filter aktiv",
   spamAutoMove: "Erkannte Spam-Mails automatisch in Spam legen",
+  spamStrictHeuristics:
+    "Strenge Textprüfung (Sonderzeichen, Konsistenz, Obfuskation)",
   spamThreshold: "Empfindlichkeit",
   spamTrained: "Trainiert: {spam} Spam · {ham} erwünscht",
   spamSave: "Spam-Einstellungen speichern",
