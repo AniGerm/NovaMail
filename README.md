@@ -2,28 +2,120 @@
 
 Modern open-source email for Ubuntu Linux.
 
-NovaMail is a local-first desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It targets Thunderbird-class capability with Spark-class UX and Outlook-class productivity — without cloud lock-in.
+NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It aims for Thunderbird-class capability, Spark-class UX, and Outlook-class productivity — without cloud lock-in.
 
-## Features (MVP)
+## Product features
 
-- Multi-account IMAP / SMTP + background sync scheduler
-- Unified Inbox (archived mail filtered out)
-- Provider presets (Gmail, Microsoft 365, Yahoo, iCloud, Proton Bridge, generic)
-- Password auth via OS keyring (+ iCloud app-specific password hint)
-- OAuth2 browser sign-in (localhost callback + token exchange)
-- Full-text search (SQLite FTS5)
-- Compose / reply / forward / archive / delete
-- Attachments: sync from IMAP, open locally, attach when sending
-- Address book with embedded CardDAV server (MFP/fax sync) + LDAP import
-- Quick Sort triage (Keep / Delete / Preview + hotkeys `T`, `K`, `D`, Space)
-- Signatures, labels, and rules in Settings
-- POP3 connectivity test
-- Local AI summarize + suggest reply (Ollama `qwen3:4b-instruct` default, `qwen2.5:1.5b` low-spec/CPU; background insights + offline fallback)
-- CardDAV shared address book with Basic auth (LAN devices)
-- IMAP flag/archive/delete sync + OAuth token refresh
-- Command palette, settings (theme/density/high contrast)
-- Keyboard shortcuts (`c`, `r`, `f`, `e`, `#`, `t`, `j`/`k`, `/`, `Ctrl/Cmd+K`)
-- HTML sanitization, CI, Linux packaging script
+### Accounts & sync
+
+- Multi-account IMAP / SMTP
+- Provider presets: **Gmail**, **Microsoft 365**, **Yahoo**, **iCloud**, **Proton Bridge**, **generic IMAP/SMTP**
+- Password auth via OS keyring (Secret Service); iCloud app-specific password hint
+- OAuth2 browser sign-in (localhost callback, token exchange, automatic refresh)
+- Background sync scheduler (≈ every 5 minutes) + manual sync
+- IMAP flag / archive / delete / move sync to the server
+- Drafts synced to the IMAP Drafts folder
+- POP3 connectivity test (settings)
+
+### Inbox & reading
+
+- **Unified Inbox** across all accounts (archived mail filtered out)
+- Threaded conversations or flat list
+- Filters: unread, starred, attachments, account, mailbox
+- Sort by date, subject, from, attachments (asc/desc)
+- Virtualized message list for large mailboxes
+- Reading pane with HTML sanitization (safe rendering)
+- Favorites (star), archive, delete
+- Dedicated **Drafts** and **Spam** views in the sidebar
+- **Offline** view for messages kept only on this device
+
+### Compose & editing
+
+- Compose, reply, forward
+- Save / edit drafts
+- Rich text editor: bold, italic, underline, lists, indent, fonts, sizes
+- Attach files when sending; open downloaded attachments locally
+- Signatures (per account / default)
+- Recipient autocomplete from address book **and** mail history
+- Add a recipient to contacts from the composer
+
+### Search & productivity
+
+- Full-text search over local mail (SQLite FTS5) — online **and** offline copies
+- Command palette (`Ctrl/Cmd+K`)
+- Keyboard shortcuts: `c` compose, `r` reply, `f` forward, `e` archive, `#` delete, `t` Quick Sort, `j`/`k` navigate, `/` search, and more
+- **Quick Sort** triage: Keep / Delete / Preview (hotkeys)
+- Labels (create, assign, manage)
+- Mail rules engine: predicates (from / to / subject / body / always) and actions (read/unread, star, label, move, spam, delete)
+- Rules run automatically after sync
+
+### Spam & retention
+
+- Local spam filter: Bayesian learning + strict text heuristics (special chars, script mixing, obfuscation, URL density) — no cloud
+- Mark as spam / not spam (trains the model)
+- Auto-move detected spam into the Spam folder (configurable)
+- Folder retention policies for Spam and Trash (keep, or delete after N days)
+- One-click cleanup of old Spam/Trash messages
+
+### Intelligent offline mailbox (quota protection)
+
+- Per-account offline policy stored locally (`offline.mailbox`)
+- Modes: **Off** (prompt when nearly full), **Threshold**, **Overflow**, **Always purge after sync**
+- IMAP **QUOTA** probe (RFC 2087 CAPABILITY / GETQUOTAROOT) with local size estimate fallback
+- Offload oldest eligible mail: keep full local copy (body + attachments), then hard-purge from IMAP
+- Prefer unstarred / older first; optional “keep starred on server”
+- Minimum age and batch limit; never purge without a complete local copy
+- Quota bar + settings per account; one-time “mailbox almost full” prompt
+- Badge **Local only** on offloaded messages; sidebar **Offline** folder
+- Global search still finds offline mail
+
+### Address book & sharing
+
+- Full local address book (name, emails, phones, fax, addresses, photo, notes, custom fields)
+- Name display order and sort options
+- Embedded **CardDAV** server for phones / MFPs (Basic auth, LAN)
+- Embedded **LDAP** hub for office sharing
+- Share modes: **Local only**, **Server (main PC)**, **Client (workstation)**
+- Client sync from the hub; LDAP search / import
+- Fuzzy contact search
+
+### Local AI (optional)
+
+- Runs entirely on your machine via **Ollama** (no mail cloud)
+- Summarize message; suggest reply (two variants: concise / friendly)
+- Background insights after sync (cached summary + reply drafts)
+- Facts/constraints field to rewrite suggestions
+- Built-in install / start / pull helpers for Ollama
+- Default model `qwen3:4b-instruct`; low-spec/CPU `qwen2.5:1.5b`
+- Offline heuristic fallback when Ollama is unavailable
+
+### Spellcheck & localization
+
+- Hunspell spellcheck in the composer (red underlines, context suggestions)
+- German and English dictionaries shipped / auto-ensured for the UI locale
+- Install more dictionaries from Settings (no admin rights; fold-out “other languages”)
+- UI languages: **German** and **English**
+
+### Appearance & accessibility
+
+- Theme: light / dark / system (time-aware auto)
+- Color schemes: Navy, Forest, Slate, Midnight
+- Density: comfortable / compact
+- High contrast mode
+- Live regions and labeled navigation for screen readers
+
+### Backup & security
+
+- Encrypted backup export / import (passphrase-protected)
+- Secrets in the OS keyring (memory fallback for headless/CI)
+- HTML sanitization before display (no script/event handlers)
+- Local-first storage under the user’s data directory
+
+### Platform
+
+- Ubuntu Linux desktop app (Tauri 2 + WebKitGTK)
+- Deb / AppImage packaging script
+- CI, issue templates, Code of Conduct, MPL-2.0 license
 
 ## Screenshots
 
