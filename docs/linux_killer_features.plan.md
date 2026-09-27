@@ -6,7 +6,7 @@ Ziel: Funktionen, die NovaMail auf Linux klar von Thunderbird/Evolution/Geary ab
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| 1 | Snooze + Send Later + Sidebar „Geplant“ | in Arbeit |
+| 1 | Snooze + Send Later + Sidebar „Geplant“ | erledigt |
 | 2 | Command Palette Expansion (Aktionen auf Auswahl) | offen |
 | 3 | OpenPGP (Sequoia) + Key-UI | offen |
 | 4 | CalDAV Kalender + Tasks | offen |
@@ -41,8 +41,8 @@ Lokale SQLite-Steuerung (kein IMAP-Label nötig). Job-Tick alle ~60s weckt Snooz
 
 - [x] README: Snooze / Send Later / Geplant
 - [x] ROADMAP aktualisieren
-- [ ] `cargo test` + Frontend-Typecheck
-- [ ] Commit + Push Branch `cursor/snooze-send-later-0350`
+- [x] `cargo test` + Frontend-Typecheck
+- [x] Commit + Push Branch `cursor/snooze-send-later-0350`
 
 ---
 

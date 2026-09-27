@@ -21,7 +21,7 @@
 - [x] Quick Sort (Keep/Delete/Preview + hotkeys)
 - [x] Signatures, Labels UI, Rules UI, POP3 test
 - [x] Intelligent offline mailbox (quota / offload)
-- [ ] Snooze + Send Later + Sidebar „Geplant“ (Phase 1 — in Arbeit)
+- [x] Snooze + Send Later + Sidebar „Geplant“ (Phase 1)
 
 ## Linux Killer Features
 
@@ -29,7 +29,7 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 
 | Phase | Fokus | Status |
 |-------|--------|--------|
-| KF1 | Snooze + Send Later + Geplant | in Arbeit |
+| KF1 | Snooze + Send Later + Geplant | erledigt |
 | KF2 | Command Palette Expansion | offen |
 | KF3 | OpenPGP (Sequoia) + Key-UI | offen |
 | KF4 | CalDAV Kalender + Tasks | offen |
