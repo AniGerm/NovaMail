@@ -254,6 +254,36 @@ export function AppShell() {
     }));
   }, [selectMessage]);
 
+  const handleSelectSpam = useCallback(() => {
+    selectMessage(null);
+    setInboxFilters((prev) => ({
+      ...prev,
+      mailboxId: null,
+      mailboxRole: "junk",
+      viewMode: "flat",
+    }));
+  }, [selectMessage]);
+
+  const refreshMailQueries = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["messages"] });
+    void queryClient.invalidateQueries({ queryKey: ["message"] });
+    void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+  }, [queryClient]);
+
+  const handleMarkSpam = useCallback(async () => {
+    if (!selectedMessageId) return;
+    await api.messagesMarkSpam(selectedMessageId);
+    selectMessage(null);
+    refreshMailQueries();
+  }, [refreshMailQueries, selectMessage, selectedMessageId]);
+
+  const handleMarkNotSpam = useCallback(async () => {
+    if (!selectedMessageId) return;
+    await api.messagesMarkNotSpam(selectedMessageId);
+    selectMessage(null);
+    refreshMailQueries();
+  }, [refreshMailQueries, selectMessage, selectedMessageId]);
+
   const openDraftInComposer = useCallback(
     async (messageId: string) => {
       if (!desktop) return;
@@ -467,11 +497,13 @@ export function AppShell() {
           accounts={accounts}
           selectedAccountId={inboxFilters.accountId}
           draftsSelected={inboxFilters.mailboxRole === "drafts"}
+          spamSelected={inboxFilters.mailboxRole === "junk"}
           syncStatus={syncStatus}
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
           onSelectDrafts={handleSelectDrafts}
+          onSelectSpam={handleSelectSpam}
           onCompose={() => {
             setReplyTo(null);
             setEditingDraft(null);
@@ -531,6 +563,7 @@ export function AppShell() {
               <ReadingPane
                 message={messageQuery.data}
                 aiEnabled={Boolean(aiSettingsQuery.data?.enabled)}
+                inSpamFolder={inboxFilters.mailboxRole === "junk"}
                 onReply={() => {
                   setComposerBody("");
                   if (messageQuery.data) {
@@ -545,6 +578,12 @@ export function AppShell() {
                 }}
                 onToggleStar={() => {
                   void handleToggleStar();
+                }}
+                onMarkSpam={() => {
+                  void handleMarkSpam();
+                }}
+                onMarkNotSpam={() => {
+                  void handleMarkNotSpam();
                 }}
                 onReplySent={() => {
                   void refresh();

@@ -37,11 +37,14 @@ import type {
   MessageSummaryDto,
   OutgoingAttachment,
   ProviderPreset,
+  FolderPoliciesDto,
   RuleDto,
   SaveDraftRequest,
   SendMessageRequest,
   SetFlagsRequest,
   SignatureDto,
+  SpamScoreDto,
+  SpamSettingsDto,
   SuggestReplyMessageResponse,
   SummarizeMessageResponse,
   SyncProgressEvent,
@@ -238,6 +241,21 @@ export const api = {
     actionJson: string;
   }) => call<RuleDto>("rules_upsert", { request }),
   rulesDelete: (ruleId: string) => call<void>("rules_delete", { ruleId }),
+  messagesMove: (request: { messageId: string; target: string }) =>
+    call<void>("messages_move", { request }),
+  messagesMarkSpam: (messageId: string) =>
+    call<void>("messages_mark_spam", { messageId }),
+  messagesMarkNotSpam: (messageId: string) =>
+    call<void>("messages_mark_not_spam", { messageId }),
+  spamGetSettings: () => call<SpamSettingsDto>("spam_get_settings"),
+  spamSetSettings: (settings: SpamSettingsDto) =>
+    call<SpamSettingsDto>("spam_set_settings", { settings }),
+  spamScoreMessage: (messageId: string) =>
+    call<SpamScoreDto>("spam_score_message", { messageId }),
+  folderPoliciesGet: () => call<FolderPoliciesDto>("folder_policies_get"),
+  folderPoliciesSet: (policies: FolderPoliciesDto) =>
+    call<FolderPoliciesDto>("folder_policies_set", { policies }),
+  folderPoliciesApply: () => call<number>("folder_policies_apply"),
   signaturesList: (accountId?: string | null) =>
     call<SignatureDto[]>("signatures_list", { accountId: accountId ?? null }),
   signaturesUpsert: (request: {

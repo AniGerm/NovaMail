@@ -384,6 +384,33 @@ export interface RuleDto {
   actionJson: string;
 }
 
+export interface SpamSettingsDto {
+  enabled: boolean;
+  autoMove: boolean;
+  threshold: number;
+  trainedSpam: number;
+  trainedHam: number;
+}
+
+export interface SpamScoreDto {
+  messageId: string;
+  score: number;
+  isSpam: boolean;
+  reasons: string[];
+}
+
+export type RetentionModeDto = "keep" | "deleteAfterDays";
+
+export interface FolderPolicyDto {
+  role: string;
+  mode: RetentionModeDto;
+  days: number;
+}
+
+export interface FolderPoliciesDto {
+  policies: FolderPolicyDto[];
+}
+
 export interface SignatureDto {
   id: string;
   accountId?: string | null;

@@ -3,8 +3,10 @@
 mod app;
 mod contacts_store;
 mod error;
+mod folder_policies;
 mod paths;
 mod sanitize;
+mod spam;
 pub mod spellcheck;
 
 pub use app::AppState;

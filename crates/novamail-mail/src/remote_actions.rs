@@ -87,6 +87,63 @@ pub async fn archive_remote(
     Ok(())
 }
 
+/// Move a message into a target IMAP mailbox (by folder name), updating the local row.
+pub async fn move_remote(
+    db: &Database,
+    secrets: &SecretStore,
+    message_id: Uuid,
+    target_mailbox_name: &str,
+    target_role: Option<&str>,
+) -> MailResult<()> {
+    let Some(locator) = load_locator(db, message_id)? else {
+        // Local-only message: just reassign mailbox when possible.
+        if let Ok(detail) = db.get_message(message_id) {
+            let mb = db.ensure_mailbox(
+                detail.summary.account_id,
+                target_mailbox_name,
+                target_role.unwrap_or("archive"),
+            )?;
+            db.set_message_mailbox(message_id, mb.id)?;
+            let _ = db.refresh_mailbox_counts(mb.id);
+            let _ = db.refresh_mailbox_counts(detail.summary.mailbox_id);
+        }
+        return Ok(());
+    };
+    if locator.mailbox_name.eq_ignore_ascii_case(target_mailbox_name) {
+        return Ok(());
+    }
+
+    let account = db.get_account(locator.account_id)?;
+    let credentials = ensure_fresh_credentials(&account, secrets).await?;
+    let mut imap = LiveImap::connect(&account, &credentials).await?;
+    imap.select(&locator.mailbox_name).await?;
+    let uid = locator.uid.to_string();
+
+    // Ensure the destination exists on the server when missing.
+    let listed = imap.list_mailboxes().await.unwrap_or_default();
+    let dest_exists = listed
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case(target_mailbox_name));
+    if !dest_exists {
+        if let Err(err) = imap.create_mailbox(target_mailbox_name).await {
+            tracing::warn!(error = %err, mailbox = %target_mailbox_name, "CREATE mailbox failed");
+        }
+    }
+
+    imap.uid_move(&uid, target_mailbox_name).await?;
+    let role = target_role.unwrap_or("archive");
+    let mb = db.ensure_mailbox(locator.account_id, target_mailbox_name, role)?;
+    db.set_message_mailbox(message_id, mb.id)?;
+    // UID becomes invalid after MOVE; clear until next sync.
+    let _ = db.set_message_uid(message_id, None);
+    let _ = db.refresh_mailbox_counts(mb.id);
+    if let Ok(Some(old)) = db.find_mailbox_by_name(locator.account_id, &locator.mailbox_name) {
+        let _ = db.refresh_mailbox_counts(old.id);
+    }
+    let _ = imap.logout().await;
+    Ok(())
+}
+
 pub async fn delete_remote(
     db: &Database,
     secrets: &SecretStore,

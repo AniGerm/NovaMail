@@ -55,10 +55,10 @@ impl SyncEngine {
         let mut new_message_ids = Vec::new();
 
         for (name, role) in mailboxes {
-            let should_sync = role.as_deref() == Some("inbox")
-                || role.as_deref() == Some("sent")
-                || role.as_deref() == Some("archive")
-                || name.eq_ignore_ascii_case("INBOX");
+            let should_sync = matches!(
+                role.as_deref(),
+                Some("inbox" | "sent" | "archive" | "junk" | "trash" | "drafts")
+            ) || name.eq_ignore_ascii_case("INBOX");
             if !should_sync {
                 continue;
             }

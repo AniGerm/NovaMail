@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { open as openPath } from "@tauri-apps/plugin-shell";
-import { Reply, Star, Forward, Sparkles, Paperclip } from "lucide-react";
+import {
+  Reply,
+  Star,
+  Forward,
+  Sparkles,
+  Paperclip,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
@@ -14,18 +22,24 @@ type ReplyVariant = "a" | "b" | "own";
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
   aiEnabled?: boolean;
+  inSpamFolder?: boolean;
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
+  onMarkSpam?: () => void;
+  onMarkNotSpam?: () => void;
   onReplySent?: () => void;
 }
 
 export function ReadingPane({
   message,
   aiEnabled = true,
+  inSpamFolder = false,
   onReply,
   onForward,
   onToggleStar,
+  onMarkSpam,
+  onMarkNotSpam,
   onReplySent,
 }: ReadingPaneProps) {
   const t = useT();
@@ -207,6 +221,15 @@ export function ReadingPane({
             <IconButton label={t("forward")} onClick={onForward}>
               <Forward />
             </IconButton>
+            {inSpamFolder ? (
+              <IconButton label={t("markNotSpam")} onClick={onMarkNotSpam}>
+                <ShieldCheck />
+              </IconButton>
+            ) : (
+              <IconButton label={t("markSpam")} onClick={onMarkSpam}>
+                <ShieldAlert />
+              </IconButton>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--nova-ink-muted)]">

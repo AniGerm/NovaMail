@@ -32,6 +32,7 @@ pub struct RuleDefinition {
 pub enum Predicate {
     Always,
     FromContains { value: String },
+    ToContains { value: String },
     SubjectContains { value: String },
     BodyContains { value: String },
     And { items: Vec<Predicate> },
@@ -42,9 +43,14 @@ pub enum Predicate {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Action {
     MarkRead,
+    MarkUnread,
     Star,
+    Unstar,
     AddLabel { label: String },
     MoveToMailbox { mailbox: String },
+    /// Move into the account's junk/spam folder (creates Spam if needed).
+    MoveToSpam,
+    Delete,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +63,11 @@ pub fn matches(predicate: &Predicate, ctx: &RuleMatchContext<'_>) -> bool {
     match predicate {
         Predicate::Always => true,
         Predicate::FromContains { value } => contains_email_or_name(&ctx.message.from, value),
+        Predicate::ToContains { value } => ctx
+            .message
+            .to
+            .iter()
+            .any(|addr| contains_email_or_name(addr, value)),
         Predicate::SubjectContains { value } => ctx
             .message
             .subject

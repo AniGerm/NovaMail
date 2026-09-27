@@ -23,29 +23,35 @@ use novamail_ipc::{
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
     ContactDto, ContactsBookSettings, ContactsShareMode, ContactsShareStatus,
-    ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
-    LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
-    ListMessagesRequest, ListMessagesResponse, SetContactsShareModeRequest,
+    ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, FolderPolicyDto,
+    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
+    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
-    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset,
-    RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
-    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto,
+    ProviderPreset, RecipientSuggestion, RetentionModeDto, RuleDto, SaveDraftRequest,
+    SearchRequest, SearchResponse, SendMessageRequest, SetContactsShareModeRequest,
+    SetFlagsRequest, SetMessageLabelsRequest, SignatureDto, SpamScoreDto, SpamSettingsDto,
     SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
     SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
     SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
     UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    archive_remote, delete_remote, save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client,
-    SmtpClient, SyncEngine,
+    archive_remote, delete_remote, move_remote, save_draft_remote, set_flags_remote, OAuthConfig,
+    Pop3Client, SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
 use uuid::Uuid;
 
 use crate::contacts_store::DbContactStore;
+use crate::folder_policies::{
+    FolderPolicies, FolderPolicy, RetentionMode, SETTINGS_KEY as FOLDER_POLICIES_KEY,
+    SPAM_SETTINGS_KEY,
+};
 use crate::paths::AppPaths;
 use crate::sanitize::sanitize_html;
+use crate::spam::{self, SpamSettings};
 use crate::{CoreError, CoreResult};
 
 pub struct AppState {
@@ -449,14 +455,20 @@ impl AppState {
             });
         }
         self.on_new_messages_synced(&new_ids);
+        if let Err(err) = self.apply_folder_retention() {
+            tracing::warn!(error = %err, "folder retention cleanup failed");
+        }
         Ok(results)
     }
 
-    /// Apply mail rules + enqueue background AI insights for newly synced messages.
+    /// Apply mail rules, spam filter, then enqueue background AI insights.
     pub fn on_new_messages_synced(&self, message_ids: &[Uuid]) {
         for message_id in message_ids {
             if let Err(err) = self.apply_rules_for_message(*message_id) {
                 tracing::debug!(%message_id, error = %err, "rule apply skipped");
+            }
+            if let Err(err) = self.apply_spam_filter(*message_id) {
+                tracing::debug!(%message_id, error = %err, "spam filter skipped");
             }
         }
         self.enqueue_ai_insights(message_ids);
@@ -1661,7 +1673,7 @@ impl AppState {
         })
     }
 
-    /// Applies enabled rules from SQLite against a message (first version).
+    /// Applies enabled rules from SQLite against a message.
     pub fn apply_rules_for_message(&self, message_id: Uuid) -> CoreResult<Vec<Action>> {
         let detail = self.get_message(message_id)?;
         let conn_rules = self.load_rule_definitions()?;
@@ -1671,24 +1683,403 @@ impl AppState {
         };
         let matched = evaluate_rules(&conn_rules, &ctx);
         let mut actions = Vec::new();
+        let mut remote_moves: Vec<(Uuid, String, String)> = Vec::new();
+        let mut remote_deletes: Vec<Uuid> = Vec::new();
+        let mut remote_flags: Vec<(Uuid, Option<bool>, Option<bool>)> = Vec::new();
+
         for (_id, acts) in matched {
             for action in acts {
                 match &action {
                     Action::MarkRead => {
                         self.db.set_flags(message_id, Some(false), None)?;
+                        remote_flags.push((message_id, Some(false), None));
+                    }
+                    Action::MarkUnread => {
+                        self.db.set_flags(message_id, Some(true), None)?;
+                        remote_flags.push((message_id, Some(true), None));
                     }
                     Action::Star => {
                         self.db.set_flags(message_id, None, Some(true))?;
+                        remote_flags.push((message_id, None, Some(true)));
                     }
-                    Action::AddLabel { .. } | Action::MoveToMailbox { .. } => {
-                        // Labels/mailbox moves land with P1 UI; actions are recorded.
+                    Action::Unstar => {
+                        self.db.set_flags(message_id, None, Some(false))?;
+                        remote_flags.push((message_id, None, Some(false)));
+                    }
+                    Action::AddLabel { label } => {
+                        self.ensure_label_on_message(
+                            detail.summary.account_id,
+                            message_id,
+                            label,
+                        )?;
+                    }
+                    Action::MoveToMailbox { mailbox } => {
+                        let (name, role) =
+                            Self::resolve_mailbox_target(mailbox, detail.summary.account_id, &self.db)?;
+                        let mb = self.db.ensure_mailbox(detail.summary.account_id, &name, &role)?;
+                        self.db.set_message_mailbox(message_id, mb.id)?;
+                        let _ = self.db.refresh_mailbox_counts(mb.id);
+                        remote_moves.push((message_id, name, role));
+                    }
+                    Action::MoveToSpam => {
+                        let (name, role) = self.ensure_spam_mailbox(detail.summary.account_id)?;
+                        let mb = self.db.ensure_mailbox(detail.summary.account_id, &name, &role)?;
+                        self.db.set_message_mailbox(message_id, mb.id)?;
+                        let _ = self.db.refresh_mailbox_counts(mb.id);
+                        remote_moves.push((message_id, name, role));
+                    }
+                    Action::Delete => {
+                        remote_deletes.push(message_id);
                     }
                 }
                 actions.push(action);
             }
         }
+
+        self.enqueue_remote_rule_side_effects(remote_moves, remote_deletes, remote_flags);
         Ok(actions)
     }
+
+    fn ensure_label_on_message(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        label_name: &str,
+    ) -> CoreResult<()> {
+        let label = if let Some(existing) = self.db.find_label_by_name(account_id, label_name)? {
+            existing
+        } else {
+            self.upsert_label(UpsertLabelRequest {
+                id: None,
+                account_id,
+                name: label_name.to_string(),
+                color: "#b45309".into(),
+            })?
+        };
+        let mut ids: Vec<Uuid> = self
+            .db
+            .list_message_labels(message_id)?
+            .into_iter()
+            .map(|l| l.id)
+            .collect();
+        if !ids.contains(&label.id) {
+            ids.push(label.id);
+            self.db.set_message_labels(message_id, &ids)?;
+        }
+        Ok(())
+    }
+
+    fn resolve_mailbox_target(
+        target: &str,
+        account_id: Uuid,
+        db: &Database,
+    ) -> CoreResult<(String, String)> {
+        let lower = target.trim().to_ascii_lowercase();
+        let role = match lower.as_str() {
+            "spam" | "junk" => "junk",
+            "trash" | "deleted" | "bin" => "trash",
+            "archive" => "archive",
+            "inbox" => "inbox",
+            "sent" => "sent",
+            "drafts" | "entwürfe" | "entwuerfe" => "drafts",
+            _ => {
+                if let Some(mb) = db.find_mailbox_by_name(account_id, target)? {
+                    return Ok((
+                        mb.name,
+                        mb.role.unwrap_or_else(|| "archive".into()),
+                    ));
+                }
+                if let Some(mb) = db.find_mailbox_by_role(account_id, &lower)? {
+                    return Ok((mb.name, lower));
+                }
+                return Ok((target.to_string(), "archive".into()));
+            }
+        };
+        if let Some(mb) = db.find_mailbox_by_role(account_id, role)? {
+            return Ok((mb.name, role.into()));
+        }
+        let fallback_name = match role {
+            "junk" => "Spam",
+            "trash" => "Trash",
+            "archive" => "Archive",
+            "drafts" => "Drafts",
+            "sent" => "Sent",
+            _ => "INBOX",
+        };
+        Ok((fallback_name.into(), role.into()))
+    }
+
+    fn ensure_spam_mailbox(&self, account_id: Uuid) -> CoreResult<(String, String)> {
+        if let Some(mb) = self.db.find_mailbox_by_role(account_id, "junk")? {
+            return Ok((mb.name, "junk".into()));
+        }
+        for name in ["Spam", "Junk", "Junk E-mail", "Junk Email"] {
+            if let Some(mb) = self.db.find_mailbox_by_name(account_id, name)? {
+                let _ = self.db.ensure_mailbox(account_id, &mb.name, "junk");
+                return Ok((mb.name, "junk".into()));
+            }
+        }
+        let mb = self.db.ensure_mailbox(account_id, "Spam", "junk")?;
+        Ok((mb.name, "junk".into()))
+    }
+
+    fn enqueue_remote_rule_side_effects(
+        &self,
+        moves: Vec<(Uuid, String, String)>,
+        deletes: Vec<Uuid>,
+        flags: Vec<(Uuid, Option<bool>, Option<bool>)>,
+    ) {
+        if moves.is_empty() && deletes.is_empty() && flags.is_empty() {
+            return;
+        }
+        let db = self.db.clone();
+        let secrets = self.secrets.clone();
+        tokio::spawn(async move {
+            for (message_id, name, role) in moves {
+                if let Err(err) = move_remote(&db, &secrets, message_id, &name, Some(&role)).await {
+                    tracing::warn!(%message_id, error = %err, "rule IMAP move failed");
+                }
+            }
+            for message_id in deletes {
+                if let Err(err) = delete_remote(&db, &secrets, message_id).await {
+                    tracing::warn!(%message_id, error = %err, "rule IMAP delete failed");
+                }
+                let _ = db.delete_message(message_id);
+            }
+            for (message_id, unread, starred) in flags {
+                if let Err(err) = set_flags_remote(&db, &secrets, message_id, unread, starred).await
+                {
+                    tracing::debug!(%message_id, error = %err, "rule IMAP flag sync failed");
+                }
+            }
+        });
+    }
+
+    pub async fn move_message(&self, request: MoveMessageRequest) -> CoreResult<()> {
+        let detail = self.get_message(request.message_id)?;
+        let (name, role) =
+            Self::resolve_mailbox_target(&request.target, detail.summary.account_id, &self.db)?;
+        let mb = self
+            .db
+            .ensure_mailbox(detail.summary.account_id, &name, &role)?;
+        self.db
+            .set_message_mailbox(request.message_id, mb.id)?;
+        let _ = self.db.refresh_mailbox_counts(mb.id);
+        let _ = self.db.refresh_mailbox_counts(detail.summary.mailbox_id);
+        if let Err(err) =
+            move_remote(&self.db, &self.secrets, request.message_id, &name, Some(&role)).await
+        {
+            tracing::warn!(error = %err, "IMAP move failed; local mailbox updated");
+        }
+        Ok(())
+    }
+
+    pub async fn mark_spam(&self, message_id: Uuid) -> CoreResult<()> {
+        let detail = self.get_message(message_id)?;
+        let body = detail.body_text.as_deref().unwrap_or("");
+        spam::train(
+            &self.paths.data_dir,
+            &detail.summary.subject,
+            &detail.summary.from.email,
+            body,
+            true,
+        )?;
+        self.move_message(MoveMessageRequest {
+            message_id,
+            target: "junk".into(),
+        })
+        .await
+    }
+
+    pub async fn mark_not_spam(&self, message_id: Uuid) -> CoreResult<()> {
+        let detail = self.get_message(message_id)?;
+        let body = detail.body_text.as_deref().unwrap_or("");
+        spam::train(
+            &self.paths.data_dir,
+            &detail.summary.subject,
+            &detail.summary.from.email,
+            body,
+            false,
+        )?;
+        self.move_message(MoveMessageRequest {
+            message_id,
+            target: "inbox".into(),
+        })
+        .await
+    }
+
+    fn apply_spam_filter(&self, message_id: Uuid) -> CoreResult<()> {
+        let settings = self.load_spam_settings();
+        if !settings.enabled || !settings.auto_move {
+            return Ok(());
+        }
+        let detail = self.get_message(message_id)?;
+        // Skip messages already in junk/trash/drafts.
+        if let Ok(mb) = self.db.get_mailbox(detail.summary.mailbox_id) {
+            if matches!(
+                mb.role.as_deref(),
+                Some("junk" | "trash" | "drafts" | "sent")
+            ) {
+                return Ok(());
+            }
+        }
+        let body = detail.body_text.as_deref().unwrap_or("");
+        let verdict = spam::score_message(
+            &self.paths.data_dir,
+            &settings,
+            &detail.summary.subject,
+            &detail.summary.from.email,
+            body,
+        );
+        if !verdict.is_spam {
+            return Ok(());
+        }
+        tracing::info!(
+            %message_id,
+            score = verdict.score,
+            reasons = ?verdict.reasons,
+            "auto-moving message to spam"
+        );
+        let (name, role) = self.ensure_spam_mailbox(detail.summary.account_id)?;
+        let mb = self
+            .db
+            .ensure_mailbox(detail.summary.account_id, &name, &role)?;
+        self.db.set_message_mailbox(message_id, mb.id)?;
+        let _ = self.db.refresh_mailbox_counts(mb.id);
+        self.enqueue_remote_rule_side_effects(
+            vec![(message_id, name, role)],
+            Vec::new(),
+            Vec::new(),
+        );
+        Ok(())
+    }
+
+    pub fn spam_settings(&self) -> CoreResult<SpamSettingsDto> {
+        let settings = self.load_spam_settings();
+        let (trained_spam, trained_ham) = spam::model_stats(&self.paths.data_dir);
+        Ok(SpamSettingsDto {
+            enabled: settings.enabled,
+            auto_move: settings.auto_move,
+            threshold: settings.threshold,
+            trained_spam,
+            trained_ham,
+        })
+    }
+
+    pub fn set_spam_settings(&self, dto: SpamSettingsDto) -> CoreResult<SpamSettingsDto> {
+        let settings = SpamSettings {
+            enabled: dto.enabled,
+            auto_move: dto.auto_move,
+            threshold: dto.threshold.clamp(0.4, 0.99),
+        };
+        self.db.set_setting(
+            SPAM_SETTINGS_KEY,
+            &serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?,
+        )?;
+        self.spam_settings()
+    }
+
+    pub fn score_spam(&self, message_id: Uuid) -> CoreResult<SpamScoreDto> {
+        let detail = self.get_message(message_id)?;
+        let settings = self.load_spam_settings();
+        let body = detail.body_text.as_deref().unwrap_or("");
+        let verdict = spam::score_message(
+            &self.paths.data_dir,
+            &settings,
+            &detail.summary.subject,
+            &detail.summary.from.email,
+            body,
+        );
+        Ok(SpamScoreDto {
+            message_id,
+            score: verdict.score,
+            is_spam: verdict.is_spam,
+            reasons: verdict.reasons,
+        })
+    }
+
+    fn load_spam_settings(&self) -> SpamSettings {
+        self.db
+            .get_setting(SPAM_SETTINGS_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn folder_policies(&self) -> CoreResult<FolderPoliciesDto> {
+        Ok(Self::policies_to_dto(&self.load_folder_policies()))
+    }
+
+    pub fn set_folder_policies(&self, dto: FolderPoliciesDto) -> CoreResult<FolderPoliciesDto> {
+        let policies = FolderPolicies {
+            policies: dto
+                .policies
+                .into_iter()
+                .map(|p| FolderPolicy {
+                    role: p.role,
+                    mode: match p.mode {
+                        RetentionModeDto::Keep => RetentionMode::Keep,
+                        RetentionModeDto::DeleteAfterDays => RetentionMode::DeleteAfterDays,
+                    },
+                    days: p.days.max(1).min(3650),
+                })
+                .collect(),
+        };
+        self.db.set_setting(
+            FOLDER_POLICIES_KEY,
+            &serde_json::to_string(&policies).map_err(|e| CoreError::Message(e.to_string()))?,
+        )?;
+        Ok(Self::policies_to_dto(&policies))
+    }
+
+    fn load_folder_policies(&self) -> FolderPolicies {
+        self.db
+            .get_setting(FOLDER_POLICIES_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn policies_to_dto(policies: &FolderPolicies) -> FolderPoliciesDto {
+        FolderPoliciesDto {
+            policies: policies
+                .policies
+                .iter()
+                .map(|p| FolderPolicyDto {
+                    role: p.role.clone(),
+                    mode: match p.mode {
+                        RetentionMode::Keep => RetentionModeDto::Keep,
+                        RetentionMode::DeleteAfterDays => RetentionModeDto::DeleteAfterDays,
+                    },
+                    days: p.days,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn apply_folder_retention(&self) -> CoreResult<u32> {
+        let policies = self.load_folder_policies();
+        let now = chrono::Utc::now().timestamp();
+        let mut deleted = 0u32;
+        for policy in &policies.policies {
+            if policy.mode != RetentionMode::DeleteAfterDays {
+                continue;
+            }
+            let cutoff = now - (i64::from(policy.days) * 86_400);
+            let ids = self
+                .db
+                .list_message_ids_in_role_older_than(&policy.role, cutoff)?;
+            for id in ids {
+                if self.db.delete_message(id).is_ok() {
+                    deleted += 1;
+                }
+            }
+        }
+        Ok(deleted)
+    }
+
 
     fn load_rule_definitions(&self) -> CoreResult<Vec<RuleDefinition>> {
         let mut out = Vec::new();

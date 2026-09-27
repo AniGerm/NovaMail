@@ -2,18 +2,19 @@ use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
     AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
     AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
-    ContactsShareMode, ContactsShareStatus, SetContactsShareModeRequest, ContactDto,
-    ContactsBookSettings, RecipientSuggestion,
-    ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
-    LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
-    ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
-    MessageDetailDto, MessageSummaryDto, OAuthExchangeRequest, OAuthExchangeResponse,
-    ProviderPreset, RuleDto, SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest,
-    SetMessageLabelsRequest, SignatureDto, SuggestRepliesMessageRequest,
-    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    SaveDraftRequest, SpellcheckStatus, SpellDictionaryDto, UpsertContactRequest,
-    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto,
+    ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest,
+    ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
+    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailProvider,
+    MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
+    OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RecipientSuggestion, RuleDto,
+    SaveDraftRequest, SearchRequest, SearchResponse, SendMessageRequest,
+    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SpamScoreDto, SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus,
+    SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
+    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
+    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
+    UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -552,6 +553,71 @@ pub fn rules_upsert(
 #[tauri::command]
 pub fn rules_delete(state: State<'_, DesktopState>, rule_id: Uuid) -> Result<(), AppError> {
     state.app.delete_rule(rule_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn messages_move(
+    state: State<'_, DesktopState>,
+    request: MoveMessageRequest,
+) -> Result<(), AppError> {
+    state.app.move_message(request).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn messages_mark_spam(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.mark_spam(message_id).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn messages_mark_not_spam(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.mark_not_spam(message_id).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spam_get_settings(state: State<'_, DesktopState>) -> Result<SpamSettingsDto, AppError> {
+    state.app.spam_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spam_set_settings(
+    state: State<'_, DesktopState>,
+    settings: SpamSettingsDto,
+) -> Result<SpamSettingsDto, AppError> {
+    state.app.set_spam_settings(settings).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spam_score_message(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<SpamScoreDto, AppError> {
+    state.app.score_spam(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn folder_policies_get(
+    state: State<'_, DesktopState>,
+) -> Result<FolderPoliciesDto, AppError> {
+    state.app.folder_policies().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn folder_policies_set(
+    state: State<'_, DesktopState>,
+    policies: FolderPoliciesDto,
+) -> Result<FolderPoliciesDto, AppError> {
+    state.app.set_folder_policies(policies).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn folder_policies_apply(state: State<'_, DesktopState>) -> Result<u32, AppError> {
+    state.app.apply_folder_retention().map_err(map_err)
 }
 
 #[tauri::command]

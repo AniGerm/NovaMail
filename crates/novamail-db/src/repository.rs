@@ -1224,6 +1224,66 @@ impl Database {
         Ok(())
     }
 
+    /// Message IDs in mailboxes with the given role whose `date` is older than `cutoff` (unix secs).
+    pub fn list_message_ids_in_role_older_than(
+        &self,
+        role: &str,
+        cutoff: i64,
+    ) -> DbResult<Vec<Uuid>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT m.id
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            WHERE lower(coalesce(mb.role, '')) = lower(?1)
+              AND m.date < ?2
+            "#,
+        )?;
+        let rows = stmt.query_map(params![role, cutoff], |row| {
+            let id: String = row.get(0)?;
+            Ok(Uuid::parse_str(&id).map_err(|e| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+            })?)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn find_label_by_name(
+        &self,
+        account_id: Uuid,
+        name: &str,
+    ) -> DbResult<Option<LabelDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, account_id, name, color FROM labels
+            WHERE account_id = ?1 AND lower(name) = lower(?2)
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![account_id.to_string(), name])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(LabelDto {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                })?,
+                account_id: Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                })?,
+                name: row.get(2)?,
+                color: row.get(3)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+
     pub fn upsert_contact(&self, contact: &ContactRecord) -> DbResult<()> {
         let conn = self.conn.lock();
         let emails = serde_json::to_string(&contact.emails)?;
@@ -1843,10 +1903,24 @@ fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
         .as_deref()
         .map(|r| r.eq_ignore_ascii_case("drafts"))
         .unwrap_or(false);
+    let junk_role = req
+        .mailbox_role
+        .as_deref()
+        .map(|r| r.eq_ignore_ascii_case("junk") || r.eq_ignore_ascii_case("spam"))
+        .unwrap_or(false);
 
     if drafts_role {
         where_parts.push(
             "(lower(coalesce(mb.role, '')) = 'drafts' OR lower(mb.name) IN ('drafts', 'entwürfe', 'entwuerfe'))"
+                .into(),
+        );
+        if let Some(account_id) = req.account_id {
+            where_parts.push("m.account_id = ?1".into());
+            bind_ids.push(account_id.to_string());
+        }
+    } else if junk_role {
+        where_parts.push(
+            "(lower(coalesce(mb.role, '')) = 'junk' OR lower(mb.name) IN ('junk', 'spam', 'junk e-mail', 'junk email'))"
                 .into(),
         );
         if let Some(account_id) = req.account_id {
@@ -1858,9 +1932,13 @@ fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
             "(mb.role = 'inbox' OR lower(mb.name) = 'inbox' OR mb.name = 'INBOX')".into(),
         );
         where_parts.push(format!("(m.flags & {FLAG_ARCHIVED}) = 0"));
-        // Keep drafts out of the unified inbox.
+        // Keep drafts and spam out of the unified inbox.
         where_parts.push(
             "(lower(coalesce(mb.role, '')) != 'drafts' AND lower(mb.name) NOT IN ('drafts', 'entwürfe', 'entwuerfe'))"
+                .into(),
+        );
+        where_parts.push(
+            "(lower(coalesce(mb.role, '')) != 'junk' AND lower(mb.name) NOT IN ('junk', 'spam', 'junk e-mail', 'junk email'))"
                 .into(),
         );
         if let Some(mailbox_id) = req.mailbox_id {

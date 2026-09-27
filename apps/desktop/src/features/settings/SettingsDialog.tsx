@@ -8,10 +8,10 @@ import type {
   AiSettings,
   AppError,
   LabelDto,
-  RuleDto,
   SignatureDto,
   SpellDictionaryDto,
 } from "@/shared/api/types";
+import { RulesSpamPanel } from "@/features/settings/RulesSpamPanel";
 
 const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
 const AI_CPU_MODEL = "qwen2.5:1.5b";
@@ -79,12 +79,9 @@ export function SettingsDialog({
 
   const [signatures, setSignatures] = useState<SignatureDto[]>([]);
   const [labels, setLabels] = useState<LabelDto[]>([]);
-  const [rules, setRules] = useState<RuleDto[]>([]);
   const [sigName, setSigName] = useState("");
   const [sigBody, setSigBody] = useState("");
   const [labelName, setLabelName] = useState("");
-  const [ruleName, setRuleName] = useState("");
-  const [ruleSubject, setRuleSubject] = useState("");
   const [backupPassphrase, setBackupPassphrase] = useState("");
   const [backupPassphraseConfirm, setBackupPassphraseConfirm] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
@@ -135,14 +132,12 @@ export function SettingsDialog({
   }
 
   async function refreshExtras() {
-    const [sigs, labs, rls] = await Promise.all([
+    const [sigs, labs] = await Promise.all([
       api.signaturesList(null),
       api.labelsList(null),
-      api.rulesList(),
     ]);
     setSignatures(sigs);
     setLabels(labs);
-    setRules(rls);
   }
 
   async function refreshAi() {
@@ -879,49 +874,7 @@ export function SettingsDialog({
           </ul>
         </section>
 
-        <section className="grid gap-2">
-          <h3 className="font-medium">{t("rules")}</h3>
-          <p className="text-xs text-[var(--nova-ink-muted)]">
-            {t("rulesDescription")}
-          </p>
-          <Input
-            placeholder={t("ruleName")}
-            value={ruleName}
-            onChange={(e) => setRuleName(e.target.value)}
-          />
-          <Input
-            placeholder={t("subjectContains")}
-            value={ruleSubject}
-            onChange={(e) => setRuleSubject(e.target.value)}
-          />
-          <Button
-            type="button"
-            size="sm"
-            onClick={async () => {
-              if (!ruleName.trim() || !ruleSubject.trim()) return;
-              await api.rulesUpsert({
-                name: ruleName.trim(),
-                enabled: true,
-                accountId: null,
-                predicateJson: JSON.stringify({
-                  type: "subjectContains",
-                  value: ruleSubject.trim(),
-                }),
-                actionJson: JSON.stringify([{ type: "markRead" }]),
-              });
-              setRuleName("");
-              setRuleSubject("");
-              await refreshExtras();
-            }}
-          >
-            {t("addRule")}
-          </Button>
-          <ul className="space-y-1 text-[var(--nova-ink-muted)]">
-            {rules.map((rule) => (
-              <li key={rule.id}>{rule.name}</li>
-            ))}
-          </ul>
-        </section>
+        <RulesSpamPanel accounts={accounts} />
 
         {error ? (
           <p className="text-[var(--nova-danger)]" role="alert">
