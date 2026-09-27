@@ -25,29 +25,43 @@ LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/novamail"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/launcher.log"
 
-# Prefer the already-built debug binary + Vite when available (faster reopen).
+# Prefer the already-built debug binary (embeds apps/desktop/dist).
+# Note: a plain `cargo build` does NOT load Vite — only `tauri dev` sets cfg(dev).
+# Starting Vite alone next to a cargo-built binary still shows the embedded (possibly stale) UI.
 BIN="${ROOT}/target/debug/novamail-desktop"
-VITE_URL="http://127.0.0.1:1420"
+DESKTOP_DIR="${ROOT}/apps/desktop"
+DIST_JS="$(ls -1t "${DESKTOP_DIR}/dist/assets"/index-*.js 2>/dev/null | head -1 || true)"
 
-is_up() {
-  curl -fsS --max-time 1 "$VITE_URL" >/dev/null 2>&1
+frontend_stale() {
+  # Rebuild when there is no dist, or any desktop src file is newer than the bundle.
+  [[ -n "$DIST_JS" && -f "$DIST_JS" ]] || return 0
+  if find "${DESKTOP_DIR}/src" "${DESKTOP_DIR}/index.html" "${DESKTOP_DIR}/public" \
+      -type f -newer "$DIST_JS" 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
 }
 
+binary_stale() {
+  [[ -x "$BIN" ]] || return 0
+  [[ -n "$DIST_JS" && -f "$DIST_JS" ]] || return 0
+  [[ "$DIST_JS" -nt "$BIN" ]] && return 0
+  return 1
+}
+
+if frontend_stale; then
+  echo "Rebuilding desktop frontend (src newer than dist)..." >>"$LOG_FILE"
+  (cd "$DESKTOP_DIR" && pnpm build) >>"$LOG_FILE" 2>&1
+  DIST_JS="$(ls -1t "${DESKTOP_DIR}/dist/assets"/index-*.js 2>/dev/null | head -1 || true)"
+fi
+
+if binary_stale; then
+  echo "Rebuilding novamail-desktop (dist newer than binary)..." >>"$LOG_FILE"
+  cargo build -p novamail-desktop >>"$LOG_FILE" 2>&1
+fi
+
 if [[ -x "$BIN" ]]; then
-  if ! is_up; then
-    # Start Vite in the background for the Tauri debug shell.
-    (
-      cd "${ROOT}/apps/desktop"
-      exec pnpm exec vite --host 127.0.0.1 --port 1420
-    ) >>"$LOG_FILE" 2>&1 &
-    for _ in $(seq 1 40); do
-      is_up && break
-      sleep 0.25
-    done
-  fi
-  if is_up; then
-    exec "$BIN" >>"$LOG_FILE" 2>&1
-  fi
+  exec "$BIN" >>"$LOG_FILE" 2>&1
 fi
 
 # Fallback: full Tauri dev (builds if needed).
