@@ -2266,7 +2266,7 @@ fn escape_fts(query: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{FLAG_SEEN, MessageRecord, ThreadRecord};
+    use crate::models::{FLAG_SEEN, MailboxRecord, MessageRecord, ThreadRecord};
     use novamail_ipc::{AddressDto, AuthType, MailProvider};
 
     fn sample_account() -> AccountRecord {
@@ -2420,5 +2420,99 @@ mod tests {
         assert!(!detail.summary.unread);
         assert!(detail.summary.starred);
         let _ = FLAG_SEEN;
+    }
+
+    #[test]
+    fn local_only_offload_and_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let account = sample_account();
+        db.insert_account(&account).unwrap();
+        let mailbox = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id: account.id,
+            name: "INBOX".into(),
+            role: Some("inbox".into()),
+            uidvalidity: Some(1),
+            uidnext: Some(2),
+            unread_count: 0,
+            total_count: 1,
+        };
+        db.upsert_mailbox(&mailbox).unwrap();
+        let thread_id = Uuid::new_v4();
+        db.upsert_thread(&ThreadRecord {
+            id: thread_id,
+            account_id: account.id,
+            subject: "Old".into(),
+            last_message_at: 100,
+            message_count: 1,
+            unread_count: 0,
+            participants: vec![AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            }],
+            snippet: "Old".into(),
+        })
+        .unwrap();
+        let message_id = Uuid::new_v4();
+        db.insert_message(&MessageRecord {
+            id: message_id,
+            account_id: account.id,
+            mailbox_id: mailbox.id,
+            thread_id,
+            uid: Some(7),
+            message_id: Some("<old@example.com>".into()),
+            in_reply_to: None,
+            references: vec![],
+            subject: "Old".into(),
+            from: AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            },
+            to: vec![],
+            cc: vec![],
+            date: 100,
+            flags: FLAG_SEEN,
+            snippet: "Old".into(),
+            body_text: Some("body".into()),
+            body_html: None,
+            has_attachments: false,
+            raw_path: None,
+            local_only: false,
+            offline_at: None,
+            size_bytes: Some(128),
+        })
+        .unwrap();
+
+        assert!(db.message_has_complete_local_copy(message_id).unwrap());
+        db.mark_message_local_only(message_id, Some(128), 200)
+            .unwrap();
+        assert!(db.get_message_uid(message_id).unwrap().is_none());
+        assert!(db.get_message(message_id).unwrap().summary.local_only);
+        assert_eq!(db.count_local_only_messages(Some(account.id)).unwrap(), 1);
+
+        let (offline, total) = db
+            .list_messages(&ListMessagesRequest {
+                mailbox_id: None,
+                account_id: None,
+                unified: false,
+                mailbox_role: None,
+                local_only: true,
+                limit: 50,
+                offset: 0,
+                query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Desc,
+            })
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(offline[0].id, message_id);
+
+        let candidates = db
+            .list_offload_candidates(account.id, 10_000, true, 10)
+            .unwrap();
+        assert!(candidates.is_empty());
     }
 }
