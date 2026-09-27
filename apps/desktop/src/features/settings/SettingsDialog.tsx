@@ -269,6 +269,7 @@ export function SettingsDialog({
       onClose={onClose}
       title={t("settingsTitle")}
       description={t("settingsDescription")}
+      className="max-w-3xl"
     >
       <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
         <label className="grid gap-1">
