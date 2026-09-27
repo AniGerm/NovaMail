@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { open as openPath } from "@tauri-apps/plugin-shell";
 import { Reply, Star, Forward, Sparkles, Paperclip } from "lucide-react";
-import { Button, EmptyState, IconButton, Input } from "@novamail/ui";
+import { Button, EmptyState, IconButton } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, MessageDetailDto } from "@/shared/api/types";
@@ -27,23 +27,15 @@ export function ReadingPane({
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
-  const [summaryProvider, setSummaryProvider] = useState<string | null>(null);
   const [variantA, setVariantA] = useState<string | null>(null);
   const [variantB, setVariantB] = useState<string | null>(null);
-  const [selectedVariant, setSelectedVariant] = useState<"a" | "b">("a");
-  const [draft, setDraft] = useState("");
-  const [facts, setFacts] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     setSummary(null);
-    setSummaryProvider(null);
     setVariantA(null);
     setVariantB(null);
-    setSelectedVariant("a");
-    setDraft("");
-    setFacts("");
     setAiError(null);
     const id = message?.summary.id;
     if (!id) return;
@@ -52,21 +44,11 @@ export function ReadingPane({
       .aiMessageInsights(id)
       .then((insights) => {
         if (cancelled) return;
-        if (insights.summary) {
-          setSummary(insights.summary);
-          setSummaryProvider(insights.provider ?? "cache");
-        }
-        const a = insights.replyA ?? insights.replySuggestion ?? null;
-        const b = insights.replyB ?? null;
-        if (a) {
-          setVariantA(a);
-          setDraft(a);
-        }
-        if (b) setVariantB(b);
+        if (insights.summary) setSummary(insights.summary);
+        setVariantA(insights.replyA ?? insights.replySuggestion ?? null);
+        setVariantB(insights.replyB ?? null);
       })
-      .catch(() => {
-        /* insights optional */
-      });
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -94,7 +76,6 @@ export function ReadingPane({
     try {
       const result = await api.aiSummarizeMessage(current.summary.id);
       setSummary(result.summary);
-      setSummaryProvider(result.provider);
     } catch (error) {
       setAiError((error as AppError).message || t("summarizeFailed"));
     } finally {
@@ -102,38 +83,48 @@ export function ReadingPane({
     }
   }
 
-  async function loadReplyVariants(withFacts?: string) {
+  async function ensureVariants(): Promise<{ a: string; b: string } | null> {
+    if (variantA && variantB) {
+      return { a: variantA, b: variantB };
+    }
     setAiBusy(true);
     setAiError(null);
     try {
-      const result = await api.aiSuggestReplies(
-        current.summary.id,
-        withFacts?.trim() || null,
-      );
+      const result = await api.aiSuggestReplies(current.summary.id);
       const a = result.variants[0] ?? "";
       const b = result.variants[1] ?? result.variants[0] ?? "";
       setVariantA(a || null);
       setVariantB(b || null);
-      setSelectedVariant("a");
-      setDraft(a);
-      setSummaryProvider(result.provider);
+      if (!a) return null;
+      return { a, b: b || a };
     } catch (error) {
       setAiError((error as AppError).message || t("suggestFailed"));
+      return null;
     } finally {
       setAiBusy(false);
     }
   }
 
-  function pickVariant(which: "a" | "b") {
-    setSelectedVariant(which);
-    const text = which === "a" ? variantA : variantB;
-    if (text) setDraft(text);
+  async function openVariant(which: "a" | "b") {
+    const variants = await ensureVariants();
+    if (!variants) return;
+    const text = which === "a" ? variants.a : variants.b;
+    onUseSuggestedReply?.(text);
+    onReply();
   }
 
-  function useDraftInReply() {
-    if (!draft.trim()) return;
-    onUseSuggestedReply?.(draft);
+  function openOwnReply() {
+    onUseSuggestedReply?.("");
     onReply();
+  }
+
+  async function openAttachment(id: string) {
+    try {
+      const path = await api.attachmentsOpenPath(id);
+      await openPath(path);
+    } catch (error) {
+      setAiError((error as AppError).message || t("openAttachmentFailed"));
+    }
   }
 
   return (
@@ -156,7 +147,7 @@ export function ReadingPane({
                 }
               />
             </IconButton>
-            <IconButton label={t("reply")} onClick={onReply}>
+            <IconButton label={t("reply")} onClick={openOwnReply}>
               <Reply />
             </IconButton>
             <IconButton label={t("forward")} onClick={onForward}>
@@ -175,7 +166,7 @@ export function ReadingPane({
           <span>{current.summary.accountEmail}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={onReply}>
+          <Button size="sm" onClick={openOwnReply}>
             {t("reply")}
           </Button>
           <Button size="sm" variant="secondary" onClick={onForward}>
@@ -183,20 +174,12 @@ export function ReadingPane({
           </Button>
           <Button
             size="sm"
-            variant="secondary"
+            variant="ghost"
             disabled={aiBusy}
             onClick={() => void handleSummarize()}
           >
             <Sparkles size={14} />
             {aiBusy ? t("working") : t("summarize")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={aiBusy}
-            onClick={() => void loadReplyVariants()}
-          >
-            {t("suggestReply")}
           </Button>
         </div>
         {attachments.length > 0 ? (
@@ -211,18 +194,7 @@ export function ReadingPane({
                   <button
                     type="button"
                     className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          const path = await api.attachmentsOpenPath(attachment.id);
-                          await openPath(path);
-                        } catch (error) {
-                          setAiError(
-                            (error as AppError).message || t("openAttachmentFailed"),
-                          );
-                        }
-                      })();
-                    }}
+                    onClick={() => void openAttachment(attachment.id)}
                   >
                     {attachment.filename}{" "}
                     <span className="text-[var(--nova-ink-muted)]">
@@ -239,98 +211,73 @@ export function ReadingPane({
             {aiError}
           </p>
         ) : null}
+      </header>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6">
         {summary ? (
-          <div className="mt-4 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-4 py-3 text-sm text-[var(--nova-ink)]">
+          <div className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-4 py-3 text-sm text-[var(--nova-ink)]">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
               {t("summary")}
-              {summaryProvider ? ` · ${summaryProvider}` : ""}
             </p>
             <p className="leading-6">{summary}</p>
           </div>
         ) : null}
 
-        <section className="mt-4 grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">{t("replyAssistTitle")}</h3>
-            <span className="text-xs text-[var(--nova-ink-muted)]">
-              {t("replyAssistHint")}
-            </span>
-          </div>
+        <section
+          aria-label={t("messageBody")}
+          className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_1px_0_color-mix(in_srgb,var(--nova-ink)_5%,transparent)]"
+        >
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+            {t("messageBody")}
+          </p>
+          {current.bodyHtml ? (
+            <div
+              className="prose max-w-none text-[15px] leading-7 text-[var(--nova-ink)]"
+              dangerouslySetInnerHTML={{ __html: current.bodyHtml }}
+            />
+          ) : (
+            <div className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--nova-ink)]">
+              {body}
+            </div>
+          )}
+        </section>
+
+        <section
+          aria-label={t("replyAssistTitle")}
+          className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] px-4 py-4"
+        >
+          <p className="mb-1 text-sm font-medium">{t("replyAssistTitle")}</p>
+          <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
+            {t("replyAssistSimpleHint")}
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
-              variant={selectedVariant === "a" ? "primary" : "secondary"}
-              disabled={!variantA || aiBusy}
-              onClick={() => pickVariant("a")}
+              disabled={aiBusy}
+              onClick={() => void openVariant("a")}
             >
-              {t("replyVariantA")}
+              {t("replyVariantAShort")}
             </Button>
             <Button
               type="button"
               size="sm"
-              variant={selectedVariant === "b" ? "primary" : "secondary"}
-              disabled={!variantB || aiBusy}
-              onClick={() => pickVariant("b")}
+              variant="secondary"
+              disabled={aiBusy}
+              onClick={() => void openVariant("b")}
             >
-              {t("replyVariantB")}
+              {t("replyVariantBShort")}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              disabled={aiBusy}
-              onClick={() => void loadReplyVariants()}
+              onClick={openOwnReply}
             >
-              {aiBusy ? t("working") : t("generateReplyVariants")}
-            </Button>
-          </div>
-          <textarea
-            className="min-h-[120px] w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2 text-sm leading-6"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={t("replyDraftPlaceholder")}
-          />
-          <label className="grid gap-1 text-xs">
-            <span>{t("replyFactsLabel")}</span>
-            <Input
-              value={facts}
-              onChange={(e) => setFacts(e.target.value)}
-              placeholder={t("replyFactsPlaceholder")}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={aiBusy || !facts.trim()}
-              onClick={() => void loadReplyVariants(facts)}
-            >
-              {t("rewriteWithFacts")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!draft.trim()}
-              onClick={useDraftInReply}
-            >
-              {t("useReplyDraft")}
+              {t("replyOwn")}
             </Button>
           </div>
         </section>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-        {current.bodyHtml ? (
-          <div
-            className="prose mx-auto max-w-[720px] text-[15px] leading-7 text-[var(--nova-ink)]"
-            dangerouslySetInnerHTML={{ __html: current.bodyHtml }}
-          />
-        ) : (
-          <div className="mx-auto max-w-[720px] whitespace-pre-wrap text-[15px] leading-7 text-[var(--nova-ink)]">
-            {body}
-          </div>
-        )}
       </div>
     </article>
   );
