@@ -10,7 +10,8 @@
     "typecheck": "pnpm --filter @novamail/desktop typecheck",
     "test:rust": "cargo test --workspace",
     "desktop:dev": "pnpm --filter @novamail/desktop dev",
-    "desktop:build": "pnpm --filter @novamail/desktop build"
+    "desktop:build": "pnpm --filter @novamail/desktop build",
+    "desktop:install-launcher": "bash scripts/install-desktop-launcher.sh"
   },
   "engines": {
     "node": ">=20"
