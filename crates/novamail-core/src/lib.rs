@@ -5,6 +5,7 @@ mod contacts_store;
 mod error;
 mod paths;
 mod sanitize;
+pub mod spellcheck;
 
 pub use app::AppState;
 pub use error::{CoreError, CoreResult};

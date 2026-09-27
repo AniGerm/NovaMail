@@ -66,6 +66,12 @@ export function AppShell() {
   const [inboxFilters, setInboxFilters] =
     useState<InboxFilters>(defaultInboxFilters);
   const desktop = isDesktopShell();
+  const locale = useUiStore((s) => s.locale);
+
+  useEffect(() => {
+    if (!desktop) return;
+    void api.spellcheckEnsureForLocale(locale).catch(() => undefined);
+  }, [desktop, locale]);
 
   const accountsQuery = useQuery({
     queryKey: ["accounts"],

@@ -11,7 +11,8 @@ use novamail_ipc::{
     SetMessageLabelsRequest, SignatureDto, SuggestRepliesMessageRequest,
     SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    SpellcheckStatus, SpellDictionaryDto, UpsertContactRequest, UpsertLabelRequest,
+    UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -271,6 +272,33 @@ pub fn recipients_suggest(
     state
         .app
         .suggest_recipients(query, limit)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spellcheck_status(
+    state: State<'_, DesktopState>,
+) -> Result<SpellcheckStatus, AppError> {
+    state.app.spellcheck_status().map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn spellcheck_install(
+    state: State<'_, DesktopState>,
+    code: String,
+) -> Result<SpellDictionaryDto, AppError> {
+    state.app.spellcheck_install(code).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn spellcheck_ensure_for_locale(
+    state: State<'_, DesktopState>,
+    locale: String,
+) -> Result<SpellDictionaryDto, AppError> {
+    state
+        .app
+        .spellcheck_ensure_for_locale(locale)
+        .await
         .map_err(map_err)
 }
 

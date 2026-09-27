@@ -10,6 +10,8 @@ import type {
   ContactDto,
   ContactsBookSettings,
   RecipientSuggestion,
+  SpellcheckStatus,
+  SpellDictionaryDto,
   ExportBackupResponse,
   ImportBackupResult,
   AiInstallOllamaResponse,
@@ -155,6 +157,11 @@ export const api = {
     call<ContactDto[]>("contacts_list", { query: query ?? null }),
   recipientsSuggest: (query: string, limit = 12) =>
     call<RecipientSuggestion[]>("recipients_suggest", { query, limit }),
+  spellcheckStatus: () => call<SpellcheckStatus>("spellcheck_status"),
+  spellcheckInstall: (code: string) =>
+    call<SpellDictionaryDto>("spellcheck_install", { code }),
+  spellcheckEnsureForLocale: (locale: string) =>
+    call<SpellDictionaryDto>("spellcheck_ensure_for_locale", { locale }),
   contactsUpsert: (request: UpsertContactRequest) =>
     call<ContactDto>("contacts_upsert", { request }),
   contactsDelete: (contactId: string) =>

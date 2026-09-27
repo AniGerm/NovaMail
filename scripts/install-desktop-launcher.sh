@@ -16,10 +16,15 @@ DOCK_DIR="${HOME}/.config/plank/dock1/launchers"
 DOCK_SETTINGS="${HOME}/.config/plank/dock1/settings"
 DESKTOP_HOME="${HOME}/Desktop"
 
-# German spellcheck dictionary for the composer (best-effort).
+# Default spellcheck dictionaries for composer (best-effort, apt).
+# Additional languages can be installed from Settings without root
+# (downloaded into ~/.config/enchant/hunspell).
 if command -v apt-get >/dev/null 2>&1; then
-  if [[ ! -f /usr/share/hunspell/de_DE.dic ]]; then
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq hunspell-de-de >/dev/null 2>&1 || true
+  missing=()
+  [[ -f /usr/share/hunspell/de_DE.dic ]] || missing+=(hunspell-de-de)
+  [[ -f /usr/share/hunspell/en_US.dic ]] || missing+=(hunspell-en-us)
+  if ((${#missing[@]})); then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null 2>&1 || true
   fi
 fi
 

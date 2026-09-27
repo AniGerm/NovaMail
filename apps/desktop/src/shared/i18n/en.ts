@@ -95,6 +95,21 @@ export const en: Translations = {
   fontSizeXLarge: "Extra large",
   spellcheckHint:
     "Spellcheck is on (red underlines). Right-click a word for corrections.",
+  spellcheckTitle: "Spellcheck",
+  spellcheckDescription:
+    "Dictionaries used in the composer. Changing the UI language auto-loads a matching dictionary. Install more languages here with one click (no admin rights).",
+  spellcheckActive: "Active dictionary",
+  spellcheckInstalled: "Installed",
+  spellcheckMissing: "Not installed",
+  spellcheckInstall: "Install",
+  spellcheckInstalling: "Installing…",
+  spellcheckUse: "Use",
+  spellcheckInUse: "Active",
+  spellcheckSourceSystem: "System",
+  spellcheckSourceUser: "NovaMail",
+  spellcheckInstallOk: "{name} installed.",
+  spellcheckEnsureHint:
+    "German and English ship with the app / desktop launcher; other languages download LibreOffice Hunspell files.",
   messageEmpty: "Please enter a message.",
   starMessage: "Star message",
   readingPane: "Reading pane",

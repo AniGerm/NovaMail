@@ -564,6 +564,24 @@ impl AppState {
             .suggest_recipients(&query, limit.unwrap_or(12) as usize)?)
     }
 
+    pub fn spellcheck_status(&self) -> CoreResult<novamail_ipc::SpellcheckStatus> {
+        crate::spellcheck::spellcheck_status()
+    }
+
+    pub async fn spellcheck_install(
+        &self,
+        code: String,
+    ) -> CoreResult<novamail_ipc::SpellDictionaryDto> {
+        crate::spellcheck::spellcheck_install(&code).await
+    }
+
+    pub async fn spellcheck_ensure_for_locale(
+        &self,
+        locale: String,
+    ) -> CoreResult<novamail_ipc::SpellDictionaryDto> {
+        crate::spellcheck::spellcheck_ensure_for_locale(&locale).await
+    }
+
     pub fn upsert_contact(&self, request: UpsertContactRequest) -> CoreResult<ContactDto> {
         let id = request.id.unwrap_or_else(Uuid::new_v4);
         let record = novamail_db::models::ContactRecord {

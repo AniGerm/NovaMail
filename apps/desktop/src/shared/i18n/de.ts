@@ -93,6 +93,21 @@ export const de = {
   fontSizeXLarge: "Sehr groß",
   spellcheckHint:
     "Rechtschreibung ist aktiv (rote Unterstreichungen). Rechtsklick zeigt Korrekturvorschläge.",
+  spellcheckTitle: "Rechtschreibung",
+  spellcheckDescription:
+    "Wörterbücher für die Prüfung im Schreibfeld. Beim Sprachwechsel wird das passende Wörterbuch automatisch nachgeladen. Weitere Sprachen lassen sich hier per Klick installieren (ohne Administratorrechte).",
+  spellcheckActive: "Aktives Wörterbuch",
+  spellcheckInstalled: "Installiert",
+  spellcheckMissing: "Nicht installiert",
+  spellcheckInstall: "Installieren",
+  spellcheckInstalling: "Wird installiert…",
+  spellcheckUse: "Verwenden",
+  spellcheckInUse: "Aktiv",
+  spellcheckSourceSystem: "System",
+  spellcheckSourceUser: "NovaMail",
+  spellcheckInstallOk: "{name} installiert.",
+  spellcheckEnsureHint:
+    "Deutsch und Englisch werden mit der App bzw. dem Desktop-Launcher mitgeliefert; weitere Sprachen laden LibreOffice-Hunspell-Dateien nach.",
   messageEmpty: "Bitte eine Nachricht eingeben.",
   starMessage: "Als Favorit markieren",
   readingPane: "Lesebereich",

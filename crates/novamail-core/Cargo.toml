@@ -21,6 +21,7 @@ novamail-rules = { workspace = true }
 novamail-search = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

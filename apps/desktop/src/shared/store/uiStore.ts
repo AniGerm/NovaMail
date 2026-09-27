@@ -9,10 +9,16 @@ type Density = "comfortable" | "compact";
 
 export type { ThemeMode };
 
+function defaultSpellLang(locale: Locale): string {
+  return locale === "de" ? "de_DE" : "en_US";
+}
+
 interface UiState {
   theme: ThemeMode;
   colorScheme: ColorSchemeId;
   locale: Locale;
+  /** Enchant / WebKit spellcheck language tag, e.g. de_DE */
+  spellcheckLang: string;
   highContrast: boolean;
   density: Density;
   selectedMessageId: string | null;
@@ -27,6 +33,7 @@ interface UiState {
   setTheme: (theme: ThemeMode) => void;
   setColorScheme: (scheme: ColorSchemeId) => void;
   setLocale: (locale: Locale) => void;
+  setSpellcheckLang: (lang: string) => void;
   setHighContrast: (value: boolean) => void;
   setDensity: (density: Density) => void;
   selectMessage: (id: string | null) => void;
@@ -46,6 +53,7 @@ export const useUiStore = create<UiState>()(
       theme: "system",
       colorScheme: "navy",
       locale: "de",
+      spellcheckLang: "de_DE",
       highContrast: false,
       density: "comfortable",
       selectedMessageId: null,
@@ -59,7 +67,9 @@ export const useUiStore = create<UiState>()(
       syncStatus: null,
       setTheme: (theme) => set({ theme }),
       setColorScheme: (colorScheme) => set({ colorScheme }),
-      setLocale: (locale) => set({ locale }),
+      setLocale: (locale) =>
+        set({ locale, spellcheckLang: defaultSpellLang(locale) }),
+      setSpellcheckLang: (spellcheckLang) => set({ spellcheckLang }),
       setHighContrast: (highContrast) => set({ highContrast }),
       setDensity: (density) => set({ density }),
       selectMessage: (selectedMessageId) => set({ selectedMessageId }),
@@ -78,6 +88,7 @@ export const useUiStore = create<UiState>()(
         theme: state.theme,
         colorScheme: state.colorScheme,
         locale: state.locale,
+        spellcheckLang: state.spellcheckLang,
         highContrast: state.highContrast,
         density: state.density,
       }),

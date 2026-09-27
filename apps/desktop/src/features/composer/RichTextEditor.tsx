@@ -69,7 +69,7 @@ export function RichTextEditor({
   required,
 }: RichTextEditorProps) {
   const t = useT();
-  const locale = useUiStore((s) => s.locale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
 
@@ -197,7 +197,7 @@ export function RichTextEditor({
           contentEditable
           suppressContentEditableWarning
           spellCheck
-          lang={locale === "de" ? "de" : "en"}
+          lang={spellcheckLang.replace("_", "-")}
           className="nova-rich-editor min-h-[220px] max-h-[420px] overflow-y-auto px-3 py-2 text-[var(--nova-ink)] outline-none"
           onInput={emitChange}
           onBlur={emitChange}

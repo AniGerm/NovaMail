@@ -38,7 +38,7 @@
     ],
     "linux": {
       "deb": {
-        "depends": []
+        "depends": ["hunspell-de-de", "hunspell-en-us", "libenchant-2-2"]
       }
     }
   },

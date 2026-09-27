@@ -10,6 +10,7 @@ import type {
   LabelDto,
   RuleDto,
   SignatureDto,
+  SpellDictionaryDto,
 } from "@/shared/api/types";
 
 const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
@@ -67,6 +68,8 @@ export function SettingsDialog({
   const setColorScheme = useUiStore((s) => s.setColorScheme);
   const locale = useUiStore((s) => s.locale);
   const setLocale = useUiStore((s) => s.setLocale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
+  const setSpellcheckLang = useUiStore((s) => s.setSpellcheckLang);
   const highContrast = useUiStore((s) => s.highContrast);
   const setHighContrast = useUiStore((s) => s.setHighContrast);
   const density = useUiStore((s) => s.density);
@@ -100,6 +103,19 @@ export function SettingsDialog({
   const [pullRef, setPullRef] = useState("");
   const [pullBusy, setPullBusy] = useState(false);
   const [pullStatus, setPullStatus] = useState<string | null>(null);
+  const [spellDicts, setSpellDicts] = useState<SpellDictionaryDto[]>([]);
+  const [spellBusyCode, setSpellBusyCode] = useState<string | null>(null);
+  const [spellStatus, setSpellStatus] = useState<string | null>(null);
+
+  async function refreshSpellcheck() {
+    if (!isDesktopShell()) return;
+    try {
+      const status = await api.spellcheckStatus();
+      setSpellDicts(status.dictionaries);
+    } catch {
+      /* ignore when shell APIs unavailable */
+    }
+  }
 
   async function refreshExtras() {
     const [sigs, labs, rls] = await Promise.all([
@@ -129,10 +145,12 @@ export function SettingsDialog({
     setBackupPassphraseConfirm("");
     setBackupStatus(null);
     setAiStatus(null);
+    setSpellStatus(null);
     setImportFileName(null);
     importFileRef.current = null;
     refreshExtras().catch((err) => setError((err as AppError).message));
     refreshAi().catch((err) => setError((err as AppError).message));
+    refreshSpellcheck().catch(() => undefined);
   }, [open, t]);
 
   async function handleSaveAi() {
@@ -277,12 +295,113 @@ export function SettingsDialog({
           <Select
             className="h-11"
             value={locale}
-            onChange={(e) => setLocale(e.target.value as Locale)}
+            onChange={(e) => {
+              const next = e.target.value as Locale;
+              setLocale(next);
+              if (isDesktopShell()) {
+                void api
+                  .spellcheckEnsureForLocale(next)
+                  .then(() => refreshSpellcheck())
+                  .catch((err) => setError((err as AppError).message));
+              }
+            }}
           >
             <option value="de">{t("languageGerman")}</option>
             <option value="en">{t("languageEnglish")}</option>
           </Select>
         </label>
+
+        <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+          <h3 className="font-medium">{t("spellcheckTitle")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("spellcheckDescription")}
+          </p>
+          <label className="grid gap-1">
+            <span>{t("spellcheckActive")}</span>
+            <Select
+              className="h-11"
+              value={spellcheckLang}
+              onChange={(e) => setSpellcheckLang(e.target.value)}
+            >
+              {spellDicts.map((dict) => (
+                <option key={dict.code} value={dict.code} disabled={!dict.installed}>
+                  {dict.name}
+                  {dict.installed ? "" : ` (${t("spellcheckMissing")})`}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <ul className="grid gap-1.5">
+            {spellDicts.map((dict) => (
+              <li
+                key={dict.code}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-2 py-1.5"
+              >
+                <span className="min-w-0">
+                  <span className="block font-medium">{dict.name}</span>
+                  <span className="text-xs text-[var(--nova-ink-muted)]">
+                    {dict.installed
+                      ? `${t("spellcheckInstalled")} · ${
+                          dict.source === "system"
+                            ? t("spellcheckSourceSystem")
+                            : t("spellcheckSourceUser")
+                        }`
+                      : t("spellcheckMissing")}
+                  </span>
+                </span>
+                {dict.installed ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={spellcheckLang === dict.code}
+                    onClick={() => setSpellcheckLang(dict.code)}
+                  >
+                    {spellcheckLang === dict.code
+                      ? t("spellcheckInUse")
+                      : t("spellcheckUse")}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="nova-file-btn"
+                    variant="secondary"
+                    disabled={spellBusyCode === dict.code}
+                    onClick={() => {
+                      setSpellBusyCode(dict.code);
+                      setSpellStatus(null);
+                      setError(null);
+                      void api
+                        .spellcheckInstall(dict.code)
+                        .then((installed) => {
+                          setSpellcheckLang(installed.code);
+                          setSpellStatus(
+                            t("spellcheckInstallOk", { name: installed.name }),
+                          );
+                          return refreshSpellcheck();
+                        })
+                        .catch((err) => setError((err as AppError).message))
+                        .finally(() => setSpellBusyCode(null));
+                    }}
+                  >
+                    {spellBusyCode === dict.code
+                      ? t("spellcheckInstalling")
+                      : t("spellcheckInstall")}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("spellcheckEnsureHint")}
+          </p>
+          {spellStatus ? (
+            <p className="text-xs text-[var(--nova-accent)]" role="status">
+              {spellStatus}
+            </p>
+          ) : null}
+        </section>
 
         <label className="grid gap-1">
           <span>{t("colorScheme")}</span>

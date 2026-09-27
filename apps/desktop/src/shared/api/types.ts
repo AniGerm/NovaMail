@@ -237,6 +237,18 @@ export interface RecipientSuggestion {
   contactId?: string | null;
 }
 
+export interface SpellDictionaryDto {
+  code: string;
+  name: string;
+  installed: boolean;
+  source: string;
+}
+
+export interface SpellcheckStatus {
+  dictionaries: SpellDictionaryDto[];
+  userDictDir: string;
+}
+
 export type ContactPrefill = {
   displayName?: string;
   givenName?: string;
