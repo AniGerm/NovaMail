@@ -263,10 +263,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
     }
 
     /// Returns `(used_bytes, limit_bytes)` from GETQUOTAROOT STORAGE (KB → bytes).
+    ///
+    /// Checks CAPABILITY for QUOTA first (RFC 2087); returns `None` when unsupported.
     pub async fn storage_quota(
         &mut self,
         mailbox: &str,
     ) -> MailResult<Option<(u64, Option<u64>)>> {
+        match self.session.capabilities().await {
+            Ok(caps) => {
+                if !caps.has_str("QUOTA") {
+                    tracing::debug!(mailbox, "IMAP QUOTA capability absent");
+                    return Ok(None);
+                }
+            }
+            Err(err) => {
+                tracing::debug!(error = %err, "CAPABILITY failed; trying GETQUOTAROOT anyway");
+            }
+        }
         let (_roots, quotas) = match self.session.get_quota_root(mailbox).await {
             Ok(v) => v,
             Err(err) => {
