@@ -23,10 +23,13 @@ interface ComposerProps {
   open: boolean;
   accounts: AccountDto[];
   replyTo?: MessageDetailDto | null;
+  /** Existing draft being edited */
+  draft?: MessageDetailDto | null;
   initialBody?: string;
   initialSubject?: string;
   onClose: () => void;
   onSent: () => void;
+  onDraftSaved?: () => void;
   onAddToContacts?: (prefill: ContactPrefill) => void;
 }
 
@@ -34,6 +37,10 @@ function formatAddress(addr: AddressDto): string {
   const name = addr.name?.trim();
   if (name) return `${name} <${addr.email}>`;
   return addr.email;
+}
+
+function formatAddressList(addrs: AddressDto[]): string {
+  return addrs.map(formatAddress).join(", ");
 }
 
 function parseRecipientToken(token: string): AddressDto {
@@ -52,10 +59,12 @@ export function Composer({
   open,
   accounts,
   replyTo,
+  draft = null,
   initialBody = "",
   initialSubject,
   onClose,
   onSent,
+  onDraftSaved,
   onAddToContacts,
 }: ComposerProps) {
   const t = useT();
@@ -65,12 +74,30 @@ export function Composer({
   const [bodyHtml, setBodyHtml] = useState("<p><br></p>");
   const [bodyText, setBodyText] = useState("");
   const [attachments, setAttachments] = useState<OutgoingAttachment[]>([]);
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    if (draft) {
+      setAccountId(draft.summary.accountId);
+      setTo(formatAddressList(draft.summary.to));
+      setSubject(draft.summary.subject === "(no subject)" ? "" : draft.summary.subject);
+      const html = draft.bodyHtml?.trim()
+        ? draft.bodyHtml
+        : plainToHtml(draft.bodyText ?? "");
+      setBodyHtml(html);
+      setBodyText(htmlToPlain(html));
+      setDraftId(draft.summary.id);
+      setAttachments([]);
+      setError(null);
+      setStatus(null);
+      return;
+    }
+
     setAccountId((current) => current || accounts[0]?.id || "");
     setTo(replyTo ? formatAddress(replyTo.summary.from) : "");
     setSubject(
@@ -80,8 +107,10 @@ export function Composer({
     const html = plainToHtml(initialBody);
     setBodyHtml(html);
     setBodyText(htmlToPlain(html));
+    setDraftId(null);
     setAttachments([]);
     setError(null);
+    setStatus(null);
 
     if (!replyTo && !initialBody && accounts[0]?.id) {
       api
@@ -100,7 +129,7 @@ export function Composer({
         })
         .catch(() => undefined);
     }
-  }, [open, replyTo, initialBody, initialSubject, accounts]);
+  }, [open, replyTo, draft, initialBody, initialSubject, accounts]);
 
   if (!open) return null;
 
@@ -123,6 +152,46 @@ export function Composer({
     setAttachments((prev) => [...prev, ...next]);
   }
 
+  function recipients() {
+    return to
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map(parseRecipientToken);
+  }
+
+  async function handleSaveDraft() {
+    if (!accountId) {
+      setError(t("addAccountBeforeSend"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const saved = await api.messagesSaveDraft({
+        id: draftId,
+        accountId,
+        to: recipients(),
+        cc: [],
+        subject,
+        bodyText,
+        bodyHtml,
+        inReplyTo: replyTo?.messageId ?? null,
+        references: replyTo
+          ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
+          : [],
+      });
+      setDraftId(saved.summary.id);
+      setStatus(t("draftSaved"));
+      onDraftSaved?.();
+    } catch (err) {
+      setError((err as AppError).message || t("draftSaveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSend(event: React.FormEvent) {
     event.preventDefault();
     if (!accountId) {
@@ -135,14 +204,11 @@ export function Composer({
     }
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
       await api.messagesSend({
         accountId,
-        to: to
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .map(parseRecipientToken),
+        to: recipients(),
         cc: [],
         bcc: [],
         subject,
@@ -153,11 +219,13 @@ export function Composer({
           ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
           : [],
         attachments,
+        draftId,
       });
       onSent();
       onClose();
       setBodyHtml("<p><br></p>");
       setBodyText("");
+      setDraftId(null);
       setAttachments([]);
     } catch (err) {
       setError((err as AppError).message || t("sendFailed"));
@@ -182,7 +250,7 @@ export function Composer({
             id="composer-title"
             className="font-[family-name:var(--nova-font-display)] text-xl"
           >
-            {replyTo ? t("reply") : t("newMessage")}
+            {draftId ? t("editDraft") : replyTo ? t("reply") : t("newMessage")}
           </h2>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
             {t("close")}
@@ -212,9 +280,9 @@ export function Composer({
           <label className="grid gap-1 text-sm">
             <span>{t("subject")}</span>
             <Input
-              required
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
+              placeholder={t("subject")}
             />
           </label>
           <RichTextEditor
@@ -268,6 +336,11 @@ export function Composer({
               </ul>
             ) : null}
           </div>
+          {status ? (
+            <p className="text-sm text-[var(--nova-accent)]" role="status">
+              {status}
+            </p>
+          ) : null}
           {error ? (
             <p className="text-sm text-[var(--nova-danger)]" role="alert">
               {error}
@@ -275,9 +348,20 @@ export function Composer({
           ) : null}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
           <Button type="button" variant="secondary" onClick={onClose}>
             {t("discard")}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="nova-file-btn"
+            disabled={busy}
+            onClick={() => {
+              void handleSaveDraft();
+            }}
+          >
+            {busy ? t("savingDraft") : t("saveDraft")}
           </Button>
           <Button type="submit" disabled={busy}>
             {busy ? t("sending") : t("send")}

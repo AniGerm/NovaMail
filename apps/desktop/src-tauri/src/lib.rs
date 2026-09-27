@@ -53,6 +53,7 @@ pub fn run() {
             commands::messages_set_flags,
             commands::messages_search,
             commands::messages_send,
+            commands::messages_save_draft,
             commands::mail_sync,
             commands::oauth_authorize_url,
             commands::oauth_exchange_code,

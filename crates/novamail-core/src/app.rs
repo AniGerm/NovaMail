@@ -16,20 +16,21 @@ use novamail_crypto::{
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
-    AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
-    AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto, BackupAccount,
-    BackupAccountCredentials, BackupContact, BackupPayload, RecipientSuggestion,
-    CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
-    ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
-    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
+    AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
+    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
+    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
+    ContactDto, ContactsBookSettings, ExportBackupRequest, ExportBackupResponse,
+    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
+    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
-    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset, RuleDto,
-    SearchRequest, SearchResponse, SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
-    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest,
-    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset,
+    RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
+    SendMessageRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
+    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
+    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
+    UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
     archive_remote, delete_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
@@ -457,8 +458,104 @@ impl AppState {
 
     pub async fn send_message(&self, request: SendMessageRequest) -> CoreResult<()> {
         let account = self.db.get_account(request.account_id)?;
+        let draft_id = request.draft_id;
         SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
+        if let Some(id) = draft_id {
+            let _ = self.db.delete_message(id);
+        }
         Ok(())
+    }
+
+    pub fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
+        let account = self.db.get_account(request.account_id)?;
+        let drafts = self.db.ensure_mailbox(request.account_id, "Drafts", "drafts")?;
+        let now = chrono::Utc::now().timestamp();
+        let subject = if request.subject.trim().is_empty() {
+            "(no subject)".to_string()
+        } else {
+            request.subject.trim().to_string()
+        };
+        let snippet: String = request
+            .body_text
+            .chars()
+            .take(160)
+            .collect::<String>()
+            .replace('\n', " ");
+        let from = AddressDto {
+            name: Some(account.name.clone()),
+            email: account.email.clone(),
+        };
+
+        let message_id = if let Some(existing_id) = request.id {
+            self.db.update_message_draft(
+                existing_id,
+                &subject,
+                &request.to,
+                &request.cc,
+                &request.body_text,
+                request.body_html.as_deref(),
+                now,
+                &snippet,
+            )?;
+            if let Ok(detail) = self.db.get_message(existing_id) {
+                let _ = self.db.upsert_thread(&novamail_db::models::ThreadRecord {
+                    id: detail.summary.thread_id,
+                    account_id: request.account_id,
+                    subject: subject.clone(),
+                    last_message_at: now,
+                    message_count: 1,
+                    unread_count: 0,
+                    participants: {
+                        let mut p = vec![from.clone()];
+                        p.extend(request.to.iter().cloned());
+                        p
+                    },
+                    snippet: snippet.clone(),
+                });
+            }
+            existing_id
+        } else {
+            let thread_id = Uuid::new_v4();
+            let message_id = Uuid::new_v4();
+            self.db.upsert_thread(&novamail_db::models::ThreadRecord {
+                id: thread_id,
+                account_id: request.account_id,
+                subject: subject.clone(),
+                last_message_at: now,
+                message_count: 1,
+                unread_count: 0,
+                participants: {
+                    let mut p = vec![from.clone()];
+                    p.extend(request.to.iter().cloned());
+                    p
+                },
+                snippet: snippet.clone(),
+            })?;
+            self.db.insert_message(&novamail_db::models::MessageRecord {
+                id: message_id,
+                account_id: request.account_id,
+                mailbox_id: drafts.id,
+                thread_id,
+                uid: None,
+                message_id: None,
+                in_reply_to: request.in_reply_to.clone(),
+                references: request.references.clone(),
+                subject: subject.clone(),
+                from: from.clone(),
+                to: request.to.clone(),
+                cc: request.cc.clone(),
+                date: now,
+                flags: novamail_db::models::FLAG_SEEN,
+                snippet: snippet.clone(),
+                body_text: Some(request.body_text.clone()),
+                body_html: request.body_html.clone(),
+                has_attachments: false,
+                raw_path: None,
+            })?;
+            message_id
+        };
+
+        Ok(self.get_message(message_id)?)
     }
 
     pub fn oauth_authorize_url(&self, provider: novamail_ipc::MailProvider) -> CoreResult<String> {
@@ -530,6 +627,7 @@ impl AppState {
             in_reply_to: None,
             references: vec![],
             attachments: Vec::new(),
+            draft_id: None,
         })
     }
 

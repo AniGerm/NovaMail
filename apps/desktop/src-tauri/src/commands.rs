@@ -11,8 +11,8 @@ use novamail_ipc::{
     SetMessageLabelsRequest, SignatureDto, SuggestRepliesMessageRequest,
     SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    SpellcheckStatus, SpellDictionaryDto, UpsertContactRequest, UpsertLabelRequest,
-    UpsertRuleRequest, UpsertSignatureRequest,
+    SaveDraftRequest, SpellcheckStatus, SpellDictionaryDto, UpsertContactRequest,
+    UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -126,6 +126,14 @@ pub async fn messages_send(
     request: SendMessageRequest,
 ) -> Result<(), AppError> {
     state.app.send_message(request).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_save_draft(
+    state: State<'_, DesktopState>,
+    request: SaveDraftRequest,
+) -> Result<MessageDetailDto, AppError> {
+    state.app.save_draft(request).map_err(map_err)
 }
 
 #[tauri::command]

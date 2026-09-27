@@ -284,6 +284,76 @@ impl Database {
         .ok_or_else(|| DbError::NotFound(format!("mailbox {mailbox_id}")))
     }
 
+    /// Ensure a local mailbox exists (e.g. Drafts) and return it.
+    pub fn ensure_mailbox(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        role: &str,
+    ) -> DbResult<MailboxRecord> {
+        if let Some(existing) = self.find_mailbox_by_role(account_id, role)? {
+            return Ok(existing);
+        }
+        if let Some(existing) = self.find_mailbox_by_name(account_id, name)? {
+            return Ok(existing);
+        }
+        let record = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id,
+            name: name.to_string(),
+            role: Some(role.to_string()),
+            uidvalidity: None,
+            uidnext: None,
+            unread_count: 0,
+            total_count: 0,
+        };
+        self.upsert_mailbox(&record)?;
+        Ok(record)
+    }
+
+    pub fn update_message_draft(
+        &self,
+        message_id: Uuid,
+        subject: &str,
+        to: &[AddressDto],
+        cc: &[AddressDto],
+        body_text: &str,
+        body_html: Option<&str>,
+        date: i64,
+        snippet: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let to_json = serde_json::to_string(to)?;
+        let cc_json = serde_json::to_string(cc)?;
+        let changed = conn.execute(
+            r#"
+            UPDATE messages SET
+              subject = ?2,
+              to_json = ?3,
+              cc_json = ?4,
+              body_text = ?5,
+              body_html = ?6,
+              date = ?7,
+              snippet = ?8
+            WHERE id = ?1
+            "#,
+            params![
+                message_id.to_string(),
+                subject,
+                to_json,
+                cc_json,
+                body_text,
+                body_html,
+                date,
+                snippet,
+            ],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
+    }
+
     pub fn find_mailbox_by_role(
         &self,
         account_id: Uuid,
@@ -1711,11 +1781,31 @@ fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
     let mut where_parts = Vec::new();
     let mut bind_ids: Vec<String> = Vec::new();
 
-    if req.unified {
+    let drafts_role = req
+        .mailbox_role
+        .as_deref()
+        .map(|r| r.eq_ignore_ascii_case("drafts"))
+        .unwrap_or(false);
+
+    if drafts_role {
+        where_parts.push(
+            "(lower(coalesce(mb.role, '')) = 'drafts' OR lower(mb.name) IN ('drafts', 'entwürfe', 'entwuerfe'))"
+                .into(),
+        );
+        if let Some(account_id) = req.account_id {
+            where_parts.push("m.account_id = ?1".into());
+            bind_ids.push(account_id.to_string());
+        }
+    } else if req.unified {
         where_parts.push(
             "(mb.role = 'inbox' OR lower(mb.name) = 'inbox' OR mb.name = 'INBOX')".into(),
         );
         where_parts.push(format!("(m.flags & {FLAG_ARCHIVED}) = 0"));
+        // Keep drafts out of the unified inbox.
+        where_parts.push(
+            "(lower(coalesce(mb.role, '')) != 'drafts' AND lower(mb.name) NOT IN ('drafts', 'entwürfe', 'entwuerfe'))"
+                .into(),
+        );
         if let Some(mailbox_id) = req.mailbox_id {
             where_parts.push("m.mailbox_id = ?1".into());
             bind_ids.push(mailbox_id.to_string());
@@ -1934,6 +2024,7 @@ mod tests {
                 mailbox_id: None,
                 account_id: None,
                 unified: true,
+                mailbox_role: None,
                 limit: 50,
                 offset: 0,
                 query: None,
@@ -1955,6 +2046,7 @@ mod tests {
                 mailbox_id: None,
                 account_id: None,
                 unified: true,
+                mailbox_role: None,
                 limit: 50,
                 offset: 0,
                 query: None,

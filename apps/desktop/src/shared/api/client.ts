@@ -36,6 +36,7 @@ import type {
   OutgoingAttachment,
   ProviderPreset,
   RuleDto,
+  SaveDraftRequest,
   SendMessageRequest,
   SetFlagsRequest,
   SignatureDto,
@@ -102,6 +103,8 @@ export const api = {
     call<void>("messages_set_flags", { request }),
   messagesSend: (request: SendMessageRequest) =>
     call<void>("messages_send", { request }),
+  messagesSaveDraft: (request: SaveDraftRequest) =>
+    call<MessageDetailDto>("messages_save_draft", { request }),
   messagesDelete: (messageId: string) =>
     call<void>("messages_delete", { messageId }),
   mailSync: (accountId?: string | null) =>

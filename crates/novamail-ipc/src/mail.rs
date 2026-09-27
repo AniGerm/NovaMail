@@ -88,6 +88,9 @@ pub struct ListMessagesRequest {
     pub mailbox_id: Option<Uuid>,
     pub account_id: Option<Uuid>,
     pub unified: bool,
+    /// When set (e.g. `"drafts"`), list messages in mailboxes with that role/name.
+    #[serde(default)]
+    pub mailbox_role: Option<String>,
     pub limit: u32,
     pub offset: u32,
     pub query: Option<String>,
@@ -148,6 +151,26 @@ pub struct SendMessageRequest {
     pub references: Vec<String>,
     #[serde(default)]
     pub attachments: Vec<crate::OutgoingAttachment>,
+    /// When sending an edited draft, delete this local draft after success.
+    #[serde(default)]
+    pub draft_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDraftRequest {
+    /// Existing draft id when updating; omit to create a new draft.
+    pub id: Option<Uuid>,
+    pub account_id: Uuid,
+    pub to: Vec<AddressDto>,
+    #[serde(default)]
+    pub cc: Vec<AddressDto>,
+    pub subject: String,
+    pub body_text: String,
+    pub body_html: Option<String>,
+    pub in_reply_to: Option<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

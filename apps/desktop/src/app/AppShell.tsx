@@ -57,6 +57,9 @@ export function AppShell() {
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
+  const [editingDraft, setEditingDraft] = useState<MessageDetailDto | null>(
+    null,
+  );
   const [composerBody, setComposerBody] = useState("");
   const [composerSubject, setComposerSubject] = useState<string | undefined>();
   const [contactPrefill, setContactPrefill] = useState<ContactPrefill | null>(
@@ -236,8 +239,32 @@ export function AppShell() {
       ...prev,
       accountId,
       mailboxId: null,
+      mailboxRole: null,
     }));
   }, []);
+
+  const handleSelectDrafts = useCallback(() => {
+    selectMessage(null);
+    setInboxFilters((prev) => ({
+      ...prev,
+      mailboxId: null,
+      mailboxRole: "drafts",
+      viewMode: "flat",
+    }));
+  }, [selectMessage]);
+
+  const openDraftInComposer = useCallback(
+    async (messageId: string) => {
+      if (!desktop) return;
+      const detail = await api.messagesGet(messageId);
+      setReplyTo(null);
+      setEditingDraft(detail);
+      setComposerBody("");
+      setComposerSubject(undefined);
+      setComposerOpen(true);
+    },
+    [desktop, setComposerOpen],
+  );
 
   const cycleTheme = useCallback(() => {
     setTheme(nextThemeMode(theme as ThemeMode));
@@ -247,6 +274,7 @@ export function AppShell() {
     () => ({
       c: () => {
         setReplyTo(null);
+        setEditingDraft(null);
         setComposerBody("");
         setComposerSubject(undefined);
         setComposerOpen(true);
@@ -254,6 +282,7 @@ export function AppShell() {
       r: () => {
         if (messageQuery.data) {
           setReplyTo(messageQuery.data);
+          setEditingDraft(null);
           setComposerBody("");
           setComposerSubject(undefined);
           setComposerOpen(true);
@@ -302,6 +331,7 @@ export function AppShell() {
         hint: "C",
         onSelect: () => {
           setReplyTo(null);
+          setEditingDraft(null);
           setComposerBody("");
           setComposerSubject(undefined);
           setComposerOpen(true);
@@ -312,6 +342,11 @@ export function AppShell() {
         label: t("cmdTriage"),
         hint: "T",
         onSelect: () => setTriageOpen(true),
+      },
+      {
+        id: "drafts",
+        label: t("drafts"),
+        onSelect: () => handleSelectDrafts(),
       },
       {
         id: "contacts",
@@ -377,6 +412,7 @@ export function AppShell() {
       handleArchive,
       handleDelete,
       handleForward,
+      handleSelectDrafts,
       handleSync,
       setAccountSetupOpen,
       setComposerOpen,
@@ -429,12 +465,15 @@ export function AppShell() {
         <Sidebar
           accounts={accounts}
           selectedAccountId={inboxFilters.accountId}
+          draftsSelected={inboxFilters.mailboxRole === "drafts"}
           syncStatus={syncStatus}
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
+          onSelectDrafts={handleSelectDrafts}
           onCompose={() => {
             setReplyTo(null);
+            setEditingDraft(null);
             setComposerBody("");
             setComposerSubject(undefined);
             setComposerOpen(true);
@@ -471,7 +510,12 @@ export function AppShell() {
                 messages={messages}
                 threads={threads}
                 selectedId={selectedMessageId}
-                onSelect={selectMessage}
+                onSelect={(id) => {
+                  selectMessage(id);
+                  if (inboxFilters.mailboxRole === "drafts") {
+                    void openDraftInComposer(id);
+                  }
+                }}
                 onToggleStar={(messageId, starred) => {
                   void handleToggleStar(messageId, starred);
                 }}
@@ -490,6 +534,7 @@ export function AppShell() {
                   setComposerBody("");
                   if (messageQuery.data) {
                     setReplyTo(messageQuery.data);
+                    setEditingDraft(null);
                     setComposerSubject(undefined);
                     setComposerOpen(true);
                   }
@@ -532,14 +577,17 @@ export function AppShell() {
         open={composerOpen}
         accounts={accounts}
         replyTo={replyTo}
+        draft={editingDraft}
         initialBody={composerBody}
         initialSubject={composerSubject}
         onClose={() => {
           setComposerOpen(false);
           setComposerBody("");
           setComposerSubject(undefined);
+          setEditingDraft(null);
         }}
         onSent={refresh}
+        onDraftSaved={refresh}
         onAddToContacts={(prefill) => {
           setContactPrefill(prefill);
           setContactsOpen(true);

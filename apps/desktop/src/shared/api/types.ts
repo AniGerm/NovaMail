@@ -98,6 +98,7 @@ export interface ListMessagesRequest {
   mailboxId?: string | null;
   accountId?: string | null;
   unified: boolean;
+  mailboxRole?: string | null;
   limit: number;
   offset: number;
   query?: string | null;
@@ -183,6 +184,19 @@ export interface SendMessageRequest {
   inReplyTo?: string | null;
   references: string[];
   attachments: OutgoingAttachment[];
+  draftId?: string | null;
+}
+
+export interface SaveDraftRequest {
+  id?: string | null;
+  accountId: string;
+  to: AddressDto[];
+  cc?: AddressDto[];
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string | null;
+  inReplyTo?: string | null;
+  references?: string[];
 }
 
 export interface SummarizeMessageResponse {

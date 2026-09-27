@@ -32,6 +32,8 @@ export interface InboxFilters {
   hasAttachments: boolean;
   accountId: string | null;
   mailboxId: string | null;
+  /** e.g. `"drafts"` — list that mailbox role across accounts */
+  mailboxRole: string | null;
   sortBy: MessageSortBy;
   sortDir: SortDirection;
   viewMode: InboxViewMode;
@@ -504,10 +506,12 @@ export function buildListRequest(
   searchQuery: string,
 ): ListMessagesRequest {
   const mailboxSelected = Boolean(filters.mailboxId);
+  const roleSelected = Boolean(filters.mailboxRole);
   return {
     mailboxId: filters.mailboxId,
     accountId: mailboxSelected ? null : filters.accountId,
-    unified: !mailboxSelected,
+    unified: !mailboxSelected && !roleSelected,
+    mailboxRole: filters.mailboxRole,
     limit: 200,
     offset: 0,
     query: searchQuery || null,
@@ -525,6 +529,7 @@ export const defaultInboxFilters: InboxFilters = {
   hasAttachments: false,
   accountId: null,
   mailboxId: null,
+  mailboxRole: null,
   sortBy: "date",
   sortDir: "desc",
   viewMode: "threads",
