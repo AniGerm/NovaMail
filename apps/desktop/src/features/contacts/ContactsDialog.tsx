@@ -7,7 +7,14 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { Button, Dialog, DialogActions, IconButton, Input } from "@novamail/ui";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  IconButton,
+  Input,
+  Select,
+} from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type {
@@ -433,7 +440,7 @@ export function ContactsDialog({
             <div className="grid gap-2 md:grid-cols-2">
               <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
                 {t("nameOrder")}
-                <select
+                <Select
                   value={bookSettings.nameOrder}
                   onChange={(e) =>
                     setBookSettings((prev) => ({
@@ -441,15 +448,15 @@ export function ContactsDialog({
                       nameOrder: e.target.value as ContactNameOrder,
                     }))
                   }
-                  className="h-9 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-sm text-[var(--nova-ink)]"
+                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
                 >
                   <option value="givenFamily">{t("nameOrderGivenFamily")}</option>
                   <option value="familyGiven">{t("nameOrderFamilyGiven")}</option>
-                </select>
+                </Select>
               </label>
               <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
                 {t("contactSortBy")}
-                <select
+                <Select
                   value={bookSettings.sortBy}
                   onChange={(e) =>
                     setBookSettings((prev) => ({
@@ -457,7 +464,7 @@ export function ContactsDialog({
                       sortBy: e.target.value as ContactSortBy,
                     }))
                   }
-                  className="h-9 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-sm text-[var(--nova-ink)]"
+                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
                 >
                   <option value="familyName">{t("contactSortFamily")}</option>
                   <option value="givenName">{t("contactSortGiven")}</option>
@@ -465,11 +472,11 @@ export function ContactsDialog({
                   <option value="organization">
                     {t("contactSortOrganization")}
                   </option>
-                </select>
+                </Select>
               </label>
               <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)] md:col-span-2">
                 {t("sortDirection")}
-                <select
+                <Select
                   value={bookSettings.sortAscending ? "asc" : "desc"}
                   onChange={(e) =>
                     setBookSettings((prev) => ({
@@ -477,11 +484,11 @@ export function ContactsDialog({
                       sortAscending: e.target.value === "asc",
                     }))
                   }
-                  className="h-9 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-sm text-[var(--nova-ink)]"
+                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
                 >
                   <option value="asc">{t("contactSortAscending")}</option>
                   <option value="desc">{t("contactSortDescending")}</option>
-                </select>
+                </Select>
               </label>
             </div>
             <Button
@@ -1174,8 +1181,8 @@ function AddressLabelField({
   }
 
   return (
-    <select
-      className="h-11 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 text-sm"
+    <Select
+      className="h-11 text-sm"
       value={normalized || ""}
       onChange={(e) => {
         const next = e.target.value;
@@ -1195,7 +1202,7 @@ function AddressLabelField({
         </option>
       ))}
       <option value="__custom__">{t("addressLabelCustom")}</option>
-    </select>
+    </Select>
   );
 }
 

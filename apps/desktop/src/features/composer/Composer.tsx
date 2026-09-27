@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Paperclip } from "lucide-react";
-import { Button, Input } from "@novamail/ui";
+import { Button, Input, Select } from "@novamail/ui";
 
 import { RecipientField } from "@/features/composer/RecipientField";
 import { api } from "@/shared/api/client";
@@ -173,21 +173,17 @@ export function Composer({
         <div className="grid gap-3 overflow-y-auto px-5 py-4">
           <label className="grid gap-1 text-sm">
             <span>{t("from")}</span>
-            <select
-              className="nova-select h-11 w-full appearance-none rounded-[var(--nova-radius-md)] border border-[color-mix(in_srgb,var(--nova-accent)_35%,var(--nova-border))] bg-[var(--nova-surface)] px-3 pr-9 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[var(--nova-accent-soft)]"
+            <Select
+              className="h-11"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
             >
               {accounts.map((account) => (
-                <option
-                  key={account.id}
-                  value={account.id}
-                  className="bg-[var(--nova-surface)] text-[var(--nova-ink)]"
-                >
+                <option key={account.id} value={account.id}>
                   {account.name} &lt;{account.email}&gt;
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <RecipientField
             value={to}
@@ -227,7 +223,7 @@ export function Composer({
               type="button"
               variant="secondary"
               size="sm"
-              className="w-fit border-[color-mix(in_srgb,var(--nova-accent)_35%,var(--nova-border))] text-[var(--nova-accent)] hover:bg-[var(--nova-accent-soft)]"
+              className="nova-file-btn w-fit"
               onClick={() => fileInputRef.current?.click()}
             >
               <Paperclip size={16} />

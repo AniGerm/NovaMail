@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button } from "@novamail/ui";
+import { Button, Select } from "@novamail/ui";
 
 import { api, isDesktopShell } from "@/shared/api/client";
 import type { AiRuntimeStatus, AiSettings, AppError } from "@/shared/api/types";
@@ -313,8 +313,8 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
             ) : null}
             <label className="grid gap-1 text-sm">
               <span>{t("aiSetupModelLabel")}</span>
-              <select
-                className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+              <Select
+                className="h-11"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
@@ -329,7 +329,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
                           : name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="grid gap-1 text-sm">
               <span>{t("aiSettingsBaseUrl")}</span>

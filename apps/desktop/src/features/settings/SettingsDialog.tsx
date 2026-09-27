@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Dialog, DialogActions, Input } from "@novamail/ui";
+import { Button, Dialog, DialogActions, Input, Select } from "@novamail/ui";
 
 import { api, isDesktopShell } from "@/shared/api/client";
 import type {
@@ -274,20 +274,20 @@ export function SettingsDialog({
       <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
         <label className="grid gap-1">
           <span>{t("language")}</span>
-          <select
-            className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+          <Select
+            className="h-11"
             value={locale}
             onChange={(e) => setLocale(e.target.value as Locale)}
           >
             <option value="de">{t("languageGerman")}</option>
             <option value="en">{t("languageEnglish")}</option>
-          </select>
+          </Select>
         </label>
 
         <label className="grid gap-1">
           <span>{t("colorScheme")}</span>
-          <select
-            className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+          <Select
+            className="h-11"
             value={colorScheme}
             onChange={(e) => setColorScheme(e.target.value as ColorSchemeId)}
           >
@@ -295,7 +295,7 @@ export function SettingsDialog({
             <option value="forest">{t("schemeForest")}</option>
             <option value="slate">{t("schemeSlate")}</option>
             <option value="midnight">{t("schemeMidnight")}</option>
-          </select>
+          </Select>
         </label>
 
         <div className="grid grid-cols-4 gap-2" aria-hidden>
@@ -333,23 +333,23 @@ export function SettingsDialog({
 
         <label className="grid gap-1">
           <span>{t("theme")}</span>
-          <select
-            className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+          <Select
+            className="h-11"
             value={theme}
             onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
           >
             <option value="system">{t("themeSystem")}</option>
             <option value="light">{t("themeLight")}</option>
             <option value="dark">{t("themeDark")}</option>
-          </select>
+          </Select>
           <span className="text-xs text-[var(--nova-ink-muted)]">
             {t("themeSystemHint")}
           </span>
         </label>
         <label className="grid gap-1">
           <span>{t("density")}</span>
-          <select
-            className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+          <Select
+            className="h-11"
             value={density}
             onChange={(e) =>
               setDensity(e.target.value as "comfortable" | "compact")
@@ -357,7 +357,7 @@ export function SettingsDialog({
           >
             <option value="comfortable">{t("densityComfortable")}</option>
             <option value="compact">{t("densityCompact")}</option>
-          </select>
+          </Select>
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -453,8 +453,8 @@ export function SettingsDialog({
           <label className="grid gap-1 text-sm">
             <span>{t("aiSettingsModel")}</span>
             {aiRuntime && aiRuntime.models.length > 0 ? (
-              <select
-                className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+              <Select
+                className="h-11"
                 value={aiSettings.model}
                 disabled={!aiSettings.enabled}
                 onChange={(e) =>
@@ -480,7 +480,7 @@ export function SettingsDialog({
                           : name}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : (
               <Input
                 value={aiSettings.model}
@@ -630,7 +630,8 @@ export function SettingsDialog({
             <Button
               type="button"
               size="sm"
-              variant="ghost"
+              variant="secondary"
+              className="nova-file-btn"
               disabled={backupBusy}
               onClick={() => importInputRef.current?.click()}
             >

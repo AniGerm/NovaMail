@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button, Input } from "@novamail/ui";
+import { Button, Input, Select } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import { addAccountPasswordSchema } from "@/shared/api/schemas";
@@ -168,8 +168,8 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
         <div className="mt-5 grid gap-3">
           <label className="grid gap-1 text-sm">
             <span>{t("provider")}</span>
-            <select
-              className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+            <Select
+              className="h-11"
               value={provider}
               onChange={(e) => {
                 const next = presets.find((p) => p.provider === e.target.value);
@@ -181,7 +181,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
                   {preset.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
 
           <label className="grid gap-1 text-sm">

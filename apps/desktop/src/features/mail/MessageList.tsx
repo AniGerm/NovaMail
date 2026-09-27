@@ -8,7 +8,7 @@ import {
   Paperclip,
   Star,
 } from "lucide-react";
-import { cn } from "@novamail/ui";
+import { cn, Select } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type {
@@ -221,7 +221,7 @@ export function MessageList({
             <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--nova-ink-muted)]">
               {t("filterMailbox")}
             </span>
-            <select
+            <Select
               value={filters.mailboxId ?? ""}
               onChange={(e) =>
                 patch({
@@ -232,7 +232,7 @@ export function MessageList({
                     : filters.accountId,
                 })
               }
-              className="w-full rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 py-1.5 text-xs text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)]"
+              className="rounded-[var(--nova-radius-sm)] px-2 py-1.5 text-xs"
             >
               <option value="">{t("allMailboxes")}</option>
               {mailboxOptions.map((mailbox) => (
@@ -240,13 +240,13 @@ export function MessageList({
                   {mailbox.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1">
             <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--nova-ink-muted)]">
               {t("filterAccount")}
             </span>
-            <select
+            <Select
               value={filters.accountId ?? ""}
               onChange={(e) =>
                 patch({
@@ -254,7 +254,7 @@ export function MessageList({
                   mailboxId: null,
                 })
               }
-              className="w-full rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 py-1.5 text-xs text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)]"
+              className="rounded-[var(--nova-radius-sm)] px-2 py-1.5 text-xs"
             >
               <option value="">{t("allAccounts")}</option>
               {accounts.map((account) => (
@@ -262,39 +262,39 @@ export function MessageList({
                   {account.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1">
             <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--nova-ink-muted)]">
               {t("sortBy")}
             </span>
-            <select
+            <Select
               value={filters.sortBy}
               onChange={(e) =>
                 patch({ sortBy: e.target.value as MessageSortBy })
               }
-              className="w-full rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 py-1.5 text-xs text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)]"
+              className="rounded-[var(--nova-radius-sm)] px-2 py-1.5 text-xs"
             >
               <option value="date">{t("sortDate")}</option>
               <option value="subject">{t("sortSubject")}</option>
               <option value="from">{t("sortFrom")}</option>
               <option value="attachments">{t("sortAttachments")}</option>
-            </select>
+            </Select>
           </label>
           <label className="space-y-1">
             <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--nova-ink-muted)]">
               {t("sortDirection")}
             </span>
-            <select
+            <Select
               value={filters.sortDir}
               onChange={(e) =>
                 patch({ sortDir: e.target.value as SortDirection })
               }
-              className="w-full rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 py-1.5 text-xs text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)]"
+              className="rounded-[var(--nova-radius-sm)] px-2 py-1.5 text-xs"
             >
               <option value="desc">{t("sortNewestFirst")}</option>
               <option value="asc">{t("sortOldestFirst")}</option>
-            </select>
+            </Select>
           </label>
         </div>
       </header>
