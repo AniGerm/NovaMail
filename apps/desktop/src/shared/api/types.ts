@@ -310,6 +310,33 @@ export interface CardDavServerStatus {
   password: string;
 }
 
+export type ContactsShareMode = "local" | "server" | "client";
+
+export interface LdapServerStatus {
+  running: boolean;
+  listenUrl: string;
+  baseDn: string;
+  bindDn: string;
+  username: string;
+  password: string;
+  contactCount: number;
+}
+
+export interface ContactsShareStatus {
+  mode: ContactsShareMode;
+  carddav: CardDavServerStatus;
+  ldapServer: LdapServerStatus;
+  client?: LdapSyncSettings | null;
+}
+
+export interface SetContactsShareModeRequest {
+  mode: ContactsShareMode;
+  clientUrl?: string | null;
+  clientBindDn?: string | null;
+  clientPassword?: string | null;
+  clientBaseDn?: string | null;
+}
+
 export interface LdapSearchRequest {
   url: string;
   bindDn?: string | null;

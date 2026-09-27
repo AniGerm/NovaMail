@@ -234,35 +234,48 @@ export const en: Translations = {
   contactSortDescending: "Descending (Z–A)",
   saveBookSettings: "Save settings",
   bookSettingsSaved: "Address book settings saved.",
-  cardDavServer: "Shared address book (main PC)",
-  cardDavHubMode: "This device is the main PC",
-  cardDavHubModeHint:
-    "NovaMail is the CardDAV server. Other apps (phone, printer, fax) connect here as clients — there is no separate NovaMail client mode.",
-  cardDavRunning: "On · {count} contacts · other devices can connect",
-  cardDavStopped:
-    "Off — contacts stay local in NovaMail only. Turn on so phones/printers share the same book.",
-  cardDavConnectTitle: "How to connect a device (client)",
+  cardDavServer: "Shared address book",
+  shareModeLabel: "Operating mode",
+  shareModeHint:
+    "One PC is the server (hub). Other NovaMail PCs connect as LDAP clients. Phones/printers also use CardDAV on the server.",
+  shareModeLocal: "Local only",
+  shareModeServer: "Server (main PC)",
+  shareModeClient: "Client (workstation)",
+  shareModeLocalHint: "Contacts stay on this PC only.",
+  shareModeServerHint:
+    "This PC offers LDAP (for other NovaMail PCs) and CardDAV (phones/printers/fax).",
+  shareModeClientHint:
+    "This PC pulls contacts from the main PC over LDAP and stores them locally.",
+  ldapServerUrlLabel: "LDAP URL (for NovaMail clients)",
+  ldapServerBaseDn: "Base DN",
+  ldapServerBindDn: "Bind DN",
+  cardDavRunning: "Server on · {count} contacts",
+  cardDavStopped: "Server stopped",
+  cardDavConnectTitle: "Other NovaMail PCs (client mode)",
   cardDavConnectStep1:
-    "1. Turn on the main-PC switch above (this computer must be running and reachable).",
-  cardDavConnectStep2:
-    "2. On the phone/printer: add a new CardDAV / Contacts account (not IMAP/email).",
+    "1. On the main PC choose mode “Server” and keep NovaMail running.",
+  cardDavConnectStep2: "2. On each workstation PC choose mode “Client”.",
   cardDavConnectStep3:
-    "3. Enter the server URL, username, and password from here (same Wi‑Fi or VPN).",
+    "3. Enter the server LDAP URL, bind DN, and password, then sync.",
   cardDavConnectStep4:
-    "4. Start sync. Edits on the device land in NovaMail, and other clients pick them up on their next sync.",
+    "4. Changes on the server or connected devices show up on clients at the next sync.",
   cardDavDeviceHint:
-    "iOS example: Settings → Contacts → Accounts → Add Account → Other → CardDAV. Android: often via DAVx⁵ with the same URL.",
+    "Phones/printers: CardDAV account with the CardDAV URL below (iOS: Contacts → Accounts → Other → CardDAV; Android often DAVx⁵).",
   cardDavSyncHint:
-    "External apps write straight into the NovaMail address book (CardDAV PUT/DELETE). Every connected client fetches changes on its next sync — not second-by-second push.",
+    "LDAP and CardDAV clients write into the shared address book. Other PCs fetch changes on their next sync — not live push.",
   cardDavUsername: "Username",
-  cardDavPassword: "Password (Basic auth)",
+  cardDavPassword: "Password",
   cardDavAuthHint:
-    "The server rejects unauthenticated access. Enter both values on the phone/printer.",
+    "The same credentials are used for LDAP (NovaMail clients) and CardDAV (phones/printers).",
   cardDavTlsHint:
-    "Note: the server currently speaks HTTP on the LAN/VPN. Use a VPN for remote access, or put TLS/HTTPS in front later — do not expose it to the public internet unprotected.",
-  cardDavUrlLabel: "CardDAV URL (for clients)",
-  stopCardDav: "Main PC off",
-  startCardDav: "Main PC on",
+    "Note: LDAP/CardDAV currently speak cleartext on the LAN (ldap:// / http://). Use a VPN for remote access — do not expose them unprotected.",
+  cardDavUrlLabel: "CardDAV URL (phones/printers)",
+  clientHubUrl: "Main PC LDAP URL",
+  clientHubUrlPlaceholder: "ldap://192.168.1.10:1389",
+  clientSyncNow: "Sync from server now",
+  clientSyncResult: "{imported} new, {updated} updated ({total} total)",
+  stopCardDav: "Server off",
+  startCardDav: "Server on",
   aiCachedHint: "Prepared in the background",
   addContact: "Add contact",
   editContact: "Edit contact",

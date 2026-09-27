@@ -8,7 +8,9 @@ use novamail_ai::{
     DEFAULT_MODEL,
 };
 use parking_lot::RwLock;
-use novamail_contacts::{search_ldap, CardDavServer};
+use novamail_contacts::{
+    search_ldap, CardDavServer, LdapServer, DEFAULT_BASE_DN, DEFAULT_BIND_DN,
+};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use novamail_crypto::{
     decrypt_backup_payload, encrypt_backup_payload, AccountCredentials, EncryptedBackupFile,
@@ -20,9 +22,10 @@ use novamail_ipc::{
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
-    ContactDto, ContactsBookSettings, ExportBackupRequest, ExportBackupResponse,
-    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
-    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    ContactDto, ContactsBookSettings, ContactsShareMode, ContactsShareStatus,
+    ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
+    LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
+    ListMessagesRequest, ListMessagesResponse, SetContactsShareModeRequest,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
     OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, ProviderPreset,
     RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
@@ -51,6 +54,7 @@ pub struct AppState {
     pub secrets: SecretStore,
     ai: RwLock<Arc<dyn AiProvider>>,
     carddav: CardDavServer,
+    ldap_server: LdapServer,
 }
 
 impl AppState {
@@ -60,7 +64,8 @@ impl AppState {
         // Memory fallback keeps headless CI / missing Secret Service usable.
         let secrets = SecretStore::with_memory_fallback(true);
         let store = DbContactStore::new(db.clone());
-        let carddav = CardDavServer::new(store);
+        let carddav = CardDavServer::new(store.clone());
+        let ldap_server = LdapServer::new(store);
         let settings = Self::load_ai_settings(&db);
         Ok(Self {
             paths,
@@ -68,6 +73,7 @@ impl AppState {
             secrets,
             ai: RwLock::new(Self::provider_from_settings(&settings)),
             carddav,
+            ldap_server,
         })
     }
 
@@ -757,20 +763,143 @@ impl AppState {
     }
 
     pub async fn start_carddav(&self) -> CoreResult<CardDavServerStatus> {
-        self.ensure_carddav_credentials()?;
-        Ok(self.carddav.start().await?)
-    }
-
-    pub fn stop_carddav(&self) -> CoreResult<CardDavServerStatus> {
-        Ok(self.carddav.stop())
-    }
-
-    pub fn carddav_status(&self) -> CoreResult<CardDavServerStatus> {
-        self.ensure_carddav_credentials()?;
+        self.set_contacts_share_mode(SetContactsShareModeRequest {
+            mode: ContactsShareMode::Server,
+            client_url: None,
+            client_bind_dn: None,
+            client_password: None,
+            client_base_dn: None,
+        })
+        .await?;
         Ok(self.carddav.status())
     }
 
-    fn ensure_carddav_credentials(&self) -> CoreResult<()> {
+    pub fn stop_carddav(&self) -> CoreResult<CardDavServerStatus> {
+        let _ = self.ldap_server.stop();
+        let status = self.carddav.stop();
+        let _ = self.db.set_setting("contacts.share_mode", "local");
+        Ok(status)
+    }
+
+    pub fn carddav_status(&self) -> CoreResult<CardDavServerStatus> {
+        self.ensure_directory_credentials()?;
+        Ok(self.carddav.status())
+    }
+
+    pub fn contacts_share_status(&self) -> CoreResult<ContactsShareStatus> {
+        self.ensure_directory_credentials()?;
+        let mode = self.contacts_share_mode()?;
+        let client = if mode == ContactsShareMode::Client {
+            Some(self.ldap_get_settings()?)
+        } else {
+            None
+        };
+        Ok(ContactsShareStatus {
+            mode,
+            carddav: self.carddav.status(),
+            ldap_server: self.ldap_server.status(),
+            client,
+        })
+    }
+
+    pub async fn set_contacts_share_mode(
+        &self,
+        request: SetContactsShareModeRequest,
+    ) -> CoreResult<ContactsShareStatus> {
+        self.ensure_directory_credentials()?;
+        match request.mode {
+            ContactsShareMode::Local => {
+                let _ = self.carddav.stop();
+                let _ = self.ldap_server.stop();
+                self.db.set_setting("contacts.share_mode", "local")?;
+            }
+            ContactsShareMode::Server => {
+                self.carddav.start().await?;
+                self.ldap_server.start().await?;
+                self.db.set_setting("contacts.share_mode", "server")?;
+            }
+            ContactsShareMode::Client => {
+                let _ = self.carddav.stop();
+                let _ = self.ldap_server.stop();
+                let url = request
+                    .client_url
+                    .filter(|u| !u.trim().is_empty())
+                    .or_else(|| {
+                        self.db
+                            .get_setting("ldap.sync")
+                            .ok()
+                            .flatten()
+                            .and_then(|raw| {
+                                serde_json::from_str::<LdapSyncSettings>(&raw)
+                                    .ok()
+                                    .map(|s| s.url)
+                            })
+                    })
+                    .ok_or_else(|| {
+                        CoreError::Message(
+                            "Client mode needs the hub LDAP URL (e.g. ldap://192.168.1.10:1389)"
+                                .into(),
+                        )
+                    })?;
+                let bind_dn = request
+                    .client_bind_dn
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| DEFAULT_BIND_DN.to_string());
+                let base_dn = request
+                    .client_base_dn
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| DEFAULT_BASE_DN.to_string());
+                let password = request.client_password.filter(|v| !v.trim().is_empty());
+                self.ldap_save_settings(LdapSyncSettings {
+                    url,
+                    bind_dn: Some(bind_dn),
+                    password,
+                    base_dn,
+                    filter: "(objectClass=inetOrgPerson)".into(),
+                })?;
+                self.db.set_setting("contacts.share_mode", "client")?;
+            }
+        }
+        self.contacts_share_status()
+    }
+
+    pub async fn contacts_client_sync(&self) -> CoreResult<LdapSyncResult> {
+        let mode = self.contacts_share_mode()?;
+        if mode != ContactsShareMode::Client {
+            return Err(CoreError::Message(
+                "LDAP client sync is only available in Client mode".into(),
+            ));
+        }
+        let settings = self.ldap_get_settings_with_password()?;
+        self.ldap_sync(LdapSyncRequest {
+            url: settings.url,
+            bind_dn: settings.bind_dn,
+            password: settings.password,
+            base_dn: settings.base_dn,
+            filter: settings.filter,
+            save_settings: false,
+        })
+        .await
+    }
+
+    fn contacts_share_mode(&self) -> CoreResult<ContactsShareMode> {
+        Ok(match self.db.get_setting("contacts.share_mode")?.as_deref() {
+            Some("server") => ContactsShareMode::Server,
+            Some("client") => ContactsShareMode::Client,
+            _ => ContactsShareMode::Local,
+        })
+    }
+
+    fn ldap_get_settings_with_password(&self) -> CoreResult<LdapSyncSettings> {
+        let raw = self.db.get_setting("ldap.sync")?;
+        if let Some(raw) = raw {
+            Ok(serde_json::from_str(&raw).map_err(|e| CoreError::Message(e.to_string()))?)
+        } else {
+            Err(CoreError::Message("no LDAP client settings saved".into()))
+        }
+    }
+
+    fn ensure_directory_credentials(&self) -> CoreResult<()> {
         const USER_KEY: &str = "carddav.username";
         const PASS_KEY: &str = "carddav.password";
         let username = match self.db.get_setting(USER_KEY)? {
@@ -788,7 +917,9 @@ impl AppState {
                 generated
             }
         };
-        self.carddav.set_credentials(username, password);
+        self.carddav
+            .set_credentials(username.clone(), password.clone());
+        self.ldap_server.set_credentials(username, password);
         Ok(())
     }
 

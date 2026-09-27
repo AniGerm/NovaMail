@@ -197,3 +197,54 @@ pub struct CardDavServerStatus {
     /// Shared password; shown in UI so devices can authenticate.
     pub password: String,
 }
+
+/// Role of this NovaMail install for the shared address book.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactsShareMode {
+    /// Contacts stay on this PC only.
+    #[default]
+    Local,
+    /// This PC is the hub: LDAP + CardDAV servers are offered to the LAN.
+    Server,
+    /// This PC syncs contacts from a hub via LDAP.
+    Client,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LdapServerStatus {
+    pub running: bool,
+    pub listen_url: String,
+    pub base_dn: String,
+    pub bind_dn: String,
+    pub username: String,
+    pub password: String,
+    pub contact_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactsShareStatus {
+    pub mode: ContactsShareMode,
+    pub carddav: CardDavServerStatus,
+    pub ldap_server: LdapServerStatus,
+    /// When mode is Client: last LDAP sync settings used against the hub.
+    #[serde(default)]
+    pub client: Option<LdapSyncSettings>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetContactsShareModeRequest {
+    pub mode: ContactsShareMode,
+    /// Required when switching to Client: hub LDAP URL, e.g. `ldap://192.168.1.10:1389`.
+    #[serde(default)]
+    pub client_url: Option<String>,
+    #[serde(default)]
+    pub client_bind_dn: Option<String>,
+    #[serde(default)]
+    pub client_password: Option<String>,
+    #[serde(default)]
+    pub client_base_dn: Option<String>,
+}

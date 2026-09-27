@@ -2881,6 +2881,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "lber",
  "ldap3",
  "novamail-ipc",
  "parking_lot",

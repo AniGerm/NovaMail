@@ -9,6 +9,8 @@ import type {
   CardDavServerStatus,
   ContactDto,
   ContactsBookSettings,
+  ContactsShareStatus,
+  SetContactsShareModeRequest,
   RecipientSuggestion,
   SpellcheckStatus,
   SpellDictionaryDto,
@@ -172,6 +174,10 @@ export const api = {
   carddavStart: () => call<CardDavServerStatus>("carddav_start"),
   carddavStop: () => call<CardDavServerStatus>("carddav_stop"),
   carddavStatus: () => call<CardDavServerStatus>("carddav_status"),
+  contactsShareStatus: () => call<ContactsShareStatus>("contacts_share_status"),
+  contactsSetShareMode: (request: SetContactsShareModeRequest) =>
+    call<ContactsShareStatus>("contacts_set_share_mode", { request }),
+  contactsClientSync: () => call<LdapSyncResult>("contacts_client_sync"),
   ldapSearch: (request: LdapSearchRequest) =>
     call<ContactDto[]>("ldap_search", { request }),
   ldapGetSettings: () => call<LdapSyncSettings>("ldap_get_settings"),

@@ -232,35 +232,49 @@ export const de = {
   contactSortDescending: "Absteigend (Z–A)",
   saveBookSettings: "Einstellungen speichern",
   bookSettingsSaved: "Adressbuch-Einstellungen gespeichert.",
-  cardDavServer: "Gemeinsames Telefonbuch (Hauptrechner)",
-  cardDavHubMode: "Dieses Gerät ist der Hauptrechner",
-  cardDavHubModeHint:
-    "NovaMail ist der CardDAV-Server. Andere Apps (Handy, Drucker, Fax) verbinden sich als Client hierher — es gibt keinen separaten NovaMail-Client-Modus.",
-  cardDavRunning: "Aktiv · {count} Kontakte · andere Geräte können sich verbinden",
-  cardDavStopped:
-    "Aus — Kontakte bleiben nur lokal in NovaMail. Einschalten, damit Handy/Drucker dasselbe Buch nutzen.",
-  cardDavConnectTitle: "So verbindest du ein Gerät (Client)",
+  cardDavServer: "Gemeinsames Telefonbuch",
+  shareModeLabel: "Betriebsmodus",
+  shareModeHint:
+    "Ein Rechner ist der Server (Hub). Die anderen NovaMail-PCs verbinden sich per LDAP als Client. Handy/Drucker nutzen zusätzlich CardDAV am Server.",
+  shareModeLocal: "Nur lokal",
+  shareModeServer: "Server (Hauptrechner)",
+  shareModeClient: "Client (Arbeitsplatz)",
+  shareModeLocalHint: "Kontakte bleiben nur auf diesem PC.",
+  shareModeServerHint:
+    "Dieser PC stellt LDAP (für andere NovaMail-Rechner) und CardDAV (Handy/Drucker/Fax) bereit.",
+  shareModeClientHint:
+    "Dieser PC holt Kontakte per LDAP vom Hauptrechner und speichert sie lokal.",
+  ldapServerUrlLabel: "LDAP-URL (für NovaMail-Clients)",
+  ldapServerBaseDn: "Base DN",
+  ldapServerBindDn: "Bind DN",
+  cardDavRunning: "Server aktiv · {count} Kontakte",
+  cardDavStopped: "Server gestoppt",
+  cardDavConnectTitle: "Andere NovaMail-PCs (Client-Modus)",
   cardDavConnectStep1:
-    "1. Oben den Hauptrechner-Schalter einschalten (dieser PC muss laufen und erreichbar sein).",
+    "1. Auf dem Hauptrechner Modus „Server“ wählen und NovaMail laufen lassen.",
   cardDavConnectStep2:
-    "2. Am Handy/Drucker: neues CardDAV-/Kontakte-Konto anlegen (nicht IMAP/E-Mail).",
+    "2. Auf jedem Arbeitsplatz-PC Modus „Client“ wählen.",
   cardDavConnectStep3:
-    "3. Server-URL, Benutzername und Passwort von hier eintragen (gleiches WLAN oder VPN).",
+    "3. LDAP-URL, Bind DN und Passwort vom Server eintragen, dann synchronisieren.",
   cardDavConnectStep4:
-    "4. Sync starten. Änderungen am Gerät landen in NovaMail und umgekehrt beim nächsten Sync der anderen Clients.",
+    "4. Änderungen am Server oder an verbundenen Geräten erscheinen beim nächsten Sync auf den Clients.",
   cardDavDeviceHint:
-    "Beispiel iOS: Einstellungen → Kontakte → Accounts → Account hinzufügen → Andere → CardDAV-Account. Android: oft über DAVx⁵ mit derselben URL.",
+    "Handy/Drucker: CardDAV-Konto mit der CardDAV-URL unten (iOS: Kontakte → Accounts → Andere → CardDAV; Android oft DAVx⁵).",
   cardDavSyncHint:
-    "Externe Apps schreiben direkt ins NovaMail-Adressbuch (CardDAV PUT/DELETE). Alle verbundenen Clients holen die Änderungen bei ihrem nächsten Sync — nicht sekundenaktuell per Push.",
+    "LDAP- und CardDAV-Clients schreiben ins gemeinsame Adressbuch. Andere PCs holen die Änderungen beim nächsten Sync — kein Live-Push.",
   cardDavUsername: "Benutzername",
-  cardDavPassword: "Passwort (Basic-Auth)",
+  cardDavPassword: "Passwort",
   cardDavAuthHint:
-    "Ohne Benutzername/Passwort lehnt der Server Zugriffe ab. Trage beides am Telefon/Drucker ein.",
+    "Dieselben Zugangsdaten gelten für LDAP (NovaMail-Clients) und CardDAV (Handy/Drucker).",
   cardDavTlsHint:
-    "Hinweis: Der Server spricht vorerst HTTP im LAN/VPN. Fürs Internet bitte VPN nutzen oder später TLS/HTTPS vor den Port legen — nicht ungeschützt ins öffentliche Netz öffnen.",
-  cardDavUrlLabel: "CardDAV-URL (für Clients)",
-  stopCardDav: "Hauptrechner aus",
-  startCardDav: "Hauptrechner an",
+    "Hinweis: LDAP/CardDAV sprechen im LAN vorerst unverschlüsselt (ldap:// / http://). Fürs Internet VPN nutzen — nicht ungeschützt öffnen.",
+  cardDavUrlLabel: "CardDAV-URL (Handy/Drucker)",
+  clientHubUrl: "Hauptrechner LDAP-URL",
+  clientHubUrlPlaceholder: "ldap://192.168.1.10:1389",
+  clientSyncNow: "Jetzt vom Server synchronisieren",
+  clientSyncResult: "{imported} neu, {updated} aktualisiert ({total} gesamt)",
+  stopCardDav: "Server aus",
+  startCardDav: "Server an",
   aiCachedHint: "Bereits im Hintergrund vorbereitet",
   addContact: "Kontakt hinzufügen",
   editContact: "Kontakt bearbeiten",

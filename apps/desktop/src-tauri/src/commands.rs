@@ -2,6 +2,7 @@ use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
     AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
     AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
+    ContactsShareStatus, SetContactsShareModeRequest,
     ContactDto, ContactsBookSettings, RecipientSuggestion,
     ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
@@ -341,6 +342,32 @@ pub fn carddav_stop(state: State<'_, DesktopState>) -> Result<CardDavServerStatu
 #[tauri::command]
 pub fn carddav_status(state: State<'_, DesktopState>) -> Result<CardDavServerStatus, AppError> {
     state.app.carddav_status().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn contacts_share_status(
+    state: State<'_, DesktopState>,
+) -> Result<ContactsShareStatus, AppError> {
+    state.app.contacts_share_status().map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn contacts_set_share_mode(
+    state: State<'_, DesktopState>,
+    request: SetContactsShareModeRequest,
+) -> Result<ContactsShareStatus, AppError> {
+    state
+        .app
+        .set_contacts_share_mode(request)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn contacts_client_sync(
+    state: State<'_, DesktopState>,
+) -> Result<LdapSyncResult, AppError> {
+    state.app.contacts_client_sync().await.map_err(map_err)
 }
 
 #[tauri::command]

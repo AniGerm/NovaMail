@@ -19,7 +19,6 @@ import {
 import { api } from "@/shared/api/client";
 import type {
   AppError,
-  CardDavServerStatus,
   ContactAddress,
   ContactCustomField,
   ContactDto,
@@ -27,6 +26,8 @@ import type {
   ContactPrefill,
   ContactSortBy,
   ContactsBookSettings,
+  ContactsShareMode,
+  ContactsShareStatus,
   UpsertContactRequest,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
@@ -214,7 +215,11 @@ export function ContactsDialog({
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [carddav, setCarddav] = useState<CardDavServerStatus | null>(null);
+  const [share, setShare] = useState<ContactsShareStatus | null>(null);
+  const [clientUrl, setClientUrl] = useState("ldap://192.168.1.10:1389");
+  const [clientBind, setClientBind] = useState("cn=novamail,dc=novamail");
+  const [clientBase, setClientBase] = useState("ou=people,dc=novamail");
+  const [clientPassword, setClientPassword] = useState("");
   const [ldapUrl, setLdapUrl] = useState("ldaps://ldap.example.com");
   const [ldapBase, setLdapBase] = useState("ou=people,dc=example,dc=com");
   const [ldapFilter, setLdapFilter] = useState("(objectClass=inetOrgPerson)");
@@ -229,16 +234,27 @@ export function ContactsDialog({
   } | null>(null);
 
   async function refresh(nextQuery = query) {
-    const [list, status, ldap, book] = await Promise.all([
+    const [list, shareStatus, ldap, book] = await Promise.all([
       api.contactsList(nextQuery || null),
-      api.carddavStatus(),
+      api.contactsShareStatus().catch(() => null),
       api.ldapGetSettings().catch(() => null),
       api.contactsBookSettings().catch(() => defaultBookSettings()),
     ]);
     setContacts(list);
-    setCarddav(status);
+    if (shareStatus) {
+      setShare(shareStatus);
+      if (shareStatus.client?.url) setClientUrl(shareStatus.client.url);
+      if (shareStatus.client?.bindDn) setClientBind(shareStatus.client.bindDn);
+      if (shareStatus.client?.baseDn) setClientBase(shareStatus.client.baseDn);
+      if (shareStatus.mode === "server" && shareStatus.ldapServer.listenUrl) {
+        // Keep client fields aligned with this hub for copy/paste to other PCs.
+        setClientUrl(shareStatus.ldapServer.listenUrl);
+        setClientBind(shareStatus.ldapServer.bindDn);
+        setClientBase(shareStatus.ldapServer.baseDn);
+      }
+    }
     setBookSettings(book);
-    if (ldap) {
+    if (ldap && shareStatus?.mode !== "client") {
       setLdapUrl(ldap.url || ldapUrl);
       setLdapBase(ldap.baseDn || ldapBase);
       setLdapFilter(ldap.filter || ldapFilter);
@@ -253,9 +269,9 @@ export function ContactsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query]);
 
-  // While CardDAV is the hub, poll so edits from phone/printer show up here too.
+  // Poll while sharing so remote LDAP/CardDAV edits show up here too.
   useEffect(() => {
-    if (!open || !carddav?.running) return;
+    if (!open || share?.mode === "local") return;
     const timer = window.setInterval(() => {
       refresh().catch(() => {
         /* keep quiet during background poll */
@@ -263,7 +279,7 @@ export function ContactsDialog({
     }, 4000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, carddav?.running, query]);
+  }, [open, share?.mode, query]);
 
   useEffect(() => {
     if (!open || !prefill) return;
@@ -335,14 +351,59 @@ export function ContactsDialog({
     }
   }
 
-  async function toggleCardDav() {
+  async function setShareMode(mode: ContactsShareMode) {
     setBusy(true);
     setError(null);
     try {
-      const status = carddav?.running
-        ? await api.carddavStop()
-        : await api.carddavStart();
-      setCarddav(status);
+      const status = await api.contactsSetShareMode({
+        mode,
+        clientUrl: mode === "client" ? clientUrl : null,
+        clientBindDn: mode === "client" ? clientBind : null,
+        clientPassword: mode === "client" ? clientPassword || null : null,
+        clientBaseDn: mode === "client" ? clientBase : null,
+      });
+      setShare(status);
+      if (mode === "client") {
+        const result = await api.contactsClientSync();
+        await refresh();
+        setStatusInfo(
+          t("clientSyncResult", {
+            imported: result.imported,
+            updated: result.updated,
+            total: result.total,
+          }),
+        );
+      } else {
+        setStatusInfo(null);
+      }
+    } catch (err) {
+      setError((err as AppError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runClientSync() {
+    setBusy(true);
+    setError(null);
+    setStatusInfo(null);
+    try {
+      await api.contactsSetShareMode({
+        mode: "client",
+        clientUrl,
+        clientBindDn: clientBind,
+        clientPassword: clientPassword || null,
+        clientBaseDn: clientBase,
+      });
+      const result = await api.contactsClientSync();
+      await refresh();
+      setStatusInfo(
+        t("clientSyncResult", {
+          imported: result.imported,
+          updated: result.updated,
+          total: result.total,
+        }),
+      );
     } catch (err) {
       setError((err as AppError).message);
     } finally {
@@ -371,9 +432,8 @@ export function ContactsDialog({
           total: result.total,
         }),
       );
-      if (!carddav?.running) {
-        const status = await api.carddavStart();
-        setCarddav(status);
+      if (share?.mode !== "server") {
+        await setShareMode("server");
       }
     } catch (err) {
       setError((err as AppError).message);
@@ -519,65 +579,149 @@ export function ContactsDialog({
             <div className="grid gap-1">
               <h3 className="font-medium">{t("cardDavServer")}</h3>
               <p className="text-xs text-[var(--nova-ink-muted)]">
-                {t("cardDavHubModeHint")}
+                {t("shareModeHint")}
               </p>
             </div>
 
-            <label className="flex items-center justify-between gap-3 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] px-3 py-2">
-              <span className="text-sm font-medium">{t("cardDavHubMode")}</span>
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-[var(--nova-accent)]"
-                checked={Boolean(carddav?.running)}
+            <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+              {t("shareModeLabel")}
+              <Select
+                value={share?.mode ?? "local"}
                 disabled={busy}
-                onChange={() => {
-                  void toggleCardDav();
+                onChange={(e) => {
+                  void setShareMode(e.target.value as ContactsShareMode);
                 }}
-                aria-label={t("cardDavHubMode")}
-              />
+                className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
+              >
+                <option value="local">{t("shareModeLocal")}</option>
+                <option value="server">{t("shareModeServer")}</option>
+                <option value="client">{t("shareModeClient")}</option>
+              </Select>
             </label>
-
             <p className="text-xs text-[var(--nova-ink-muted)]">
-              {carddav?.running
-                ? t("cardDavRunning", {
-                    count: carddav.contactCount,
-                  })
-                : t("cardDavStopped")}
+              {(share?.mode ?? "local") === "server"
+                ? t("shareModeServerHint")
+                : (share?.mode ?? "local") === "client"
+                  ? t("shareModeClientHint")
+                  : t("shareModeLocalHint")}
             </p>
 
-            {carddav?.addressbookUrl ? (
-              <label className="grid gap-1 text-xs">
-                <span>{t("cardDavUrlLabel")}</span>
-                <Input
-                  readOnly
-                  value={carddav.addressbookUrl}
-                  onFocus={(e) => e.currentTarget.select()}
-                  aria-label={t("cardDavUrlLabel")}
-                />
-              </label>
-            ) : null}
-            {carddav?.username ? (
-              <label className="grid gap-1 text-xs">
-                <span>{t("cardDavUsername")}</span>
-                <Input
-                  readOnly
-                  value={carddav.username}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-              </label>
-            ) : null}
-            {carddav?.password ? (
-              <label className="grid gap-1 text-xs">
-                <span>{t("cardDavPassword")}</span>
-                <Input
-                  readOnly
-                  value={carddav.password}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-              </label>
+            {share?.mode === "server" ? (
+              <>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("cardDavRunning", {
+                    count: share.ldapServer.contactCount,
+                  })}
+                </p>
+                <label className="grid gap-1 text-xs">
+                  <span>{t("ldapServerUrlLabel")}</span>
+                  <Input
+                    readOnly
+                    value={share.ldapServer.listenUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                </label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("ldapServerBindDn")}</span>
+                    <Input
+                      readOnly
+                      value={share.ldapServer.bindDn}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("ldapServerBaseDn")}</span>
+                    <Input
+                      readOnly
+                      value={share.ldapServer.baseDn}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-1 text-xs">
+                  <span>{t("cardDavUrlLabel")}</span>
+                  <Input
+                    readOnly
+                    value={share.carddav.addressbookUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                </label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("cardDavUsername")}</span>
+                    <Input
+                      readOnly
+                      value={share.carddav.username}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("cardDavPassword")}</span>
+                    <Input
+                      readOnly
+                      value={share.carddav.password}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </label>
+                </div>
+              </>
             ) : null}
 
-            <div className="grid gap-1 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-muted,transparent)] text-xs text-[var(--nova-ink-muted)]">
+            {share?.mode !== "server" ? (
+              <div className="grid gap-2">
+                <label className="grid gap-1 text-xs">
+                  <span>{t("clientHubUrl")}</span>
+                  <Input
+                    value={clientUrl}
+                    onChange={(e) => setClientUrl(e.target.value)}
+                    placeholder={t("clientHubUrlPlaceholder")}
+                    disabled={busy}
+                  />
+                </label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("ldapServerBindDn")}</span>
+                    <Input
+                      value={clientBind}
+                      onChange={(e) => setClientBind(e.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("ldapServerBaseDn")}</span>
+                    <Input
+                      value={clientBase}
+                      onChange={(e) => setClientBase(e.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-1 text-xs">
+                  <span>{t("cardDavPassword")}</span>
+                  <Input
+                    type="password"
+                    value={clientPassword}
+                    onChange={(e) => setClientPassword(e.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                {share?.mode === "client" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      void runClientSync();
+                    }}
+                  >
+                    {t("clientSyncNow")}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
               <p className="font-medium text-[var(--nova-ink)]">
                 {t("cardDavConnectTitle")}
               </p>
@@ -587,60 +731,59 @@ export function ContactsDialog({
               <p>{t("cardDavConnectStep4")}</p>
               <p>{t("cardDavDeviceHint")}</p>
               <p>{t("cardDavSyncHint")}</p>
+              <p>{t("cardDavAuthHint")}</p>
+              <p>{t("cardDavTlsHint")}</p>
             </div>
-
-            <p className="text-xs text-[var(--nova-ink-muted)]">
-              {t("cardDavAuthHint")}
-            </p>
-            <p className="text-xs text-[var(--nova-ink-muted)]">
-              {t("cardDavTlsHint")}
-            </p>
           </section>
 
-          <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-            <h3 className="font-medium">{t("ldapSyncTitle")}</h3>
-            <p className="text-xs text-[var(--nova-ink-muted)]">
-              {t("ldapSyncDescription")}
-            </p>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                value={ldapUrl}
-                onChange={(e) => setLdapUrl(e.target.value)}
-                placeholder={t("ldapUrl")}
-              />
-              <Input
-                value={ldapBase}
-                onChange={(e) => setLdapBase(e.target.value)}
-                placeholder={t("ldapBaseDn")}
-              />
-              <Input
-                value={ldapFilter}
-                onChange={(e) => setLdapFilter(e.target.value)}
-                placeholder={t("ldapFilter")}
-              />
-              <Input
-                value={ldapBind}
-                onChange={(e) => setLdapBind(e.target.value)}
-                placeholder={t("ldapBindDn")}
-              />
-              <Input
-                type="password"
-                value={ldapPassword}
-                onChange={(e) => setLdapPassword(e.target.value)}
-                placeholder={t("ldapPassword")}
-                className="md:col-span-2"
-              />
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={busy}
-              onClick={runLdapSync}
-            >
-              {t("ldapSyncNow")}
-            </Button>
-          </section>
+          {share?.mode === "server" ? (
+            <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+              <h3 className="font-medium">{t("ldapSyncTitle")}</h3>
+              <p className="text-xs text-[var(--nova-ink-muted)]">
+                {t("ldapSyncDescription")}
+              </p>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Input
+                  value={ldapUrl}
+                  onChange={(e) => setLdapUrl(e.target.value)}
+                  placeholder={t("ldapUrl")}
+                />
+                <Input
+                  value={ldapBase}
+                  onChange={(e) => setLdapBase(e.target.value)}
+                  placeholder={t("ldapBaseDn")}
+                />
+                <Input
+                  value={ldapFilter}
+                  onChange={(e) => setLdapFilter(e.target.value)}
+                  placeholder={t("ldapFilter")}
+                />
+                <Input
+                  value={ldapBind}
+                  onChange={(e) => setLdapBind(e.target.value)}
+                  placeholder={t("ldapBindDn")}
+                />
+                <Input
+                  type="password"
+                  value={ldapPassword}
+                  onChange={(e) => setLdapPassword(e.target.value)}
+                  placeholder={t("ldapPassword")}
+                  className="md:col-span-2"
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  void runLdapSync();
+                }}
+              >
+                {t("ldapSyncNow")}
+              </Button>
+            </section>
+          ) : null}
 
           {statusInfo ? (
             <p className="text-[var(--nova-accent)]" role="status">
