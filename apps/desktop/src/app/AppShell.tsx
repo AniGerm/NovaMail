@@ -464,6 +464,8 @@ export function AppShell() {
                   setComposerBody(suggestion);
                   if (messageQuery.data) {
                     setReplyTo(messageQuery.data);
+                    setComposerSubject(undefined);
+                    setComposerOpen(true);
                   }
                 }}
               />

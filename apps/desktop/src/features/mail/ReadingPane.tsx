@@ -109,12 +109,18 @@ export function ReadingPane({
     const variants = await ensureVariants();
     if (!variants) return;
     const text = which === "a" ? variants.a : variants.b;
-    onUseSuggestedReply?.(text);
+    if (onUseSuggestedReply) {
+      onUseSuggestedReply(text);
+      return;
+    }
     onReply();
   }
 
   function openOwnReply() {
-    onUseSuggestedReply?.("");
+    if (onUseSuggestedReply) {
+      onUseSuggestedReply("");
+      return;
+    }
     onReply();
   }
 
@@ -165,25 +171,16 @@ export function ReadingPane({
           <span>·</span>
           <span>{current.summary.accountEmail}</span>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={openOwnReply}>
-            {t("reply")}
-          </Button>
-          <Button size="sm" variant="secondary" onClick={onForward}>
-            {t("forward")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={aiBusy}
-            onClick={() => void handleSummarize()}
-          >
-            <Sparkles size={14} />
-            {aiBusy ? t("working") : t("summarize")}
-          </Button>
-        </div>
+        {aiError ? (
+          <p className="mt-3 text-sm text-[var(--nova-danger)]" role="alert">
+            {aiError}
+          </p>
+        ) : null}
+      </header>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6">
         {attachments.length > 0 ? (
-          <div className="mt-4">
+          <section aria-label={t("attachments")}>
             <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
               <Paperclip size={14} />
               {t("attachments")}
@@ -193,7 +190,7 @@ export function ReadingPane({
                 <li key={attachment.id}>
                   <button
                     type="button"
-                    className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
+                    className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
                     onClick={() => void openAttachment(attachment.id)}
                   >
                     {attachment.filename}{" "}
@@ -204,16 +201,9 @@ export function ReadingPane({
                 </li>
               ))}
             </ul>
-          </div>
+          </section>
         ) : null}
-        {aiError ? (
-          <p className="mt-3 text-sm text-[var(--nova-danger)]" role="alert">
-            {aiError}
-          </p>
-        ) : null}
-      </header>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6">
         <section
           aria-label={t("messageBody")}
           className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_1px_0_color-mix(in_srgb,var(--nova-ink)_5%,transparent)]"
@@ -237,7 +227,21 @@ export function ReadingPane({
           aria-label={t("replyAssistTitle")}
           className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] px-4 py-4"
         >
-          <p className="mb-1 text-sm font-medium">{t("replyAssistTitle")}</p>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">{t("replyAssistTitle")}</p>
+            {!summary ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={aiBusy}
+                onClick={() => void handleSummarize()}
+              >
+                <Sparkles size={14} />
+                {aiBusy ? t("working") : t("summarize")}
+              </Button>
+            ) : null}
+          </div>
           {summary ? (
             <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
               <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
