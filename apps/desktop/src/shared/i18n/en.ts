@@ -193,6 +193,8 @@ export const en: Translations = {
   cardDavPassword: "Password (Basic auth)",
   cardDavAuthHint:
     "The server rejects unauthenticated access. Enter both values on the phone/printer.",
+  cardDavTlsHint:
+    "Note: the server currently speaks HTTP on the LAN/VPN. Use a VPN for remote access, or put TLS/HTTPS in front later — do not expose it to the public internet unprotected.",
   stopCardDav: "Stop CardDAV",
   startCardDav: "Start CardDAV",
   aiCachedHint: "Prepared in the background",

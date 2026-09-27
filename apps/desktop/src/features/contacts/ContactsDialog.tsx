@@ -503,6 +503,9 @@ export function ContactsDialog({
               {t("cardDavAuthHint")}
             </p>
             <p className="text-xs text-[var(--nova-ink-muted)]">
+              {t("cardDavTlsHint")}
+            </p>
+            <p className="text-xs text-[var(--nova-ink-muted)]">
               {t("cardDavDeviceHint")}
             </p>
             <Button type="button" size="sm" disabled={busy} onClick={toggleCardDav}>

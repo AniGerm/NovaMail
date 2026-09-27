@@ -30,7 +30,7 @@
 | P3 | OpenPGP (Sequoia), Key Management UI |
 | P4 | Calendar (CalDAV) |
 | P5 | Plugin Runtime WASM + erste Official Plugins |
-| P6 | AI job queue + persisted insights |
+| P6 | ~~AI job queue + persisted insights~~ (done: qwen2.5:1.5b, ai_insights, 2 reply variants) |
 | P7 | Microsoft Graph / Exchange Vertiefung |
 | P8 | Flatpak, Snap, automatic signed Updates, Telemetrie opt-in |
 

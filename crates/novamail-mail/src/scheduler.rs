@@ -11,6 +11,7 @@ use novamail_db::Database;
 use novamail_ipc::{SyncProgressEvent, SyncRequest};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::sync::SyncEngine;
 
@@ -41,9 +42,17 @@ impl SyncScheduler {
 
     /// Start the periodic sync loop on a dedicated Tokio runtime thread.
     /// Safe to call from Tauri's sync `setup` hook (no ambient runtime required).
-    pub fn spawn<F>(self, mut on_progress: F) -> std::thread::JoinHandle<()>
+    ///
+    /// `on_new_messages` receives local message IDs newly inserted in a cycle
+    /// (for AI insights + mail rules).
+    pub fn spawn<F, N>(
+        self,
+        mut on_progress: F,
+        mut on_new_messages: N,
+    ) -> std::thread::JoinHandle<()>
     where
         F: FnMut(SyncProgressEvent) + Send + 'static,
+        N: FnMut(Vec<Uuid>) + Send + 'static,
     {
         std::thread::Builder::new()
             .name("novamail-sync-scheduler".into())
@@ -81,18 +90,27 @@ impl SyncScheduler {
                                         continue;
                                     }
                                 };
+                                let mut new_ids = Vec::new();
                                 for account in accounts {
                                     info!(account = %account.email, "scheduled sync starting");
-                                    if let Err(err) = engine
+                                    match engine
                                         .sync_account(account.id, |event| on_progress(event))
                                         .await
                                     {
-                                        warn!(
-                                            account = %account.email,
-                                            error = %err,
-                                            "scheduled sync failed"
-                                        );
+                                        Ok(report) => {
+                                            new_ids.extend(report.new_message_ids);
+                                        }
+                                        Err(err) => {
+                                            warn!(
+                                                account = %account.email,
+                                                error = %err,
+                                                "scheduled sync failed"
+                                            );
+                                        }
                                     }
+                                }
+                                if !new_ids.is_empty() {
+                                    on_new_messages(new_ids);
                                 }
                                 *self.running.lock().await = false;
                             }

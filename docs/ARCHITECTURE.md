@@ -33,8 +33,10 @@ novamail-core          use-cases
 
 - Primary provider: Ollama (`novamail-ai::OllamaProvider`), default model `qwen2.5:1.5b`
 - Offline fallback: `NullAiProvider` (deterministic heuristics)
-- Background queue after sync writes `ai_insights` (summary + reply draft)
-- Commands: `ai_summarize_message`, `ai_suggest_reply`, `ai_message_insights`
+- After manual or scheduled sync: mail rules run, then concurrency-1 AI queue
+  writes `ai_insights` (summary + reply_a/reply_b)
+- Commands: `ai_summarize_message`, `ai_suggest_reply`, `ai_suggest_replies`,
+  `ai_message_insights`
 - `AppState::get_message` sanitizes HTML with ammonia before IPC (ADR 0005)
 
 ## Engineering rules

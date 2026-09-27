@@ -27,9 +27,15 @@ pub fn run() {
                 Duration::from_secs(300),
             );
             let handle = app.handle().clone();
-            let _sync_task = scheduler.spawn(move |event| {
-                let _ = handle.emit("sync://progress", &event);
-            });
+            let app_for_ai = state.app.clone();
+            let _sync_task = scheduler.spawn(
+                move |event| {
+                    let _ = handle.emit("sync://progress", &event);
+                },
+                move |new_ids| {
+                    app_for_ai.on_new_messages_synced(&new_ids);
+                },
+            );
             app.manage(state);
             Ok(())
         })

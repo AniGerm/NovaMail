@@ -191,6 +191,8 @@ export const de = {
   cardDavPassword: "Passwort (Basic-Auth)",
   cardDavAuthHint:
     "Ohne Benutzername/Passwort lehnt der Server Zugriffe ab. Trage beides am Telefon/Drucker ein.",
+  cardDavTlsHint:
+    "Hinweis: Der Server spricht vorerst HTTP im LAN/VPN. Fürs Internet bitte VPN nutzen oder später TLS/HTTPS vor den Port legen — nicht ungeschützt ins öffentliche Netz öffnen.",
   stopCardDav: "CardDAV stoppen",
   startCardDav: "CardDAV starten",
   aiCachedHint: "Bereits im Hintergrund vorbereitet",

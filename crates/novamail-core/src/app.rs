@@ -267,8 +267,18 @@ impl AppState {
                 messages_fetched: report.messages_fetched,
             });
         }
-        self.enqueue_ai_insights(&new_ids);
+        self.on_new_messages_synced(&new_ids);
         Ok(results)
+    }
+
+    /// Apply mail rules + enqueue background AI insights for newly synced messages.
+    pub fn on_new_messages_synced(&self, message_ids: &[Uuid]) {
+        for message_id in message_ids {
+            if let Err(err) = self.apply_rules_for_message(*message_id) {
+                tracing::debug!(%message_id, error = %err, "rule apply skipped");
+            }
+        }
+        self.enqueue_ai_insights(message_ids);
     }
 
     pub async fn send_message(&self, request: SendMessageRequest) -> CoreResult<()> {
@@ -932,7 +942,7 @@ impl AppState {
         })
     }
 
-    fn enqueue_ai_insights(&self, message_ids: &[Uuid]) {
+    pub fn enqueue_ai_insights(&self, message_ids: &[Uuid]) {
         if message_ids.is_empty() {
             return;
         }
