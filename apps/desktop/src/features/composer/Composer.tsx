@@ -27,6 +27,8 @@ interface ComposerProps {
   draft?: MessageDetailDto | null;
   initialBody?: string;
   initialSubject?: string;
+  /** Prefill To field (e.g. from command palette) */
+  initialTo?: string;
   onClose: () => void;
   onSent: () => void;
   onDraftSaved?: () => void;
@@ -88,6 +90,7 @@ export function Composer({
   draft = null,
   initialBody = "",
   initialSubject,
+  initialTo,
   onClose,
   onSent,
   onDraftSaved,
@@ -127,7 +130,11 @@ export function Composer({
     }
 
     setAccountId((current) => current || accounts[0]?.id || "");
-    setTo(replyTo ? formatAddress(replyTo.summary.from) : "");
+    setTo(
+      replyTo
+        ? formatAddress(replyTo.summary.from)
+        : (initialTo ?? ""),
+    );
     setSubject(
       initialSubject ??
         (replyTo ? `Re: ${replyTo.summary.subject}` : ""),
@@ -158,7 +165,7 @@ export function Composer({
         })
         .catch(() => undefined);
     }
-  }, [open, replyTo, draft, initialBody, initialSubject, accounts]);
+  }, [open, replyTo, draft, initialBody, initialSubject, initialTo, accounts]);
 
   if (!open) return null;
 

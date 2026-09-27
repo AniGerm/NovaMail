@@ -243,6 +243,10 @@ export const api = {
     color: string;
   }) => call<LabelDto>("labels_upsert", { request }),
   labelsDelete: (labelId: string) => call<void>("labels_delete", { labelId }),
+  messagesSetLabels: (request: { messageId: string; labelIds: string[] }) =>
+    call<void>("messages_set_labels", { request }),
+  messagesListLabels: (messageId: string) =>
+    call<LabelDto[]>("messages_list_labels", { messageId }),
   rulesList: () => call<RuleDto[]>("rules_list"),
   rulesUpsert: (request: {
     id?: string | null;

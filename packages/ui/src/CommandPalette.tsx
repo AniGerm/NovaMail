@@ -6,25 +6,60 @@ export type CommandItem = {
   id: string;
   label: string;
   hint?: string;
+  /** Extra text used only for fuzzy matching */
+  keywords?: string;
+  group?: string;
   onSelect: () => void;
 };
+
+function fuzzyScore(haystack: string, needle: string): number {
+  if (!needle) return 1;
+  const h = haystack.toLowerCase();
+  const n = needle.toLowerCase();
+  if (h === n) return 1000;
+  const idx = h.indexOf(n);
+  if (idx === 0) return 800 - Math.min(h.length, 40);
+  if (idx > 0) return 600 - idx;
+  // subsequence match
+  let hi = 0;
+  for (let ni = 0; ni < n.length; ni += 1) {
+    const ch = n[ni]!;
+    const found = h.indexOf(ch, hi);
+    if (found < 0) return 0;
+    hi = found + 1;
+  }
+  return 200 - Math.min(h.length, 100);
+}
 
 export function CommandPalette({
   open,
   items,
   onClose,
+  placeholder = "Type a command…",
+  emptyLabel = "No matches",
+  ariaLabel = "Command palette",
 }: {
   open: boolean;
   items: CommandItem[];
   onClose: () => void;
+  placeholder?: string;
+  emptyLabel?: string;
+  ariaLabel?: string;
 }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) return items;
-    return items.filter((item) => item.label.toLowerCase().includes(q));
+    return items
+      .map((item) => {
+        const hay = `${item.label} ${item.keywords ?? ""} ${item.group ?? ""}`;
+        return { item, score: fuzzyScore(hay, q) };
+      })
+      .filter((row) => row.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((row) => row.item);
   }, [items, query]);
 
   useEffect(() => {
@@ -33,6 +68,10 @@ export function CommandPalette({
       setActive(0);
     }
   }, [open]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [query]);
 
   useEffect(() => {
     if (!open) return;
@@ -58,12 +97,14 @@ export function CommandPalette({
 
   if (!open) return null;
 
+  let lastGroup: string | undefined;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(14,17,20,0.35)] p-6 pt-[12vh] backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label="Command palette"
+      aria-label={ariaLabel}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -75,41 +116,53 @@ export function CommandPalette({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setActive(0);
             }}
-            placeholder="Type a command…"
-            aria-label="Filter commands"
+            placeholder={placeholder}
+            aria-label={placeholder}
           />
         </div>
         <ul className="max-h-80 overflow-y-auto p-2" role="listbox">
           {filtered.length === 0 ? (
-            <li className="px-3 py-4 text-sm text-[var(--nova-ink-muted)]">No matches</li>
+            <li className="px-3 py-4 text-sm text-[var(--nova-ink-muted)]">
+              {emptyLabel}
+            </li>
           ) : (
-            filtered.map((item, index) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === active}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-[var(--nova-radius-md)] px-3 py-3 text-left text-sm",
-                    index === active
-                      ? "bg-[var(--nova-accent-soft)] text-[var(--nova-accent)]"
-                      : "hover:bg-[var(--nova-surface-2)]",
-                  )}
-                  onMouseEnter={() => setActive(index)}
-                  onClick={() => {
-                    item.onSelect();
-                    onClose();
-                  }}
-                >
-                  <span>{item.label}</span>
-                  {item.hint ? (
-                    <span className="text-xs text-[var(--nova-ink-muted)]">{item.hint}</span>
+            filtered.map((item, index) => {
+              const showGroup = Boolean(item.group && item.group !== lastGroup);
+              if (item.group) lastGroup = item.group;
+              return (
+                <li key={item.id}>
+                  {showGroup ? (
+                    <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                      {item.group}
+                    </p>
                   ) : null}
-                </button>
-              </li>
-            ))
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === active}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-[var(--nova-radius-md)] px-3 py-3 text-left text-sm",
+                      index === active
+                        ? "bg-[var(--nova-accent-soft)] text-[var(--nova-accent)]"
+                        : "hover:bg-[var(--nova-surface-2)]",
+                    )}
+                    onMouseEnter={() => setActive(index)}
+                    onClick={() => {
+                      item.onSelect();
+                      onClose();
+                    }}
+                  >
+                    <span>{item.label}</span>
+                    {item.hint ? (
+                      <span className="text-xs text-[var(--nova-ink-muted)]">
+                        {item.hint}
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })
           )}
         </ul>
       </div>

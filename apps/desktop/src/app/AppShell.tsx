@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useKeyboardShortcuts } from "@novamail/hooks";
-import { CommandPalette, EmptyState, Input, VisuallyHidden } from "@novamail/ui";
+import {
+  CommandPalette,
+  EmptyState,
+  Input,
+  VisuallyHidden,
+  type CommandItem,
+} from "@novamail/ui";
 
 import { AccountSetup } from "@/features/accounts/AccountSetup";
 import { AiSetupDialog } from "@/features/ai/AiSetupDialog";
@@ -25,9 +31,11 @@ import type {
   AiSettings,
   AppError,
   ContactPrefill,
+  LabelDto,
   MessageDetailDto,
   OfflinePromptEvent,
   PlannedSummaryDto,
+  RecipientSuggestion,
   SnoozePreset,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
@@ -67,9 +75,12 @@ export function AppShell() {
   );
   const [composerBody, setComposerBody] = useState("");
   const [composerSubject, setComposerSubject] = useState<string | undefined>();
+  const [composerTo, setComposerTo] = useState<string | undefined>();
   const [contactPrefill, setContactPrefill] = useState<ContactPrefill | null>(
     null,
   );
+  const [paletteLabels, setPaletteLabels] = useState<LabelDto[]>([]);
+  const [palettePeople, setPalettePeople] = useState<RecipientSuggestion[]>([]);
   const clearContactPrefill = useCallback(() => setContactPrefill(null), []);
   const [inboxFilters, setInboxFilters] =
     useState<InboxFilters>(defaultInboxFilters);
@@ -182,6 +193,18 @@ export function AppShell() {
   useEffect(() => {
     refreshPlannedSummary();
   }, [refreshPlannedSummary]);
+
+  useEffect(() => {
+    if (!desktop || !commandPaletteOpen) return;
+    void api
+      .labelsList(inboxFilters.accountId)
+      .then(setPaletteLabels)
+      .catch(() => setPaletteLabels([]));
+    void api
+      .recipientsSuggest("", 40)
+      .then(setPalettePeople)
+      .catch(() => setPalettePeople([]));
+  }, [commandPaletteOpen, desktop, inboxFilters.accountId]);
 
   useEffect(() => {
     if (!desktop) return;
@@ -417,21 +440,28 @@ export function AppShell() {
     setTheme(nextThemeMode(theme as ThemeMode));
   }, [setTheme, theme]);
 
+  const openComposer = useCallback(
+    (opts?: { to?: string }) => {
+      setReplyTo(null);
+      setEditingDraft(null);
+      setComposerBody("");
+      setComposerSubject(undefined);
+      setComposerTo(opts?.to);
+      setComposerOpen(true);
+    },
+    [setComposerOpen],
+  );
+
   const shortcuts = useMemo(
     () => ({
-      c: () => {
-        setReplyTo(null);
-        setEditingDraft(null);
-        setComposerBody("");
-        setComposerSubject(undefined);
-        setComposerOpen(true);
-      },
+      c: () => openComposer(),
       r: () => {
         if (messageQuery.data) {
           setReplyTo(messageQuery.data);
           setEditingDraft(null);
           setComposerBody("");
           setComposerSubject(undefined);
+          setComposerTo(undefined);
           setComposerOpen(true);
         }
       },
@@ -466,6 +496,7 @@ export function AppShell() {
       handleSnooze,
       messageQuery.data,
       navigateList,
+      openComposer,
       setCommandPaletteOpen,
       setComposerOpen,
       setSettingsOpen,
@@ -474,67 +505,53 @@ export function AppShell() {
   );
   useKeyboardShortcuts(triageOpen ? {} : shortcuts);
 
-  const commandItems = useMemo(
-    () => [
+  const commandItems = useMemo(() => {
+    const items: CommandItem[] = [
       {
         id: "compose",
         label: t("cmdCompose"),
         hint: "C",
-        onSelect: () => {
-          setReplyTo(null);
-          setEditingDraft(null);
-          setComposerBody("");
-          setComposerSubject(undefined);
-          setComposerOpen(true);
-        },
+        group: t("cmdGroupNavigate"),
+        onSelect: () => openComposer(),
       },
       {
         id: "triage",
         label: t("cmdTriage"),
         hint: "T",
+        group: t("cmdGroupNavigate"),
         onSelect: () => setTriageOpen(true),
       },
       {
         id: "drafts",
         label: t("drafts"),
+        group: t("cmdGroupNavigate"),
+        keywords: "entwürfe drafts",
         onSelect: () => handleSelectDrafts(),
       },
       {
         id: "planned",
         label: t("cmdPlanned"),
+        group: t("cmdGroupNavigate"),
+        keywords: "snooze geplant planned later",
         onSelect: () => handleSelectPlanned(),
       },
       {
-        id: "snooze-later-today",
-        label: t("cmdSnoozeLaterToday"),
-        hint: "H",
-        onSelect: () => {
-          void handleSnooze("laterToday");
-        },
-      },
-      {
-        id: "snooze-tomorrow",
-        label: t("cmdSnoozeTomorrow"),
-        onSelect: () => {
-          void handleSnooze("tomorrowMorning");
-        },
-      },
-      {
-        id: "snooze-monday",
-        label: t("cmdSnoozeMonday"),
-        onSelect: () => {
-          void handleSnooze("nextMonday");
-        },
+        id: "offline",
+        label: t("cmdOffline"),
+        group: t("cmdGroupNavigate"),
+        keywords: "offline local only",
+        onSelect: () => handleSelectOffline(),
       },
       {
         id: "contacts",
         label: t("cmdContacts"),
+        group: t("cmdGroupNavigate"),
         onSelect: () => setContactsOpen(true),
       },
       {
         id: "sync",
         label: t("cmdSync"),
-        hint: "",
+        group: t("cmdGroupNavigate"),
         onSelect: () => {
           void handleSync();
         },
@@ -542,37 +559,15 @@ export function AppShell() {
       {
         id: "add-account",
         label: t("cmdAddAccount"),
+        group: t("cmdGroupNavigate"),
         onSelect: () => setAccountSetupOpen(true),
       },
       {
         id: "settings",
         label: t("cmdSettings"),
         hint: ",",
+        group: t("cmdGroupNavigate"),
         onSelect: () => setSettingsOpen(true),
-      },
-      {
-        id: "archive",
-        label: t("cmdArchive"),
-        hint: "E",
-        onSelect: () => {
-          void handleArchive();
-        },
-      },
-      {
-        id: "delete",
-        label: t("cmdDelete"),
-        hint: "⌫",
-        onSelect: () => {
-          void handleDelete();
-        },
-      },
-      {
-        id: "forward",
-        label: t("cmdForward"),
-        hint: "F",
-        onSelect: () => {
-          void handleForward();
-        },
       },
       {
         id: "theme",
@@ -582,27 +577,200 @@ export function AppShell() {
             : theme === "dark"
               ? t("switchToAuto")
               : t("switchToLight"),
+        group: t("cmdGroupNavigate"),
         onSelect: () => cycleTheme(),
       },
-    ],
-    [
-      cycleTheme,
-      handleArchive,
-      handleDelete,
-      handleForward,
-      handleSelectDrafts,
-      handleSelectPlanned,
-      handleSnooze,
-      handleSync,
-      setAccountSetupOpen,
-      setComposerOpen,
-      setContactsOpen,
-      setSettingsOpen,
-      setTriageOpen,
-      t,
-      theme,
-    ],
-  );
+      {
+        id: "archive",
+        label: t("cmdArchive"),
+        hint: "E",
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleArchive();
+        },
+      },
+      {
+        id: "delete",
+        label: t("cmdDelete"),
+        hint: "⌫",
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleDelete();
+        },
+      },
+      {
+        id: "forward",
+        label: t("cmdForward"),
+        hint: "F",
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleForward();
+        },
+      },
+      {
+        id: "star",
+        label: t("cmdStar"),
+        group: t("cmdGroupActions"),
+        keywords: "favorite favourit star",
+        onSelect: () => {
+          void handleToggleStar();
+        },
+      },
+      {
+        id: "mark-spam",
+        label: t("cmdMarkSpam"),
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleMarkSpam();
+        },
+      },
+      {
+        id: "snooze-later-today",
+        label: t("cmdSnoozeLaterToday"),
+        hint: "H",
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleSnooze("laterToday");
+        },
+      },
+      {
+        id: "snooze-tomorrow",
+        label: t("cmdSnoozeTomorrow"),
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleSnooze("tomorrowMorning");
+        },
+      },
+      {
+        id: "snooze-monday",
+        label: t("cmdSnoozeMonday"),
+        group: t("cmdGroupActions"),
+        onSelect: () => {
+          void handleSnooze("nextMonday");
+        },
+      },
+      {
+        id: "filter-unread",
+        label: t("cmdFilterUnread"),
+        group: t("cmdGroupFilters"),
+        onSelect: () => {
+          setPlannedOpen(false);
+          setInboxFilters((prev) => ({
+            ...prev,
+            unreadOnly: true,
+            starredOnly: false,
+            localOnly: false,
+            snoozedOnly: false,
+            mailboxRole: null,
+          }));
+        },
+      },
+      {
+        id: "filter-starred",
+        label: t("cmdFilterStarred"),
+        group: t("cmdGroupFilters"),
+        onSelect: () => {
+          setPlannedOpen(false);
+          setInboxFilters((prev) => ({
+            ...prev,
+            starredOnly: true,
+            unreadOnly: false,
+            localOnly: false,
+            snoozedOnly: false,
+            mailboxRole: null,
+          }));
+        },
+      },
+      {
+        id: "filter-clear",
+        label: t("cmdFilterClear"),
+        group: t("cmdGroupFilters"),
+        onSelect: () => {
+          setPlannedOpen(false);
+          setInboxFilters(defaultInboxFilters);
+        },
+      },
+    ];
+
+    for (const account of accounts) {
+      items.push({
+        id: `account-${account.id}`,
+        label: t("cmdAccount", { name: account.name }),
+        group: t("cmdGroupFilters"),
+        keywords: `${account.name} ${account.email}`,
+        onSelect: () => handleSelectAccountFilter(account.id),
+      });
+    }
+
+    if (selectedMessageId) {
+      for (const label of paletteLabels) {
+        items.push({
+          id: `label-${label.id}`,
+          label: t("cmdLabel", { name: label.name }),
+          group: t("cmdGroupActions"),
+          keywords: `label ${label.name}`,
+          onSelect: () => {
+            void api
+              .messagesListLabels(selectedMessageId)
+              .then((current) => {
+                const ids = new Set(current.map((l) => l.id));
+                if (ids.has(label.id)) ids.delete(label.id);
+                else ids.add(label.id);
+                return api.messagesSetLabels({
+                  messageId: selectedMessageId,
+                  labelIds: [...ids],
+                });
+              })
+              .then(() => refreshMailQueries())
+              .catch((err) => setSyncStatus((err as AppError).message));
+          },
+        });
+      }
+    }
+
+    for (const person of palettePeople) {
+      const name = person.name?.trim() || person.email;
+      const to = person.name?.trim()
+        ? `${person.name.trim()} <${person.email}>`
+        : person.email;
+      items.push({
+        id: `person-${person.source}-${person.email}`,
+        label: t("cmdComposeTo", { name }),
+        group: t("cmdGroupPeople"),
+        keywords: `${person.email} ${person.name ?? ""} contact recipient`,
+        hint: person.inContacts ? t("contacts") : person.source,
+        onSelect: () => openComposer({ to }),
+      });
+    }
+
+    return items;
+  }, [
+    accounts,
+    cycleTheme,
+    handleArchive,
+    handleDelete,
+    handleForward,
+    handleMarkSpam,
+    handleSelectAccountFilter,
+    handleSelectDrafts,
+    handleSelectOffline,
+    handleSelectPlanned,
+    handleSnooze,
+    handleSync,
+    handleToggleStar,
+    openComposer,
+    paletteLabels,
+    palettePeople,
+    refreshMailQueries,
+    selectedMessageId,
+    setAccountSetupOpen,
+    setContactsOpen,
+    setSettingsOpen,
+    setSyncStatus,
+    setTriageOpen,
+    t,
+    theme,
+  ]);
 
   if (!desktop) {
     return (
@@ -661,13 +829,7 @@ export function AppShell() {
           onSelectSpam={handleSelectSpam}
           onSelectOffline={handleSelectOffline}
           onSelectPlanned={handleSelectPlanned}
-          onCompose={() => {
-            setReplyTo(null);
-            setEditingDraft(null);
-            setComposerBody("");
-            setComposerSubject(undefined);
-            setComposerOpen(true);
-          }}
+          onCompose={() => openComposer()}
           onSync={handleSync}
           onAddAccount={() => setAccountSetupOpen(true)}
           onToggleTheme={cycleTheme}
@@ -797,10 +959,12 @@ export function AppShell() {
         draft={editingDraft}
         initialBody={composerBody}
         initialSubject={composerSubject}
+        initialTo={composerTo}
         onClose={() => {
           setComposerOpen(false);
           setComposerBody("");
           setComposerSubject(undefined);
+          setComposerTo(undefined);
           setEditingDraft(null);
         }}
         onSent={async () => {
@@ -863,6 +1027,9 @@ export function AppShell() {
         open={commandPaletteOpen}
         items={commandItems}
         onClose={() => setCommandPaletteOpen(false)}
+        placeholder={t("cmdPalettePlaceholder")}
+        emptyLabel={t("cmdPaletteEmpty")}
+        ariaLabel={t("commandHint")}
       />
       <div aria-live="polite" className="sr-only">
         {syncStatus}
