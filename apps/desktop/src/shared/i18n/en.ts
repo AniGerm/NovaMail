@@ -116,6 +116,9 @@ export const en: Translations = {
   spellcheckInstallOk: "{name} installed.",
   spellcheckEnsureHint:
     "German and English ship with the app / desktop launcher; other languages download LibreOffice Hunspell files.",
+  spellcheckOtherLanguages: "More languages",
+  spellcheckOtherLanguagesHint:
+    "Open only when you need extra dictionaries (download, no admin).",
   messageEmpty: "Please enter a message.",
   starMessage: "Star message",
   readingPane: "Reading pane",
@@ -209,6 +212,8 @@ export const en: Translations = {
   labelName: "Label name",
   addLabel: "Add label",
   rules: "Rules",
+  rulesDescription:
+    "Currently: mark newly synced mail as read when the subject matches. Broader filters (sender, folder, labels) exist in the engine but are not exposed in the UI yet.",
   ruleName: "Rule name",
   subjectContains: "Subject contains…",
   addRule: "Add rule",

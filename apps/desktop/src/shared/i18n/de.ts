@@ -114,6 +114,9 @@ export const de = {
   spellcheckInstallOk: "{name} installiert.",
   spellcheckEnsureHint:
     "Deutsch und Englisch werden mit der App bzw. dem Desktop-Launcher mitgeliefert; weitere Sprachen laden LibreOffice-Hunspell-Dateien nach.",
+  spellcheckOtherLanguages: "Weitere Sprachen",
+  spellcheckOtherLanguagesHint:
+    "Nur öffnen, wenn du zusätzliche Wörterbücher brauchst (Download ohne Admin).",
   messageEmpty: "Bitte eine Nachricht eingeben.",
   starMessage: "Als Favorit markieren",
   readingPane: "Lesebereich",
@@ -207,6 +210,8 @@ export const de = {
   labelName: "Labelname",
   addLabel: "Label hinzufügen",
   rules: "Regeln",
+  rulesDescription:
+    "Aktuell: Bei neu empfangenen Mails mit passendem Betreff als gelesen markieren. Erweitern (Absender, Ordner, Labels) ist vorbereitet, in der Oberfläche aber noch nicht freigeschaltet.",
   ruleName: "Regelname",
   subjectContains: "Betreff enthält…",
   addRule: "Regel hinzufügen",

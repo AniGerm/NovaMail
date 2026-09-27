@@ -15,6 +15,8 @@ import type {
 
 const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
 const AI_CPU_MODEL = "qwen2.5:1.5b";
+/** Always-visible spellcheck languages (ship with app / launcher). */
+const PRIMARY_SPELL_CODES = new Set(["de_DE", "en_US"]);
 import { useT } from "@/shared/i18n/useT";
 import type { Locale } from "@/shared/i18n";
 import type { ColorSchemeId } from "@/shared/theme/schemes";
@@ -106,6 +108,21 @@ export function SettingsDialog({
   const [spellDicts, setSpellDicts] = useState<SpellDictionaryDto[]>([]);
   const [spellBusyCode, setSpellBusyCode] = useState<string | null>(null);
   const [spellStatus, setSpellStatus] = useState<string | null>(null);
+  const [otherLangsOpen, setOtherLangsOpen] = useState(false);
+  const primarySpellDicts = spellDicts.filter((d) =>
+    PRIMARY_SPELL_CODES.has(d.code),
+  );
+  const otherSpellDicts = spellDicts.filter(
+    (d) => !PRIMARY_SPELL_CODES.has(d.code),
+  );
+  const shouldRevealOtherLangs =
+    (!PRIMARY_SPELL_CODES.has(spellcheckLang) &&
+      otherSpellDicts.some((d) => d.code === spellcheckLang)) ||
+    (spellBusyCode != null && !PRIMARY_SPELL_CODES.has(spellBusyCode));
+
+  useEffect(() => {
+    if (shouldRevealOtherLangs) setOtherLangsOpen(true);
+  }, [shouldRevealOtherLangs]);
 
   async function refreshSpellcheck() {
     if (!isDesktopShell()) return;
@@ -332,67 +349,75 @@ export function SettingsDialog({
             </Select>
           </label>
           <ul className="grid gap-1.5">
-            {spellDicts.map((dict) => (
-              <li
+            {primarySpellDicts.map((dict) => (
+              <SpellDictRow
                 key={dict.code}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-2 py-1.5"
-              >
-                <span className="min-w-0">
-                  <span className="block font-medium">{dict.name}</span>
-                  <span className="text-xs text-[var(--nova-ink-muted)]">
-                    {dict.installed
-                      ? `${t("spellcheckInstalled")} · ${
-                          dict.source === "system"
-                            ? t("spellcheckSourceSystem")
-                            : t("spellcheckSourceUser")
-                        }`
-                      : t("spellcheckMissing")}
-                  </span>
+                dict={dict}
+                activeCode={spellcheckLang}
+                busyCode={spellBusyCode}
+                onUse={setSpellcheckLang}
+                onInstall={(code) => {
+                  setSpellBusyCode(code);
+                  setSpellStatus(null);
+                  setError(null);
+                  void api
+                    .spellcheckInstall(code)
+                    .then((installed) => {
+                      setSpellcheckLang(installed.code);
+                      setSpellStatus(
+                        t("spellcheckInstallOk", { name: installed.name }),
+                      );
+                      return refreshSpellcheck();
+                    })
+                    .catch((err) => setError((err as AppError).message))
+                    .finally(() => setSpellBusyCode(null));
+                }}
+              />
+            ))}
+          </ul>
+          {otherSpellDicts.length > 0 ? (
+            <details
+              className="rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] open:bg-[color-mix(in_srgb,var(--nova-surface-2)_55%,transparent)]"
+              open={otherLangsOpen}
+              onToggle={(e) => setOtherLangsOpen(e.currentTarget.open)}
+            >
+              <summary className="cursor-pointer select-none px-2 py-2 font-medium marker:text-[var(--nova-ink-muted)]">
+                {t("spellcheckOtherLanguages")}
+                <span className="mt-0.5 block text-xs font-normal text-[var(--nova-ink-muted)]">
+                  {t("spellcheckOtherLanguagesHint")}
                 </span>
-                {dict.installed ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={spellcheckLang === dict.code}
-                    onClick={() => setSpellcheckLang(dict.code)}
-                  >
-                    {spellcheckLang === dict.code
-                      ? t("spellcheckInUse")
-                      : t("spellcheckUse")}
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="nova-file-btn"
-                    variant="secondary"
-                    disabled={spellBusyCode === dict.code}
-                    onClick={() => {
-                      setSpellBusyCode(dict.code);
+              </summary>
+              <ul className="grid gap-1.5 px-2 pb-2">
+                {otherSpellDicts.map((dict) => (
+                  <SpellDictRow
+                    key={dict.code}
+                    dict={dict}
+                    activeCode={spellcheckLang}
+                    busyCode={spellBusyCode}
+                    onUse={setSpellcheckLang}
+                    onInstall={(code) => {
+                      setSpellBusyCode(code);
                       setSpellStatus(null);
                       setError(null);
                       void api
-                        .spellcheckInstall(dict.code)
+                        .spellcheckInstall(code)
                         .then((installed) => {
                           setSpellcheckLang(installed.code);
                           setSpellStatus(
-                            t("spellcheckInstallOk", { name: installed.name }),
+                            t("spellcheckInstallOk", {
+                              name: installed.name,
+                            }),
                           );
                           return refreshSpellcheck();
                         })
                         .catch((err) => setError((err as AppError).message))
                         .finally(() => setSpellBusyCode(null));
                     }}
-                  >
-                    {spellBusyCode === dict.code
-                      ? t("spellcheckInstalling")
-                      : t("spellcheckInstall")}
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+                  />
+                ))}
+              </ul>
+            </details>
+          ) : null}
           <p className="text-xs text-[var(--nova-ink-muted)]">
             {t("spellcheckEnsureHint")}
           </p>
@@ -856,6 +881,9 @@ export function SettingsDialog({
 
         <section className="grid gap-2">
           <h3 className="font-medium">{t("rules")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("rulesDescription")}
+          </p>
           <Input
             placeholder={t("ruleName")}
             value={ruleName}
@@ -905,5 +933,63 @@ export function SettingsDialog({
         <Button onClick={onClose}>{t("done")}</Button>
       </DialogActions>
     </Dialog>
+  );
+}
+
+function SpellDictRow({
+  dict,
+  activeCode,
+  busyCode,
+  onUse,
+  onInstall,
+}: {
+  dict: SpellDictionaryDto;
+  activeCode: string;
+  busyCode: string | null;
+  onUse: (code: string) => void;
+  onInstall: (code: string) => void;
+}) {
+  const t = useT();
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-2 py-1.5">
+      <span className="min-w-0">
+        <span className="block font-medium">{dict.name}</span>
+        <span className="text-xs text-[var(--nova-ink-muted)]">
+          {dict.installed
+            ? `${t("spellcheckInstalled")} · ${
+                dict.source === "system"
+                  ? t("spellcheckSourceSystem")
+                  : t("spellcheckSourceUser")
+              }`
+            : t("spellcheckMissing")}
+        </span>
+      </span>
+      {dict.installed ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={activeCode === dict.code}
+          onClick={() => onUse(dict.code)}
+        >
+          {activeCode === dict.code
+            ? t("spellcheckInUse")
+            : t("spellcheckUse")}
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          className="nova-file-btn"
+          variant="secondary"
+          disabled={busyCode === dict.code}
+          onClick={() => onInstall(dict.code)}
+        >
+          {busyCode === dict.code
+            ? t("spellcheckInstalling")
+            : t("spellcheckInstall")}
+        </Button>
+      )}
+    </li>
   );
 }
