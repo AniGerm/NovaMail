@@ -129,11 +129,11 @@ pub async fn messages_send(
 }
 
 #[tauri::command]
-pub fn messages_save_draft(
+pub async fn messages_save_draft(
     state: State<'_, DesktopState>,
     request: SaveDraftRequest,
 ) -> Result<MessageDetailDto, AppError> {
-    state.app.save_draft(request).map_err(map_err)
+    state.app.save_draft(request).await.map_err(map_err)
 }
 
 #[tauri::command]

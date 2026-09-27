@@ -210,6 +210,7 @@ export function AppShell() {
     if (!selectedMessageId || !desktop) return;
     const draft = await api.messagesForwardDraft(selectedMessageId);
     setReplyTo(null);
+    setEditingDraft(null);
     setComposerSubject(draft.subject);
     setComposerBody(draft.bodyText);
     setComposerOpen(true);

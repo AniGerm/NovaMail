@@ -285,16 +285,37 @@ impl Database {
     }
 
     /// Ensure a local mailbox exists (e.g. Drafts) and return it.
+    ///
+    /// When a mailbox already exists for `role` but under a different name,
+    /// prefers the provided `name` (typically the IMAP server folder name).
     pub fn ensure_mailbox(
         &self,
         account_id: Uuid,
         name: &str,
         role: &str,
     ) -> DbResult<MailboxRecord> {
-        if let Some(existing) = self.find_mailbox_by_role(account_id, role)? {
+        if let Some(existing) = self.find_mailbox_by_name(account_id, name)? {
+            if existing.role.as_deref() != Some(role) {
+                let conn = self.conn.lock();
+                conn.execute(
+                    "UPDATE mailboxes SET role = ?2 WHERE id = ?1",
+                    params![existing.id.to_string(), role],
+                )?;
+                drop(conn);
+                return self.get_mailbox(existing.id);
+            }
             return Ok(existing);
         }
-        if let Some(existing) = self.find_mailbox_by_name(account_id, name)? {
+        if let Some(existing) = self.find_mailbox_by_role(account_id, role)? {
+            if existing.name != name {
+                let conn = self.conn.lock();
+                conn.execute(
+                    "UPDATE mailboxes SET name = ?2 WHERE id = ?1",
+                    params![existing.id.to_string(), name],
+                )?;
+                drop(conn);
+                return self.get_mailbox(existing.id);
+            }
             return Ok(existing);
         }
         let record = MailboxRecord {
@@ -309,6 +330,18 @@ impl Database {
         };
         self.upsert_mailbox(&record)?;
         Ok(record)
+    }
+
+    pub fn set_message_mailbox(&self, message_id: Uuid, mailbox_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE messages SET mailbox_id = ?2 WHERE id = ?1",
+            params![message_id.to_string(), mailbox_id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
     }
 
     pub fn update_message_draft(
@@ -372,6 +405,30 @@ impl Database {
         )
         .optional()
         .map_err(Into::into)
+    }
+
+    pub fn set_message_uid(&self, message_id: Uuid, uid: Option<u32>) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE messages SET uid = ?2 WHERE id = ?1",
+            params![message_id.to_string(), uid.map(|u| u as i64)],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn set_message_rfc_id(&self, message_id: Uuid, rfc_message_id: &str) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE messages SET message_id = ?2 WHERE id = ?1",
+            params![message_id.to_string(), rfc_message_id],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
     }
 
     pub fn get_message_uid(&self, message_id: Uuid) -> DbResult<Option<u32>> {

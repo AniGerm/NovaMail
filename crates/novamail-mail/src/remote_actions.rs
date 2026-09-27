@@ -1,11 +1,13 @@
-//! Push local flag / archive / delete actions to the IMAP server.
+//! Push local flag / archive / delete / draft actions to the IMAP server.
 
 use futures::TryStreamExt;
 use novamail_crypto::SecretStore;
-use novamail_db::Database;
+use novamail_db::{AccountRecord, Database};
+use novamail_ipc::SaveDraftRequest;
 use uuid::Uuid;
 
 use crate::credentials::ensure_fresh_credentials;
+use crate::draft_mime::build_draft_rfc822;
 use crate::imap_client::LiveImap;
 use crate::{MailError, MailResult};
 
@@ -128,6 +130,93 @@ fn load_locator(db: &Database, message_id: Uuid) -> MailResult<Option<ImapLocato
         mailbox_name: mailbox.name,
         uid,
     }))
+}
+
+/// Append a draft to the account's IMAP Drafts folder (`\Draft \Seen`).
+///
+/// Returns the server UID when discoverable via Message-ID search.
+pub async fn save_draft_remote(
+    db: &Database,
+    secrets: &SecretStore,
+    account: &AccountRecord,
+    request: &SaveDraftRequest,
+    local_message_id: Uuid,
+    rfc_message_id: &str,
+) -> MailResult<Option<u32>> {
+    let credentials = ensure_fresh_credentials(account, secrets).await?;
+    let mut imap = LiveImap::connect(account, &credentials).await?;
+
+    // Replace previous server copy when updating an already-synced draft.
+    if let Some(existing_id) = request.id {
+        if let Some(locator) = load_locator(db, existing_id)? {
+            if let Err(err) = imap.select(&locator.mailbox_name).await {
+                tracing::warn!(error = %err, "could not select old draft mailbox");
+            } else {
+                let uid = locator.uid.to_string();
+                let _ = imap.uid_store(&uid, "+FLAGS (\\Deleted)").await;
+                let _ = imap.uid_expunge(&uid).await;
+            }
+        }
+    }
+
+    let drafts_name = resolve_drafts_mailbox(&mut imap, db, account.id).await?;
+    let raw = build_draft_rfc822(account, request, rfc_message_id)?;
+    imap.append(&drafts_name, Some(r"(\Draft \Seen)"), &raw)
+        .await?;
+
+    // Best-effort: resolve the new UID so later edits/deletes hit the server copy.
+    let mut new_uid = None;
+    if imap.select(&drafts_name).await.is_ok() {
+        let bare = rfc_message_id.trim_matches(['<', '>']);
+        let query = format!("HEADER Message-ID {bare}");
+        if let Ok(uids) = imap.uid_search(&query).await {
+            new_uid = uids.into_iter().max();
+        }
+        if new_uid.is_none() {
+            let query = format!("HEADER Message-ID <{bare}>");
+            if let Ok(uids) = imap.uid_search(&query).await {
+                new_uid = uids.into_iter().max();
+            }
+        }
+    }
+
+    // Keep local row in the IMAP Drafts mailbox with UID + Message-ID.
+    if let Ok(mb) = db.ensure_mailbox(account.id, &drafts_name, "drafts") {
+        let _ = db.set_message_mailbox(local_message_id, mb.id);
+        let _ = db.set_message_uid(local_message_id, new_uid);
+        let _ = db.set_message_rfc_id(local_message_id, rfc_message_id);
+        let _ = db.refresh_mailbox_counts(mb.id);
+    }
+
+    let _ = imap.logout().await;
+    Ok(new_uid)
+}
+
+async fn resolve_drafts_mailbox(
+    imap: &mut LiveImap,
+    db: &Database,
+    account_id: Uuid,
+) -> MailResult<String> {
+    // Prefer the live IMAP LIST so we hit Entwürfe / INBOX.Drafts / etc.
+    if let Ok(listed) = imap.list_mailboxes().await {
+        for (name, role) in &listed {
+            if role.as_deref() == Some("drafts") {
+                let _ = db.ensure_mailbox(account_id, name, "drafts");
+                return Ok(name.clone());
+            }
+        }
+    }
+
+    if let Some(existing) = db.find_mailbox_by_role(account_id, "drafts")? {
+        return Ok(existing.name);
+    }
+
+    // Create a standard Drafts folder when the provider has none yet.
+    if let Err(err) = imap.create_mailbox("Drafts").await {
+        tracing::warn!(error = %err, "CREATE Drafts failed; trying APPEND anyway");
+    }
+    let _ = db.ensure_mailbox(account_id, "Drafts", "drafts");
+    Ok("Drafts".into())
 }
 
 /// Drain a uid_store / uid_expunge stream so the command completes.

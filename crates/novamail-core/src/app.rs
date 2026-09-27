@@ -33,8 +33,8 @@ use novamail_ipc::{
     UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    archive_remote, delete_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
-    SyncEngine,
+    archive_remote, delete_remote, save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client,
+    SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -461,12 +461,17 @@ impl AppState {
         let draft_id = request.draft_id;
         SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
         if let Some(id) = draft_id {
+            if !account.imap_host.trim().is_empty() {
+                if let Err(err) = delete_remote(&self.db, &self.secrets, id).await {
+                    tracing::warn!(error = %err, "IMAP draft delete after send failed");
+                }
+            }
             let _ = self.db.delete_message(id);
         }
         Ok(())
     }
 
-    pub fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
+    pub async fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
         let account = self.db.get_account(request.account_id)?;
         let drafts = self.db.ensure_mailbox(request.account_id, "Drafts", "drafts")?;
         let now = chrono::Utc::now().timestamp();
@@ -486,7 +491,12 @@ impl AppState {
             email: account.email.clone(),
         };
 
-        let message_id = if let Some(existing_id) = request.id {
+        let (message_id, rfc_message_id) = if let Some(existing_id) = request.id {
+            let existing_rfc = self
+                .db
+                .get_message(existing_id)?
+                .message_id
+                .unwrap_or_else(|| format!("<{existing_id}@novamail.local>"));
             self.db.update_message_draft(
                 existing_id,
                 &subject,
@@ -513,10 +523,11 @@ impl AppState {
                     snippet: snippet.clone(),
                 });
             }
-            existing_id
+            (existing_id, existing_rfc)
         } else {
             let thread_id = Uuid::new_v4();
             let message_id = Uuid::new_v4();
+            let rfc_message_id = format!("<{message_id}@novamail.local>");
             self.db.upsert_thread(&novamail_db::models::ThreadRecord {
                 id: thread_id,
                 account_id: request.account_id,
@@ -537,7 +548,7 @@ impl AppState {
                 mailbox_id: drafts.id,
                 thread_id,
                 uid: None,
-                message_id: None,
+                message_id: Some(rfc_message_id.clone()),
                 in_reply_to: request.in_reply_to.clone(),
                 references: request.references.clone(),
                 subject: subject.clone(),
@@ -552,8 +563,26 @@ impl AppState {
                 has_attachments: false,
                 raw_path: None,
             })?;
-            message_id
+            (message_id, rfc_message_id)
         };
+
+        let _ = self.db.set_message_rfc_id(message_id, &rfc_message_id);
+
+        // IMAP: APPEND into the server Drafts / Entwürfe folder.
+        if !account.imap_host.trim().is_empty() {
+            if let Err(err) = save_draft_remote(
+                &self.db,
+                &self.secrets,
+                &account,
+                &request,
+                message_id,
+                &rfc_message_id,
+            )
+            .await
+            {
+                tracing::warn!(error = %err, "IMAP draft APPEND failed; local draft kept");
+            }
+        }
 
         Ok(self.get_message(message_id)?)
     }

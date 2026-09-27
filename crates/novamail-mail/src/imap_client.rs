@@ -83,6 +83,32 @@ impl LiveImap {
         }
     }
 
+    pub async fn append(
+        &mut self,
+        mailbox: &str,
+        flags: Option<&str>,
+        content: &[u8],
+    ) -> MailResult<()> {
+        match self {
+            LiveImap::Tls(s) => s.append(mailbox, flags, content).await,
+            LiveImap::Plain(s) => s.append(mailbox, flags, content).await,
+        }
+    }
+
+    pub async fn create_mailbox(&mut self, mailbox: &str) -> MailResult<()> {
+        match self {
+            LiveImap::Tls(s) => s.create_mailbox(mailbox).await,
+            LiveImap::Plain(s) => s.create_mailbox(mailbox).await,
+        }
+    }
+
+    pub async fn uid_search(&mut self, query: &str) -> MailResult<Vec<u32>> {
+        match self {
+            LiveImap::Tls(s) => s.uid_search(query).await,
+            LiveImap::Plain(s) => s.uid_search(query).await,
+        }
+    }
+
     pub async fn logout(self) -> MailResult<()> {
         match self {
             LiveImap::Tls(s) => s.logout().await,
@@ -185,6 +211,34 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
         crate::remote_actions::drain_fetches(stream).await
     }
 
+    pub async fn append(
+        &mut self,
+        mailbox: &str,
+        flags: Option<&str>,
+        content: &[u8],
+    ) -> MailResult<()> {
+        self.session
+            .append(mailbox, flags, None, content)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))
+    }
+
+    pub async fn create_mailbox(&mut self, mailbox: &str) -> MailResult<()> {
+        self.session
+            .create(mailbox)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))
+    }
+
+    pub async fn uid_search(&mut self, query: &str) -> MailResult<Vec<u32>> {
+        let set = self
+            .session
+            .uid_search(query)
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))?;
+        Ok(set.into_iter().collect())
+    }
+
     pub async fn logout(mut self) -> MailResult<()> {
         self.session
             .logout()
@@ -284,7 +338,7 @@ fn infer_role(name: &str) -> Option<String> {
         Some("inbox".into())
     } else if lower.contains("sent") {
         Some("sent".into())
-    } else if lower.contains("draft") {
+    } else if lower.contains("draft") || lower.contains("entwurf") {
         Some("drafts".into())
     } else if lower.contains("trash") || lower.contains("deleted") {
         Some("trash".into())
