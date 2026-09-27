@@ -14,7 +14,7 @@ import type {
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 
-type ViewMode = "day" | "week";
+type ViewMode = "month" | "week" | "day";
 type PanelTab = "schedule" | "inbox" | "manage";
 
 const REMINDER_OPTIONS = [0, 5, 15, 30, 60] as const;
@@ -42,7 +42,8 @@ interface EventDraft {
 export function CalendarPanel() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
-  const [view, setView] = useState<ViewMode>("week");
+  const loc = locale === "de" ? "de-DE" : "en-US";
+  const [view, setView] = useState<ViewMode>("month");
   const [tab, setTab] = useState<PanelTab>("schedule");
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [events, setEvents] = useState<CalendarEventDto[]>([]);
@@ -64,10 +65,21 @@ export function CalendarPanel() {
   const [saving, setSaving] = useState(false);
 
   const range = useMemo(() => {
-    const from = Math.floor(anchor / 1000);
-    const days = view === "day" ? 1 : 7;
-    const to = from + days * 86400 - 1;
-    return { from, to, days };
+    if (view === "month") {
+      const monthStart = startOfMonth(anchor);
+      const gridStart = startOfWeekMonday(monthStart);
+      const from = Math.floor(gridStart / 1000);
+      const to = from + 42 * 86400 - 1;
+      return { from, to, days: 42, gridStart };
+    }
+    if (view === "week") {
+      const weekStart = startOfWeekMonday(anchor);
+      const from = Math.floor(weekStart / 1000);
+      return { from, to: from + 7 * 86400 - 1, days: 7, gridStart: weekStart };
+    }
+    const day = startOfDay(anchor);
+    const from = Math.floor(day / 1000);
+    return { from, to: from + 86399, days: 1, gridStart: day };
   }, [anchor, view]);
 
   const defaultCollection = useMemo(
@@ -99,14 +111,46 @@ export function CalendarPanel() {
     void refresh();
   }, [refresh]);
 
+  const periodTitle = useMemo(() => {
+    if (view === "month") {
+      return new Date(anchor).toLocaleDateString(loc, {
+        month: "long",
+        year: "numeric",
+      });
+    }
+    if (view === "week") {
+      const end = range.gridStart + 6 * 86400000;
+      const a = new Date(range.gridStart).toLocaleDateString(loc, {
+        day: "numeric",
+        month: "short",
+      });
+      const b = new Date(end).toLocaleDateString(loc, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+      return `${a} – ${b}`;
+    }
+    return new Date(anchor).toLocaleDateString(loc, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  }, [anchor, loc, range.gridStart, view]);
+
   const days = useMemo(() => {
     return Array.from({ length: range.days }, (_, i) => {
-      const start = anchor + i * 86400000;
+      const start = range.gridStart + i * 86400000;
       const dayStart = Math.floor(start / 1000);
       const dayEnd = dayStart + 86399;
       return {
         start,
         dayStart,
+        inMonth:
+          view !== "month" ||
+          new Date(start).getMonth() === new Date(anchor).getMonth(),
+        isToday: startOfDay(Date.now()) === startOfDay(start),
         events: events.filter(
           (ev) =>
             ev.startsAt <= dayEnd &&
@@ -114,7 +158,17 @@ export function CalendarPanel() {
         ),
       };
     });
-  }, [anchor, events, range.days]);
+  }, [anchor, events, range.days, range.gridStart, view]);
+
+  const weekdayLabels = t("calendarWeekdays").split(",");
+
+  const shiftPeriod = (dir: -1 | 1) => {
+    const d = new Date(anchor);
+    if (view === "month") d.setMonth(d.getMonth() + dir);
+    else if (view === "week") d.setDate(d.getDate() + dir * 7);
+    else d.setDate(d.getDate() + dir);
+    setAnchor(startOfDay(d.getTime()));
+  };
 
   const openNewEvent = (dayStartMs?: number) => {
     const base = dayStartMs ?? Date.now();
@@ -201,172 +255,272 @@ export function CalendarPanel() {
 
   const hourSlots = useMemo(() => Array.from({ length: 14 }, (_, i) => i + 7), []);
 
+  const segmentBtn = (active: boolean) =>
+    active
+      ? "rounded-[calc(var(--nova-radius-md)-2px)] bg-[var(--nova-surface)] px-3 py-1.5 text-sm font-medium text-[var(--nova-ink)] shadow-sm"
+      : "px-3 py-1.5 text-sm text-[var(--nova-ink-muted)] hover:text-[var(--nova-ink)]";
+
   return (
     <section className="relative flex h-full flex-col overflow-hidden">
-      <div className="nova-fade-in flex flex-wrap items-end justify-between gap-3 border-b border-[var(--nova-border)] px-6 py-4">
-        <div>
-          <h1 className="font-[family-name:var(--nova-font-display)] text-2xl tracking-tight">
-            {t("calendar")}
-          </h1>
-          <p className="mt-0.5 text-sm text-[var(--nova-ink-muted)]">
-            {t("calendarDescription")}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-0.5">
-            {(
-              [
-                ["schedule", t("calendar")],
-                ["inbox", `${t("calendarInbox")}${invites.length ? ` (${invites.length})` : ""}`],
-                ["manage", t("calendarManage")],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setTab(key)}
-                className={
-                  tab === key
-                    ? "rounded-[calc(var(--nova-radius-md)-2px)] bg-[var(--nova-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--nova-accent)]"
-                    : "px-3 py-1.5 text-sm text-[var(--nova-ink-muted)] hover:text-[var(--nova-ink)]"
-                }
-              >
-                {label}
-              </button>
-            ))}
+      {/* Hero header — period name is the brand signal, not a second "Kalender" */}
+      <header className="nova-fade-in border-b border-[var(--nova-border)] px-6 pb-4 pt-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--nova-ink-muted)]">
+              {t("calendar")}
+            </p>
+            <h1 className="mt-1 font-[family-name:var(--nova-font-display)] text-3xl tracking-tight capitalize">
+              {periodTitle}
+            </h1>
           </div>
-          {tab === "schedule" ? (
-            <>
-              <Button size="sm" variant="secondary" onClick={() => setView("day")}>
-                {t("calendarDay")}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setView("week")}>
-                {t("calendarWeek")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setAnchor(startOfDay(Date.now()))}
-              >
-                {t("calendarToday")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setAnchor((a) => a - range.days * 86400000)}
+          <div className="flex flex-wrap items-center gap-2">
+            <nav
+              aria-label={t("calendar")}
+              className="flex rounded-[var(--nova-radius-md)] bg-[color-mix(in_srgb,var(--nova-surface-2)_80%,transparent)] p-0.5"
+            >
+              {(
+                [
+                  ["schedule", t("calendarSchedule")],
+                  [
+                    "inbox",
+                    invites.length
+                      ? `${t("calendarInbox")} · ${invites.length}`
+                      : t("calendarInbox"),
+                  ],
+                  ["manage", t("calendarManage")],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={segmentBtn(tab === key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            <Button size="sm" onClick={() => openNewEvent()}>
+              {t("calendarNewEvent")}
+            </Button>
+          </div>
+        </div>
+
+        {tab === "schedule" ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label={t("calendarPrev")}
+                onClick={() => shiftPeriod(-1)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--nova-ink-muted)] transition-colors hover:bg-[var(--nova-accent-soft)] hover:text-[var(--nova-ink)]"
               >
                 ←
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setAnchor((a) => a + range.days * 86400000)}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnchor(startOfDay(Date.now()))}
+                className="h-9 rounded-full px-3 text-sm font-medium text-[var(--nova-accent)] transition-colors hover:bg-[var(--nova-accent-soft)]"
+              >
+                {t("calendarToday")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("calendarNext")}
+                onClick={() => shiftPeriod(1)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--nova-ink-muted)] transition-colors hover:bg-[var(--nova-accent-soft)] hover:text-[var(--nova-ink)]"
               >
                 →
-              </Button>
-              <Button size="sm" onClick={() => openNewEvent()}>
-                + {t("calendarNewEvent")}
-              </Button>
-            </>
-          ) : null}
-        </div>
-      </div>
+              </button>
+            </div>
+            <div className="flex rounded-[var(--nova-radius-md)] bg-[color-mix(in_srgb,var(--nova-surface-2)_80%,transparent)] p-0.5">
+              {(
+                [
+                  ["month", t("calendarMonth")],
+                  ["week", t("calendarWeek")],
+                  ["day", t("calendarDay")],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setView(key);
+                    if (key === "week") {
+                      setAnchor(startOfWeekMonday(anchor));
+                    }
+                  }}
+                  className={segmentBtn(view === key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </header>
 
       {(error || status) && (
         <p
           className={`px-6 py-2 text-sm ${error ? "text-[var(--nova-danger)]" : "text-[var(--nova-ink-muted)]"}`}
+          role="status"
         >
           {error ?? status}
         </p>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         {tab === "schedule" ? (
-          <div className="nova-fade-in space-y-6">
-            {view === "day" ? (
-              <div className="relative rounded-[var(--nova-radius-md)] border border-[var(--nova-border)]">
-                <div className="border-b border-[var(--nova-border)] px-4 py-2 text-sm font-medium">
-                  {formatDayLabel(days[0]?.start ?? anchor, locale)}
-                </div>
-                <div className="relative">
-                  {(() => {
-                    const dayStart =
-                      days[0]?.dayStart ?? Math.floor(anchor / 1000);
-                    const nowSec = Math.floor(Date.now() / 1000);
-                    const gridStart = dayStart + hourSlots[0]! * 3600;
-                    const gridEnd =
-                      dayStart + (hourSlots[hourSlots.length - 1]! + 1) * 3600;
-                    const showNow =
-                      nowSec >= gridStart &&
-                      nowSec < gridEnd &&
-                      startOfDay(Date.now()) ===
-                        startOfDay((days[0]?.start ?? anchor));
-                    if (!showNow) return null;
-                    const slotH = 52;
-                    const minutesFromGrid =
-                      (nowSec - gridStart) / 60;
-                    const top = (minutesFromGrid / 60) * slotH;
-                    return (
+          <div
+            key={`${view}-${range.from}`}
+            className="nova-fade-in grid gap-6 xl:grid-cols-[1fr_240px]"
+          >
+            <div className="min-w-0">
+              {view === "month" ? (
+                <div className="overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]">
+                  <div className="grid grid-cols-7 border-b border-[var(--nova-border)]">
+                    {weekdayLabels.map((d) => (
                       <div
-                        className="pointer-events-none absolute left-14 right-0 z-10 flex items-center"
-                        style={{ top }}
-                        aria-hidden
+                        key={d}
+                        className="px-2 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider text-[var(--nova-ink-muted)]"
                       >
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-danger)]" />
-                        <span className="h-px flex-1 bg-[var(--nova-danger)]" />
+                        {d}
                       </div>
-                    );
-                  })()}
-                  {hourSlots.map((hour) => {
-                    const slotStart =
-                      (days[0]?.dayStart ?? Math.floor(anchor / 1000)) +
-                      hour * 3600;
-                    const slotEnd = slotStart + 3600;
-                    const slotEvents = (days[0]?.events ?? []).filter(
-                      (ev) =>
-                        !ev.allDay &&
-                        ev.startsAt < slotEnd &&
-                        (ev.endsAt ?? ev.startsAt + 3600) > slotStart,
-                    );
-                    return (
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7">
+                    {days.map((day) => {
+                      const dateNum = new Date(day.start).getDate();
+                      return (
+                        <button
+                          key={day.start}
+                          type="button"
+                          onClick={() => openNewEvent(day.start)}
+                          className={`min-h-[104px] border-b border-r border-[var(--nova-border)] p-1.5 text-left transition-colors last:border-r-0 hover:bg-[var(--nova-accent-soft)] ${
+                            day.inMonth ? "" : "bg-[color-mix(in_srgb,var(--nova-surface-2)_45%,transparent)]"
+                          }`}
+                        >
+                          <span
+                            className={`mb-1 inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-sm ${
+                              day.isToday
+                                ? "bg-[var(--nova-accent)] font-semibold text-white"
+                                : day.inMonth
+                                  ? "font-medium text-[var(--nova-ink)]"
+                                  : "text-[var(--nova-ink-muted)]"
+                            }`}
+                          >
+                            {dateNum}
+                          </span>
+                          <ul className="space-y-0.5">
+                            {day.events.slice(0, 3).map((ev) => (
+                              <li key={ev.id}>
+                                <span
+                                  role="link"
+                                  tabIndex={0}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditEvent(ev);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.stopPropagation();
+                                      openEditEvent(ev);
+                                    }
+                                  }}
+                                  className="block truncate rounded px-1 py-0.5 text-[11px] font-medium text-white"
+                                  style={{
+                                    background: ev.color ?? "var(--nova-accent)",
+                                  }}
+                                >
+                                  {!ev.allDay
+                                    ? `${formatTime(ev.startsAt, locale)} `
+                                    : ""}
+                                  {ev.title}
+                                </span>
+                              </li>
+                            ))}
+                            {day.events.length > 3 ? (
+                              <li className="px-1 text-[10px] text-[var(--nova-ink-muted)]">
+                                +{day.events.length - 3}
+                              </li>
+                            ) : null}
+                          </ul>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {view === "week" ? (
+                <div className="overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]">
+                  <div className="grid grid-cols-7">
+                    {days.map((day) => (
                       <div
-                        key={hour}
-                        className="grid min-h-[52px] grid-cols-[56px_1fr] border-b border-[var(--nova-border)] last:border-0"
+                        key={day.start}
+                        className="min-h-[280px] border-r border-[var(--nova-border)] last:border-r-0"
                       >
                         <button
                           type="button"
-                          className="px-2 py-1 text-right text-xs text-[var(--nova-ink-muted)] hover:text-[var(--nova-accent)]"
-                          onClick={() =>
-                            openNewEvent(
-                              ((days[0]?.dayStart ?? 0) + hour * 3600) * 1000,
-                            )
-                          }
+                          onClick={() => {
+                            setView("day");
+                            setAnchor(startOfDay(day.start));
+                          }}
+                          className="flex w-full flex-col items-center gap-0.5 border-b border-[var(--nova-border)] px-2 py-3 transition-colors hover:bg-[var(--nova-accent-soft)]"
                         >
-                          {String(hour).padStart(2, "0")}:00
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--nova-ink-muted)]">
+                            {new Date(day.start).toLocaleDateString(loc, {
+                              weekday: "short",
+                            })}
+                          </span>
+                          <span
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm ${
+                              day.isToday
+                                ? "bg-[var(--nova-accent)] font-semibold text-white"
+                                : "font-medium"
+                            }`}
+                          >
+                            {new Date(day.start).getDate()}
+                          </span>
                         </button>
-                        <div className="relative flex flex-col gap-1 px-2 py-1">
-                          {slotEvents.map((ev) => (
-                            <button
-                              key={ev.id}
-                              type="button"
-                              onClick={() => openEditEvent(ev)}
-                              className="rounded-md px-2 py-1 text-left text-sm text-white transition-transform hover:scale-[1.01]"
-                              style={{
-                                background: ev.color ?? "var(--nova-accent)",
-                              }}
-                            >
-                              <span className="font-medium">{ev.title}</span>
-                              {ev.location ? (
-                                <span className="ml-2 opacity-90">
-                                  · {ev.location}
-                                </span>
-                              ) : null}
-                            </button>
+                        <ul className="space-y-1 p-1.5">
+                          {day.events.map((ev) => (
+                            <li key={ev.id}>
+                              <button
+                                type="button"
+                                onClick={() => openEditEvent(ev)}
+                                className="w-full rounded-md px-1.5 py-1 text-left text-xs text-white transition-transform hover:scale-[1.02]"
+                                style={{
+                                  background: ev.color ?? "var(--nova-accent)",
+                                }}
+                              >
+                                {!ev.allDay ? (
+                                  <span className="opacity-90">
+                                    {formatTime(ev.startsAt, locale)}{" "}
+                                  </span>
+                                ) : null}
+                                {ev.title}
+                              </button>
+                            </li>
                           ))}
-                        </div>
+                          <li>
+                            <button
+                              type="button"
+                              onClick={() => openNewEvent(day.start)}
+                              className="w-full rounded-md px-1.5 py-1 text-left text-xs text-[var(--nova-ink-muted)] hover:bg-[var(--nova-accent-soft)] hover:text-[var(--nova-accent)]"
+                            >
+                              +
+                            </button>
+                          </li>
+                        </ul>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {view === "day" ? (
+                <div className="overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]">
                   {(days[0]?.events ?? [])
                     .filter((ev) => ev.allDay)
                     .map((ev) => (
@@ -374,145 +528,222 @@ export function CalendarPanel() {
                         key={ev.id}
                         type="button"
                         onClick={() => openEditEvent(ev)}
-                        className="m-2 block w-[calc(100%-1rem)] rounded-md px-2 py-1 text-left text-sm text-white"
+                        className="mx-3 mt-3 block w-[calc(100%-1.5rem)] rounded-md px-3 py-1.5 text-left text-sm text-white"
                         style={{ background: ev.color ?? "var(--nova-accent)" }}
                       >
                         {ev.title}
+                        {ev.location ? ` · ${ev.location}` : ""}
                       </button>
                     ))}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={`grid gap-2 ${range.days === 7 ? "md:grid-cols-7" : "grid-cols-1"}`}
-              >
-                {days.map((day) => (
-                  <div
-                    key={day.start}
-                    className="min-h-[140px] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-2"
-                  >
-                    <button
-                      type="button"
-                      className="mb-2 w-full text-left text-xs font-medium text-[var(--nova-ink-muted)] hover:text-[var(--nova-accent)]"
-                      onClick={() => openNewEvent(day.start)}
-                    >
-                      {formatDayLabel(day.start, locale)}
-                    </button>
-                    <ul className="space-y-1">
-                      {day.events.map((ev) => (
-                        <li key={ev.id}>
+                  <div className="relative mt-2">
+                    {(() => {
+                      const dayStart =
+                        days[0]?.dayStart ?? Math.floor(anchor / 1000);
+                      const nowSec = Math.floor(Date.now() / 1000);
+                      const gridStart = dayStart + hourSlots[0]! * 3600;
+                      const gridEnd =
+                        dayStart +
+                        (hourSlots[hourSlots.length - 1]! + 1) * 3600;
+                      const showNow =
+                        nowSec >= gridStart &&
+                        nowSec < gridEnd &&
+                        startOfDay(Date.now()) === startOfDay(anchor);
+                      if (!showNow) return null;
+                      const top = ((nowSec - gridStart) / 3600) * 52;
+                      return (
+                        <div
+                          className="pointer-events-none absolute left-14 right-3 z-10 flex items-center"
+                          style={{ top }}
+                          aria-hidden
+                        >
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--nova-danger)]" />
+                          <span className="h-px flex-1 bg-[var(--nova-danger)]" />
+                        </div>
+                      );
+                    })()}
+                    {hourSlots.map((hour) => {
+                      const slotStart =
+                        (days[0]?.dayStart ?? Math.floor(anchor / 1000)) +
+                        hour * 3600;
+                      const slotEnd = slotStart + 3600;
+                      const slotEvents = (days[0]?.events ?? []).filter(
+                        (ev) =>
+                          !ev.allDay &&
+                          ev.startsAt < slotEnd &&
+                          (ev.endsAt ?? ev.startsAt + 3600) > slotStart,
+                      );
+                      return (
+                        <div
+                          key={hour}
+                          className="grid min-h-[52px] grid-cols-[56px_1fr] border-b border-[var(--nova-border)] last:border-0"
+                        >
                           <button
                             type="button"
-                            onClick={() => openEditEvent(ev)}
-                            className="flex w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left text-xs transition-colors hover:bg-[var(--nova-accent-soft)]"
+                            className="px-2 py-1 text-right text-xs tabular-nums text-[var(--nova-ink-muted)] hover:text-[var(--nova-accent)]"
+                            onClick={() =>
+                              openNewEvent(
+                                ((days[0]?.dayStart ?? 0) + hour * 3600) *
+                                  1000,
+                              )
+                            }
                           >
-                            <span
-                              className="mt-1 h-2 w-2 shrink-0 rounded-full"
-                              style={{
-                                background: ev.color ?? "var(--nova-accent)",
-                              }}
-                            />
-                            <span>
-                              {!ev.allDay ? (
-                                <span className="text-[var(--nova-ink-muted)]">
-                                  {formatTime(ev.startsAt, locale)}{" "}
-                                </span>
-                              ) : null}
-                              {ev.title}
-                            </span>
+                            {String(hour).padStart(2, "0")}:00
                           </button>
-                        </li>
-                      ))}
-                    </ul>
+                          <div className="flex flex-col gap-1 px-2 py-1">
+                            {slotEvents.map((ev) => (
+                              <button
+                                key={ev.id}
+                                type="button"
+                                onClick={() => openEditEvent(ev)}
+                                className="rounded-md px-2.5 py-1.5 text-left text-sm text-white transition-transform hover:scale-[1.01]"
+                                style={{
+                                  background: ev.color ?? "var(--nova-accent)",
+                                }}
+                              >
+                                <span className="font-medium">{ev.title}</span>
+                                {ev.location ? (
+                                  <span className="ml-2 opacity-90">
+                                    · {ev.location}
+                                  </span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              ) : null}
+            </div>
 
-            <section>
-              <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--nova-ink-muted)]">
-                {t("tasks")}
-              </h2>
-              <div className="mb-2 flex gap-2">
-                <Input
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  placeholder={t("taskTitle")}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (!newTaskTitle.trim()) return;
-                    void api
-                      .calendarTasksUpsert({
-                        title: newTaskTitle.trim(),
-                        dueAt: Math.floor(Date.now() / 1000) + 86400,
-                      })
-                      .then(() => {
-                        setNewTaskTitle("");
-                        return refresh();
-                      })
-                      .catch((err) => setError((err as AppError).message));
-                  }}
-                >
-                  {t("add")}
-                </Button>
-              </div>
-              <ul className="space-y-1">
-                {tasks.map((task) => (
-                  <li
-                    key={task.id}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={task.completed}
-                      onChange={() => {
+            <aside className="space-y-4">
+              <section>
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--nova-ink-muted)]">
+                  {t("calendarTasksTitle")}
+                </h2>
+                <div className="mb-2 flex gap-2">
+                  <Input
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    placeholder={t("taskTitle")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newTaskTitle.trim()) {
                         void api
                           .calendarTasksUpsert({
-                            id: task.id,
-                            title: task.title,
-                            dueAt: task.dueAt,
-                            completed: !task.completed,
-                            notes: task.notes,
+                            title: newTaskTitle.trim(),
+                            dueAt: Math.floor(Date.now() / 1000) + 86400,
                           })
-                          .then(refresh)
-                          .catch((err) => setError((err as AppError).message));
-                      }}
-                    />
-                    <span
-                      className={
-                        task.completed
-                          ? "text-[var(--nova-ink-muted)] line-through"
-                          : undefined
+                          .then(() => {
+                            setNewTaskTitle("");
+                            return refresh();
+                          })
+                          .catch((err) =>
+                            setError((err as AppError).message),
+                          );
                       }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      if (!newTaskTitle.trim()) return;
+                      void api
+                        .calendarTasksUpsert({
+                          title: newTaskTitle.trim(),
+                          dueAt: Math.floor(Date.now() / 1000) + 86400,
+                        })
+                        .then(() => {
+                          setNewTaskTitle("");
+                          return refresh();
+                        })
+                        .catch((err) => setError((err as AppError).message));
+                    }}
+                  >
+                    {t("add")}
+                  </Button>
+                </div>
+                <ul className="space-y-1.5">
+                  {tasks.slice(0, 12).map((task) => (
+                    <li
+                      key={task.id}
+                      className="flex items-start gap-2 text-sm"
                     >
-                      {task.title}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        void api
-                          .calendarTasksDelete(task.id)
-                          .then(refresh)
-                          .catch((err) => setError((err as AppError).message));
-                      }}
-                    >
-                      {t("remove")}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </section>
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={task.completed}
+                        onChange={() => {
+                          void api
+                            .calendarTasksUpsert({
+                              id: task.id,
+                              title: task.title,
+                              dueAt: task.dueAt,
+                              completed: !task.completed,
+                              notes: task.notes,
+                            })
+                            .then(refresh)
+                            .catch((err) =>
+                              setError((err as AppError).message),
+                            );
+                        }}
+                      />
+                      <span
+                        className={
+                          task.completed
+                            ? "text-[var(--nova-ink-muted)] line-through"
+                            : undefined
+                        }
+                      >
+                        {task.title}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              {collections.length > 0 ? (
+                <section>
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--nova-ink-muted)]">
+                    {t("calendarManageTitle")}
+                  </h2>
+                  <ul className="space-y-1.5">
+                    {collections
+                      .filter((c) => c.isVisible)
+                      .map((c) => (
+                        <li
+                          key={c.id}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ background: c.color }}
+                          />
+                          <span className="truncate">{c.displayName}</span>
+                          {c.isDefault ? (
+                            <span className="text-[10px] text-[var(--nova-accent)]">
+                              {t("calendarMain")}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                  </ul>
+                </section>
+              ) : null}
+            </aside>
           </div>
         ) : null}
 
         {tab === "inbox" ? (
-          <div className="nova-slide-in mx-auto max-w-xl space-y-3">
-            <p className="text-sm text-[var(--nova-ink-muted)]">
-              {t("calendarInboxHint")}
-            </p>
+          <div className="nova-slide-in mx-auto max-w-xl space-y-4">
+            <div>
+              <h2 className="font-[family-name:var(--nova-font-display)] text-2xl tracking-tight">
+                {t("calendarInbox")}
+              </h2>
+              <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">
+                {t("calendarInboxHint")}
+              </p>
+            </div>
             {invites.length === 0 ? (
               <p className="text-sm text-[var(--nova-ink-muted)]">
                 {t("calendarInboxEmpty")}
@@ -521,19 +752,19 @@ export function CalendarPanel() {
               invites.map((inv) => (
                 <article
                   key={inv.id}
-                  className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-4"
+                  className="rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_90%,transparent)] px-5 py-4"
                 >
-                  <h3 className="font-medium">{inv.title}</h3>
+                  <h3 className="text-base font-medium">{inv.title}</h3>
                   <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">
                     {formatDateTime(inv.startsAt, locale)}
                     {inv.location ? ` · ${inv.location}` : ""}
                   </p>
                   {inv.organizer ? (
-                    <p className="text-sm text-[var(--nova-ink-muted)]">
+                    <p className="mt-0.5 text-sm text-[var(--nova-ink-muted)]">
                       {inv.organizer}
                     </p>
                   ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       onClick={() => void respondInvite(inv.id, "accept")}
@@ -562,16 +793,16 @@ export function CalendarPanel() {
         ) : null}
 
         {tab === "manage" ? (
-          <div className="nova-fade-in mx-auto max-w-2xl space-y-8">
+          <div className="nova-fade-in mx-auto max-w-2xl space-y-10">
             <section>
-              <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--nova-ink-muted)]">
-                {t("calendarManage")}
+              <h2 className="font-[family-name:var(--nova-font-display)] text-2xl tracking-tight">
+                {t("calendarManageTitle")}
               </h2>
-              <ul className="space-y-2">
+              <ul className="mt-4 space-y-2">
                 {collections.map((col) => (
                   <li
                     key={col.id}
-                    className="flex flex-wrap items-center gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-2"
+                    className="flex flex-wrap items-center gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-2.5"
                   >
                     <input
                       type="color"
@@ -608,7 +839,7 @@ export function CalendarPanel() {
                           : t("calendarLocal")}
                       </p>
                     </div>
-                    <label className="flex items-center gap-1 text-xs">
+                    <label className="flex items-center gap-1.5 text-xs">
                       <input
                         type="checkbox"
                         checked={col.isVisible}
@@ -650,13 +881,16 @@ export function CalendarPanel() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarNewLocal")}
+                </span>
                 {COLOR_PALETTE.map((c) => (
                   <button
                     key={c}
                     type="button"
                     title={c}
-                    className="h-6 w-6 rounded-full border border-[var(--nova-border)]"
+                    className="h-6 w-6 rounded-full border border-[var(--nova-border)] transition-transform hover:scale-110"
                     style={{ background: c }}
                     onClick={() => {
                       void api
@@ -675,10 +909,10 @@ export function CalendarPanel() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--nova-ink-muted)]">
-                {t("caldavAccounts")}
+              <h2 className="font-[family-name:var(--nova-font-display)] text-2xl tracking-tight">
+                {t("calendarAccountsTitle")}
               </h2>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -701,7 +935,7 @@ export function CalendarPanel() {
                   placeholder={t("password")}
                 />
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   variant="secondary"
@@ -750,14 +984,14 @@ export function CalendarPanel() {
                   {t("caldavAdd")}
                 </Button>
               </div>
-              <ul className="mt-3 space-y-2">
+              <ul className="mt-4 space-y-2">
                 {accounts.map((acc) => (
                   <li
                     key={acc.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-2 text-sm"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] px-3 py-2.5 text-sm"
                   >
                     <span>
-                      {acc.name}{" "}
+                      <span className="font-medium">{acc.name}</span>{" "}
                       <span className="text-[var(--nova-ink-muted)]">
                         {acc.username}
                       </span>
@@ -808,8 +1042,8 @@ export function CalendarPanel() {
       </div>
 
       {draft ? (
-        <div className="absolute inset-0 z-20 flex justify-end bg-[color-mix(in_srgb,var(--nova-ink)_25%,transparent)]">
-          <div className="nova-slide-in flex h-full w-full max-w-md flex-col border-l border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-xl">
+        <div className="absolute inset-0 z-20 flex justify-end bg-[color-mix(in_srgb,var(--nova-ink)_28%,transparent)]">
+          <div className="nova-slide-in flex h-full w-full max-w-md flex-col border-l border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]">
             <div className="flex items-center justify-between border-b border-[var(--nova-border)] px-5 py-4">
               <h2 className="font-[family-name:var(--nova-font-display)] text-xl">
                 {draft.id ? t("calendarEditEvent") : t("calendarNewEvent")}
@@ -821,9 +1055,7 @@ export function CalendarPanel() {
             <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
               <Input
                 value={draft.title}
-                onChange={(e) =>
-                  setDraft({ ...draft, title: e.target.value })
-                }
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
                 placeholder={t("calendarEventTitle")}
                 autoFocus
               />
@@ -908,7 +1140,7 @@ export function CalendarPanel() {
                 </select>
               </label>
               <label className="block text-xs text-[var(--nova-ink-muted)]">
-                {t("calendar")}
+                {t("calendarManageTitle")}
                 <select
                   className="mt-1 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm"
                   value={draft.collectionId}
@@ -965,12 +1197,20 @@ function startOfDay(ms: number): number {
   return d.getTime();
 }
 
-function formatDayLabel(ms: number, locale: string): string {
-  return new Date(ms).toLocaleDateString(locale === "de" ? "de-DE" : "en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
+function startOfMonth(ms: number): number {
+  const d = new Date(ms);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Monday-first week start (ISO-style, German office default). */
+function startOfWeekMonday(ms: number): number {
+  const d = new Date(startOfDay(ms));
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.getTime();
 }
 
 function formatTime(unix: number, locale: string): string {
@@ -1001,5 +1241,7 @@ function toLocalInput(unix: number): string {
 
 function fromLocalInput(value: string): number {
   const t = Date.parse(value);
-  return Number.isFinite(t) ? Math.floor(t / 1000) : Math.floor(Date.now() / 1000);
+  return Number.isFinite(t)
+    ? Math.floor(t / 1000)
+    : Math.floor(Date.now() / 1000);
 }
