@@ -2,20 +2,23 @@ use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
-    CardDavServerStatus, ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto,
-    ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest,
-    ImportBackupResult, JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest,
-    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
-    ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto,
-    MessageSummaryDto, MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse,
-    OfflineMailboxAccountPolicy, OfflineMailboxMode, OfflineMailboxSettingsDto,
-    OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto, PlannedSummaryDto,
-    ProviderPreset, RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
-    SendLaterRequest, SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest,
-    SetMessageLabelsRequest, SignatureDto, SnoozeRequest, SnoozedMessageDto, SpamScoreDto,
-    SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus, SuggestRepliesMessageRequest,
-    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus,
+    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto, ExportBackupRequest,
+    ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest, ImportBackupResult,
+    JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
+    ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
+    MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
+    MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy,
+    OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
+    OutboundQueueItemDto, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest, PgpKeyDto,
+    PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion, RuleDto,
+    SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest, SendMessageRequest,
+    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto, SpellDictionaryDto,
+    SpellcheckStatus, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
+    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
+    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertCalendarAccountRequest, UpsertCalendarEventRequest, UpsertCalendarTaskRequest,
     UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
@@ -824,4 +827,169 @@ pub fn backup_import(
     request: ImportBackupRequest,
 ) -> Result<ImportBackupResult, AppError> {
     state.app.import_backup(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_list_keys(state: State<'_, DesktopState>) -> Result<Vec<PgpKeyDto>, AppError> {
+    state.app.pgp_list_keys().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_generate(
+    state: State<'_, DesktopState>,
+    request: PgpGenerateRequest,
+) -> Result<PgpKeyDto, AppError> {
+    state.app.pgp_generate(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_import(
+    state: State<'_, DesktopState>,
+    request: PgpImportRequest,
+) -> Result<PgpKeyDto, AppError> {
+    state.app.pgp_import(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_delete(state: State<'_, DesktopState>, fingerprint: String) -> Result<(), AppError> {
+    state.app.pgp_delete(&fingerprint).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_export_public(
+    state: State<'_, DesktopState>,
+    fingerprint: String,
+) -> Result<String, AppError> {
+    state.app.pgp_export_public(&fingerprint).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_decrypt_text(
+    state: State<'_, DesktopState>,
+    armored: String,
+) -> Result<PgpDecryptResult, AppError> {
+    state.app.pgp_decrypt_text(&armored).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_verify_text(
+    state: State<'_, DesktopState>,
+    armored: String,
+) -> Result<PgpVerifyResult, AppError> {
+    state.app.pgp_verify_text(&armored).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn pgp_inspect_message(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<Option<PgpDecryptResult>, AppError> {
+    state.app.pgp_inspect_message(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_accounts_list(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<CalendarAccountDto>, AppError> {
+    state.app.list_calendar_accounts().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_accounts_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertCalendarAccountRequest,
+) -> Result<CalendarAccountDto, AppError> {
+    state.app.upsert_calendar_account(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_accounts_delete(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_calendar_account(id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn calendar_accounts_sync(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(u32, u32), AppError> {
+    state.app.sync_calendar_account(id).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_events_list(
+    state: State<'_, DesktopState>,
+    request: ListCalendarRangeRequest,
+) -> Result<Vec<CalendarEventDto>, AppError> {
+    state.app.list_calendar_events(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_events_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertCalendarEventRequest,
+) -> Result<CalendarEventDto, AppError> {
+    state.app.upsert_calendar_event(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_events_delete(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_calendar_event(id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_tasks_list(
+    state: State<'_, DesktopState>,
+    include_completed: Option<bool>,
+) -> Result<Vec<CalendarTaskDto>, AppError> {
+    state
+        .app
+        .list_calendar_tasks(include_completed.unwrap_or(true))
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_tasks_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertCalendarTaskRequest,
+) -> Result<CalendarTaskDto, AppError> {
+    state.app.upsert_calendar_task(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_tasks_delete(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(), AppError> {
+    state.app.delete_calendar_task(id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_event_from_message(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+    starts_at: i64,
+    ends_at: Option<i64>,
+) -> Result<CalendarEventDto, AppError> {
+    state
+        .app
+        .create_event_from_message(message_id, starts_at, ends_at)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_task_from_message(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+    due_at: Option<i64>,
+) -> Result<CalendarTaskDto, AppError> {
+    state
+        .app
+        .create_task_from_message(message_id, due_at)
+        .map_err(map_err)
 }

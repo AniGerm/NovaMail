@@ -44,8 +44,14 @@ import type {
   OfflineOffloadReport,
   OfflinePromptEvent,
   AccountQuotaDto,
+  CalendarAccountDto,
+  CalendarEventDto,
+  CalendarTaskDto,
   JobsTickReport,
   OutboundQueueItemDto,
+  PgpDecryptResult,
+  PgpKeyDto,
+  PgpVerifyResult,
   PlannedSummaryDto,
   SendLaterRequest,
   SnoozeRequest,
@@ -350,6 +356,76 @@ export const api = {
   backupImport: (passphrase: string, dataBase64: string) =>
     call<ImportBackupResult>("backup_import", {
       request: { passphrase, dataBase64 },
+    }),
+  pgpListKeys: () => call<PgpKeyDto[]>("pgp_list_keys"),
+  pgpGenerate: (userId: string) =>
+    call<PgpKeyDto>("pgp_generate", { request: { userId } }),
+  pgpImport: (armored: string) =>
+    call<PgpKeyDto>("pgp_import", { request: { armored } }),
+  pgpDelete: (fingerprint: string) => call<void>("pgp_delete", { fingerprint }),
+  pgpExportPublic: (fingerprint: string) =>
+    call<string>("pgp_export_public", { fingerprint }),
+  pgpDecryptText: (armored: string) =>
+    call<PgpDecryptResult>("pgp_decrypt_text", { armored }),
+  pgpVerifyText: (armored: string) =>
+    call<PgpVerifyResult>("pgp_verify_text", { armored }),
+  pgpInspectMessage: (messageId: string) =>
+    call<PgpDecryptResult | null>("pgp_inspect_message", { messageId }),
+  calendarAccountsList: () =>
+    call<CalendarAccountDto[]>("calendar_accounts_list"),
+  calendarAccountsUpsert: (request: {
+    id?: string | null;
+    name: string;
+    caldavUrl: string;
+    username: string;
+    password?: string | null;
+  }) => call<CalendarAccountDto>("calendar_accounts_upsert", { request }),
+  calendarAccountsDelete: (id: string) =>
+    call<void>("calendar_accounts_delete", { id }),
+  calendarAccountsSync: (id: string) =>
+    call<[number, number]>("calendar_accounts_sync", { id }),
+  calendarEventsList: (from: number, to: number) =>
+    call<CalendarEventDto[]>("calendar_events_list", { request: { from, to } }),
+  calendarEventsUpsert: (request: {
+    id?: string | null;
+    calendarAccountId?: string | null;
+    title: string;
+    startsAt: number;
+    endsAt?: number | null;
+    location?: string | null;
+    description?: string | null;
+    allDay?: boolean;
+    sourceMessageId?: string | null;
+  }) => call<CalendarEventDto>("calendar_events_upsert", { request }),
+  calendarEventsDelete: (id: string) =>
+    call<void>("calendar_events_delete", { id }),
+  calendarTasksList: (includeCompleted = true) =>
+    call<CalendarTaskDto[]>("calendar_tasks_list", { includeCompleted }),
+  calendarTasksUpsert: (request: {
+    id?: string | null;
+    calendarAccountId?: string | null;
+    title: string;
+    dueAt?: number | null;
+    completed?: boolean;
+    notes?: string;
+    sourceMessageId?: string | null;
+  }) => call<CalendarTaskDto>("calendar_tasks_upsert", { request }),
+  calendarTasksDelete: (id: string) =>
+    call<void>("calendar_tasks_delete", { id }),
+  calendarEventFromMessage: (
+    messageId: string,
+    startsAt: number,
+    endsAt?: number | null,
+  ) =>
+    call<CalendarEventDto>("calendar_event_from_message", {
+      messageId,
+      startsAt,
+      endsAt: endsAt ?? null,
+    }),
+  calendarTaskFromMessage: (messageId: string, dueAt?: number | null) =>
+    call<CalendarTaskDto>("calendar_task_from_message", {
+      messageId,
+      dueAt: dueAt ?? null,
     }),
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),

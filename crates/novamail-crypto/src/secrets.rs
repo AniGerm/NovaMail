@@ -123,9 +123,75 @@ impl SecretStore {
     }
 
     pub fn delete_credentials(&self, account_id: Uuid) -> CryptoResult<()> {
-        let key = Self::account_key(account_id);
-        self.memory.delete(&key);
-        if let Ok(entry) = Entry::new(SERVICE, &key) {
+        self.delete_raw(&Self::account_key(account_id))
+    }
+
+    fn calendar_key(calendar_id: Uuid) -> String {
+        format!("calendar:{calendar_id}")
+    }
+
+    pub fn store_calendar_password(&self, calendar_id: Uuid, password: &str) -> CryptoResult<()> {
+        self.store_raw(&Self::calendar_key(calendar_id), password)
+    }
+
+    pub fn load_calendar_password(&self, calendar_id: Uuid) -> CryptoResult<Option<String>> {
+        match self.load_raw(&Self::calendar_key(calendar_id)) {
+            Ok(v) => Ok(Some(v)),
+            Err(CryptoError::NotFound(_)) => Ok(None),
+            Err(CryptoError::Keyring(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn delete_calendar_password(&self, calendar_id: Uuid) -> CryptoResult<()> {
+        self.delete_raw(&Self::calendar_key(calendar_id))
+    }
+
+    fn store_raw(&self, key: &str, payload: &str) -> CryptoResult<()> {
+        match Entry::new(SERVICE, key) {
+            Ok(entry) => match entry.set_password(payload) {
+                Ok(()) => Ok(()),
+                Err(err) if self.memory_fallback => {
+                    tracing::warn!(error = %err, "keyring unavailable; using memory secret store");
+                    self.memory.set(key, payload);
+                    Ok(())
+                }
+                Err(err) => Err(CryptoError::Keyring(err.to_string())),
+            },
+            Err(err) if self.memory_fallback => {
+                tracing::warn!(error = %err, "keyring entry failed; using memory secret store");
+                self.memory.set(key, payload);
+                Ok(())
+            }
+            Err(err) => Err(CryptoError::Keyring(err.to_string())),
+        }
+    }
+
+    fn load_raw(&self, key: &str) -> CryptoResult<String> {
+        match Entry::new(SERVICE, key) {
+            Ok(entry) => match entry.get_password() {
+                Ok(password) => Ok(password),
+                Err(err) => {
+                    if let Some(value) = self.memory.get(key) {
+                        Ok(value)
+                    } else {
+                        Err(CryptoError::Keyring(err.to_string()))
+                    }
+                }
+            },
+            Err(err) => {
+                if let Some(value) = self.memory.get(key) {
+                    Ok(value)
+                } else {
+                    Err(CryptoError::Keyring(err.to_string()))
+                }
+            }
+        }
+    }
+
+    fn delete_raw(&self, key: &str) -> CryptoResult<()> {
+        self.memory.delete(key);
+        if let Ok(entry) = Entry::new(SERVICE, key) {
             match entry.delete_credential() {
                 Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
                 Err(err) if self.memory_fallback => {

@@ -1,6 +1,7 @@
 //! NovaMail application core — use-cases over ports (db, mail, secrets).
 
 mod app;
+mod caldav;
 mod contacts_store;
 mod error;
 mod folder_policies;

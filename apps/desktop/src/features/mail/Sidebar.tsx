@@ -10,6 +10,7 @@ import {
   FilePenLine,
   HardDrive,
   Clock3,
+  CalendarDays,
   ShieldAlert,
   Zap,
 } from "lucide-react";
@@ -27,6 +28,7 @@ interface SidebarProps {
   offlineSelected?: boolean;
   plannedSelected?: boolean;
   plannedCount?: number;
+  calendarSelected?: boolean;
   syncStatus: string | null;
   themeMode: ThemeMode;
   onSelectUnified: () => void;
@@ -35,6 +37,7 @@ interface SidebarProps {
   onSelectSpam: () => void;
   onSelectOffline: () => void;
   onSelectPlanned: () => void;
+  onSelectCalendar: () => void;
   onCompose: () => void;
   onSync: () => void;
   onAddAccount: () => void;
@@ -52,6 +55,7 @@ export function Sidebar({
   offlineSelected = false,
   plannedSelected = false,
   plannedCount = 0,
+  calendarSelected = false,
   syncStatus,
   themeMode,
   onSelectUnified,
@@ -60,6 +64,7 @@ export function Sidebar({
   onSelectSpam,
   onSelectOffline,
   onSelectPlanned,
+  onSelectCalendar,
   onCompose,
   onSync,
   onAddAccount,
@@ -125,7 +130,8 @@ export function Sidebar({
             !draftsSelected &&
             !spamSelected &&
             !offlineSelected &&
-            !plannedSelected
+            !plannedSelected &&
+            !calendarSelected
               ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
               : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
           }
@@ -186,6 +192,18 @@ export function Sidebar({
         </button>
         <button
           type="button"
+          onClick={onSelectCalendar}
+          className={
+            calendarSelected
+              ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+              : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          }
+        >
+          <CalendarDays size={18} />
+          {t("calendar")}
+        </button>
+        <button
+          type="button"
           className="flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
           onClick={onOpenTriage}
         >
@@ -230,7 +248,8 @@ export function Sidebar({
                       !draftsSelected &&
                       !spamSelected &&
                       !offlineSelected &&
-                      !plannedSelected
+                      !plannedSelected &&
+                      !calendarSelected
                         ? "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-2 py-2 text-left text-sm text-[var(--nova-accent)]"
                         : "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--nova-surface-2)]"
                     }

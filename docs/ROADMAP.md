@@ -22,6 +22,9 @@
 - [x] Signatures, Labels UI, Rules UI, POP3 test
 - [x] Intelligent offline mailbox (quota / offload)
 - [x] Snooze + Send Later + Sidebar „Geplant“ (Phase 1)
+- [x] Command Palette Expansion (Phase 2)
+- [x] OpenPGP Sequoia + Key-UI (Phase 3)
+- [x] CalDAV Kalender + Tasks (Phase 4)
 
 ## Linux Killer Features
 
@@ -30,9 +33,9 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 | Phase | Fokus | Status |
 |-------|--------|--------|
 | KF1 | Snooze + Send Later + Geplant | erledigt |
-| KF2 | Command Palette Expansion | offen |
-| KF3 | OpenPGP (Sequoia) + Key-UI | offen |
-| KF4 | CalDAV Kalender + Tasks | offen |
+| KF2 | Command Palette Expansion | erledigt |
+| KF3 | OpenPGP (Sequoia) + Key-UI | erledigt |
+| KF4 | CalDAV Kalender + Tasks | erledigt |
 
 ## Production phases
 
@@ -40,8 +43,8 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 |-------|--------|
 | P1 | Threading polish, attachment DnD polish, Smart Search |
 | P2 | POP3 full mailbox sync, signature HTML templates |
-| P3 | OpenPGP (Sequoia), Key Management UI |
-| P4 | Calendar (CalDAV) |
+| P3 | ~~OpenPGP (Sequoia), Key Management UI~~ (done) |
+| P4 | ~~Calendar (CalDAV)~~ (done — day/week + tasks + sync) |
 | P5 | Plugin Runtime WASM + erste Official Plugins |
 | P6 | ~~AI job queue + persisted insights~~ (done: qwen3:4b-instruct / qwen2.5:1.5b, ai_insights, 2 reply variants) |
 | P7 | Microsoft Graph / Exchange Vertiefung |

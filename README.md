@@ -44,10 +44,14 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 ### Search & productivity
 
 - Full-text search over local mail (SQLite FTS5) — online **and** offline copies
-- Command palette (`Ctrl/Cmd+K`) — compose, triage, planned, snooze presets, sync, settings, …
+- **Command palette** (`Ctrl/Cmd+K`) with fuzzy matching and groups:
+  - Message actions: archive, delete, star, snooze, spam, toggle labels
+  - Navigate: drafts, planned, offline, calendar, contacts, sync, settings
+  - Filters: unread / starred / clear; jump to any account
+  - People: compose-to from address book + recent recipients
 - Keyboard shortcuts: `c` compose, `r` reply, `f` forward, `e` archive, `#` delete, `h` snooze later today, `t` Quick Sort, `j`/`k` navigate, `/` search, and more
 - **Quick Sort** triage: Keep / Delete / Preview (hotkeys)
-- Labels (create, assign, manage)
+- Labels (create, assign, manage — also from the palette)
 - Mail rules engine: predicates (from / to / subject / body / always) and actions (read/unread, star, label, move, spam, delete)
 - Rules run automatically after sync
 
@@ -106,17 +110,33 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - High contrast mode
 - Live regions and labeled navigation for screen readers
 
+### OpenPGP (Sequoia)
+
+- Local keyring: generate key pair, import armored keys, copy public key, delete
+- Composer toggles: **Sign** and/or **Encrypt** (recipient public keys matched by email in User ID)
+- Reading pane: auto-decrypt PGP messages; verify cleartext signatures
+- Secrets stay on-device; no cloud key service
+
+### Calendar & tasks (CalDAV)
+
+- Sidebar **Calendar** with day / week view
+- Local events and tasks; create from any mail (“As event” / “As task”)
+- CalDAV accounts: URL + username/password (password in OS keyring)
+- Sync pulls VEVENT and VTODO into the local store
+
 ### Backup & security
 
 - Encrypted backup export / import (passphrase-protected)
 - Secrets in the OS keyring (memory fallback for headless/CI)
 - HTML sanitization before display (no script/event handlers)
 - Local-first storage under the user’s data directory
+- OpenPGP via Sequoia (see above)
 
 ### Platform
 
 - Ubuntu Linux desktop app (Tauri 2 + WebKitGTK)
 - Deb / AppImage packaging script
+- Build note: OpenPGP needs system `nettle` / `nettle-dev` for Sequoia
 - CI, issue templates, Code of Conduct, MPL-2.0 license
 
 ## Screenshots

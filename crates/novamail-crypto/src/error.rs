@@ -14,4 +14,6 @@ pub enum CryptoError {
     Backup(String),
     #[error("wrong backup passphrase or corrupt file")]
     BadPassphrase,
+    #[error("OpenPGP error: {0}")]
+    Pgp(String),
 }

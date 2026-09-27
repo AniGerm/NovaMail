@@ -245,6 +245,47 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_outbound_due
       ON outbound_queue(status, send_at);
     "#,
+    // v7 — OpenPGP keyring
+    r#"
+    CREATE TABLE IF NOT EXISTS pgp_keys (
+      fingerprint TEXT PRIMARY KEY NOT NULL,
+      user_ids_json TEXT NOT NULL DEFAULT '[]',
+      has_secret INTEGER NOT NULL DEFAULT 0,
+      armored_public TEXT NOT NULL,
+      armored_secret TEXT,
+      created_at INTEGER NOT NULL
+    );
+    "#,
+    // v8 — calendar accounts, tasks, richer events
+    r#"
+    CREATE TABLE IF NOT EXISTS calendar_accounts (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      caldav_url TEXT NOT NULL,
+      username TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS calendar_tasks (
+      id TEXT PRIMARY KEY NOT NULL,
+      calendar_account_id TEXT REFERENCES calendar_accounts(id) ON DELETE SET NULL,
+      ical_uid TEXT,
+      title TEXT NOT NULL,
+      due_at INTEGER,
+      completed INTEGER NOT NULL DEFAULT 0,
+      notes TEXT NOT NULL DEFAULT '',
+      source_message_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_tasks_due
+      ON calendar_tasks(due_at);
+
+    ALTER TABLE calendar_events ADD COLUMN calendar_account_id TEXT;
+    ALTER TABLE calendar_events ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE calendar_events ADD COLUMN source_message_id TEXT;
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -297,7 +338,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 8);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

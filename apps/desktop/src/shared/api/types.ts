@@ -238,6 +238,61 @@ export interface SendMessageRequest {
   references: string[];
   attachments: OutgoingAttachment[];
   draftId?: string | null;
+  pgpSign?: boolean;
+  pgpEncrypt?: boolean;
+}
+
+export interface PgpKeyDto {
+  fingerprint: string;
+  userIds: string[];
+  hasSecret: boolean;
+  createdAt: number;
+}
+
+export interface PgpDecryptResult {
+  plaintext: string;
+  signatureValid?: boolean | null;
+  signerFpr?: string | null;
+}
+
+export interface PgpVerifyResult {
+  plaintext: string;
+  valid: boolean;
+  signerFpr?: string | null;
+}
+
+export interface CalendarAccountDto {
+  id: string;
+  name: string;
+  caldavUrl: string;
+  username: string;
+  createdAt: number;
+}
+
+export interface CalendarEventDto {
+  id: string;
+  calendarAccountId?: string | null;
+  icalUid?: string | null;
+  title: string;
+  startsAt: number;
+  endsAt?: number | null;
+  location?: string | null;
+  description?: string | null;
+  allDay: boolean;
+  sourceMessageId?: string | null;
+}
+
+export interface CalendarTaskDto {
+  id: string;
+  calendarAccountId?: string | null;
+  icalUid?: string | null;
+  title: string;
+  dueAt?: number | null;
+  completed: boolean;
+  notes: string;
+  sourceMessageId?: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type SnoozePreset =

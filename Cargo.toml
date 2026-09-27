@@ -55,7 +55,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tokio-rustls = "0.26"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 webpki-roots = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
@@ -65,3 +65,4 @@ sha2 = "0.10"
 hex = "0.4"
 ammonia = "4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+sequoia-openpgp = "2.4"

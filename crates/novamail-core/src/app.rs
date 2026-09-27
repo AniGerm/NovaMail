@@ -13,30 +13,33 @@ use novamail_contacts::{
 };
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use novamail_crypto::{
-    decrypt_backup_payload, encrypt_backup_payload, AccountCredentials, EncryptedBackupFile,
-    OAuthTokens, SecretStore,
+    decrypt_backup_payload, decrypt_message, encrypt_backup_payload, encrypt_message, generate_key,
+    import_armored, looks_like_pgp, sign_message, verify_message, AccountCredentials,
+    EncryptedBackupFile, OAuthTokens, SecretStore,
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
-    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
-    ContactDto, ContactsBookSettings, ContactsShareMode, ContactsShareStatus,
-    ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, FolderPolicyDto,
-    ImportBackupRequest, ImportBackupResult, JobsTickReport, LabelDto, LdapSearchRequest,
-    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
-    ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
-    MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto,
-    OfflineMailboxAccountPolicy, OfflineMailboxMode, OfflineMailboxSettingsDto,
-    OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto, OutboundStatus,
-    PlannedSummaryDto, ProviderPreset, RecipientSuggestion, RetentionModeDto, RuleDto,
-    SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest, SendMessageRequest,
-    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SnoozePreset, SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto,
+    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalendarAccountDto,
+    CalendarEventDto, CalendarTaskDto, CardDavServerStatus, ContactDto, ContactsBookSettings,
+    ContactsShareMode, ContactsShareStatus, ExportBackupRequest, ExportBackupResponse,
+    FolderPoliciesDto, FolderPolicyDto, ImportBackupRequest, ImportBackupResult, JobsTickReport,
+    LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
+    ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
+    MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
+    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, OfflineMailboxAccountPolicy,
+    OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
+    OutboundQueueItemDto, OutboundStatus, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest,
+    PgpKeyDto, PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion,
+    RetentionModeDto, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest,
+    SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SnoozePreset, SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto,
     SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
     SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
-    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
+    SyncProgressEvent, SyncRequest, SyncResult, UpsertCalendarAccountRequest,
+    UpsertCalendarEventRequest, UpsertCalendarTaskRequest, UpsertContactRequest, UpsertLabelRequest,
     UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
@@ -498,6 +501,7 @@ impl AppState {
     pub async fn send_message(&self, request: SendMessageRequest) -> CoreResult<()> {
         let account = self.db.get_account(request.account_id)?;
         let draft_id = request.draft_id;
+        let request = self.apply_pgp_to_send(request)?;
         SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
         if let Some(id) = draft_id {
             if !account.imap_host.trim().is_empty() {
@@ -508,6 +512,41 @@ impl AppState {
             let _ = self.db.delete_message(id);
         }
         Ok(())
+    }
+
+    fn apply_pgp_to_send(&self, mut request: SendMessageRequest) -> CoreResult<SendMessageRequest> {
+        if !request.pgp_sign && !request.pgp_encrypt {
+            return Ok(request);
+        }
+        let account = self.db.get_account(request.account_id)?;
+        let mut body = request.body_text.clone();
+        if request.pgp_sign {
+            let Some((_, secret)) = self.db.find_pgp_secret_for_email(&account.email)? else {
+                return Err(CoreError::Message(format!(
+                    "no OpenPGP secret key for {}",
+                    account.email
+                )));
+            };
+            body = sign_message(&body, &secret)?;
+        }
+        if request.pgp_encrypt {
+            let mut publics = Vec::new();
+            for addr in request.to.iter().chain(request.cc.iter()) {
+                if let Some(pub_armored) = self.db.find_pgp_public_for_email(&addr.email)? {
+                    publics.push(pub_armored);
+                }
+            }
+            if publics.is_empty() {
+                return Err(CoreError::Message(
+                    "no OpenPGP public keys for recipients".into(),
+                ));
+            }
+            let refs: Vec<&str> = publics.iter().map(String::as_str).collect();
+            body = encrypt_message(&body, &refs)?;
+            request.body_html = None;
+        }
+        request.body_text = body;
+        Ok(request)
     }
 
     pub fn snooze_message(&self, request: SnoozeRequest) -> CoreResult<i64> {
@@ -830,6 +869,8 @@ impl AppState {
             references: vec![],
             attachments: Vec::new(),
             draft_id: None,
+            pgp_sign: false,
+            pgp_encrypt: false,
         })
     }
 
@@ -2473,6 +2514,310 @@ impl AppState {
             Err(_) => Self::offline_ai().prioritize(request).await?,
         };
         Ok((result.score, result.rationale, result.provider))
+    }
+
+    // —— OpenPGP ——
+
+    pub fn pgp_list_keys(&self) -> CoreResult<Vec<PgpKeyDto>> {
+        Ok(self.db.list_pgp_keys()?)
+    }
+
+    pub fn pgp_generate(&self, request: PgpGenerateRequest) -> CoreResult<PgpKeyDto> {
+        let info = generate_key(&request.user_id)?;
+        self.db.upsert_pgp_key(
+            &info.fingerprint,
+            &info.user_ids,
+            info.has_secret,
+            &info.armored_public,
+            info.armored_secret.as_deref(),
+        )?;
+        Ok(PgpKeyDto {
+            fingerprint: info.fingerprint,
+            user_ids: info.user_ids,
+            has_secret: info.has_secret,
+            created_at: chrono::Utc::now().timestamp(),
+        })
+    }
+
+    pub fn pgp_import(&self, request: PgpImportRequest) -> CoreResult<PgpKeyDto> {
+        let info = import_armored(&request.armored)?;
+        self.db.upsert_pgp_key(
+            &info.fingerprint,
+            &info.user_ids,
+            info.has_secret,
+            &info.armored_public,
+            info.armored_secret.as_deref(),
+        )?;
+        Ok(PgpKeyDto {
+            fingerprint: info.fingerprint,
+            user_ids: info.user_ids,
+            has_secret: info.has_secret,
+            created_at: chrono::Utc::now().timestamp(),
+        })
+    }
+
+    pub fn pgp_delete(&self, fingerprint: &str) -> CoreResult<()> {
+        self.db.delete_pgp_key(fingerprint)?;
+        Ok(())
+    }
+
+    pub fn pgp_export_public(&self, fingerprint: &str) -> CoreResult<String> {
+        self.db
+            .get_pgp_public(fingerprint)?
+            .ok_or_else(|| CoreError::Message("key not found".into()))
+    }
+
+    pub fn pgp_decrypt_text(&self, armored: &str) -> CoreResult<PgpDecryptResult> {
+        let secrets = self.db.list_pgp_secrets()?;
+        let publics = self.db.list_pgp_publics()?;
+        let secret_refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        let public_refs: Vec<&str> = publics.iter().map(String::as_str).collect();
+        let result = decrypt_message(armored, &secret_refs, &public_refs)?;
+        Ok(PgpDecryptResult {
+            plaintext: result.plaintext,
+            signature_valid: result.signature_valid,
+            signer_fpr: result.signer_fpr,
+        })
+    }
+
+    pub fn pgp_verify_text(&self, armored: &str) -> CoreResult<PgpVerifyResult> {
+        let publics = self.db.list_pgp_publics()?;
+        let public_refs: Vec<&str> = publics.iter().map(String::as_str).collect();
+        let result = verify_message(armored, &public_refs)?;
+        Ok(PgpVerifyResult {
+            plaintext: result.plaintext,
+            valid: result.valid,
+            signer_fpr: result.signer_fpr,
+        })
+    }
+
+    pub fn pgp_inspect_message(&self, message_id: Uuid) -> CoreResult<Option<PgpDecryptResult>> {
+        let detail = self.get_message(message_id)?;
+        let text = detail
+            .body_text
+            .unwrap_or_else(|| detail.summary.snippet.clone());
+        if !looks_like_pgp(&text) {
+            return Ok(None);
+        }
+        if text.contains("-----BEGIN PGP MESSAGE-----") {
+            Ok(Some(self.pgp_decrypt_text(&text)?))
+        } else {
+            let verified = self.pgp_verify_text(&text)?;
+            Ok(Some(PgpDecryptResult {
+                plaintext: verified.plaintext,
+                signature_valid: Some(verified.valid),
+                signer_fpr: verified.signer_fpr,
+            }))
+        }
+    }
+
+    // —— Calendar / Tasks ——
+
+    pub fn list_calendar_accounts(&self) -> CoreResult<Vec<CalendarAccountDto>> {
+        Ok(self.db.list_calendar_accounts()?)
+    }
+
+    pub fn upsert_calendar_account(
+        &self,
+        request: UpsertCalendarAccountRequest,
+    ) -> CoreResult<CalendarAccountDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        self.db.upsert_calendar_account(
+            id,
+            &request.name,
+            &request.caldav_url,
+            &request.username,
+        )?;
+        if let Some(password) = request.password {
+            if !password.is_empty() {
+                self.secrets.store_calendar_password(id, &password)?;
+            }
+        }
+        self.db
+            .list_calendar_accounts()?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| CoreError::Message("calendar account missing after upsert".into()))
+    }
+
+    pub fn delete_calendar_account(&self, id: Uuid) -> CoreResult<()> {
+        let _ = self.secrets.delete_calendar_password(id);
+        self.db.delete_calendar_account(id)?;
+        Ok(())
+    }
+
+    pub async fn sync_calendar_account(&self, id: Uuid) -> CoreResult<(u32, u32)> {
+        let account = self
+            .db
+            .list_calendar_accounts()?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| CoreError::Message("calendar account not found".into()))?;
+        let password = self
+            .secrets
+            .load_calendar_password(id)?
+            .unwrap_or_default();
+        let result =
+            crate::caldav::sync_calendar(&account.caldav_url, &account.username, &password).await?;
+        let mut events = 0u32;
+        for event in result.events {
+            let local_id = Uuid::new_v4();
+            // Stable id from ical uid when possible
+            let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, event.uid.as_bytes());
+            let _ = local_id;
+            self.db.upsert_calendar_event(
+                id,
+                Some(account.id),
+                Some(&event.uid),
+                &event.title,
+                event.starts_at,
+                event.ends_at,
+                event.location.as_deref(),
+                event.description.as_deref(),
+                event.all_day,
+                None,
+            )?;
+            events += 1;
+        }
+        let mut tasks = 0u32;
+        for task in result.tasks {
+            let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, task.uid.as_bytes());
+            self.db.upsert_calendar_task(
+                id,
+                Some(account.id),
+                Some(&task.uid),
+                &task.title,
+                task.due_at,
+                task.completed,
+                &task.notes,
+                None,
+            )?;
+            tasks += 1;
+        }
+        Ok((events, tasks))
+    }
+
+    pub fn list_calendar_events(
+        &self,
+        request: ListCalendarRangeRequest,
+    ) -> CoreResult<Vec<CalendarEventDto>> {
+        Ok(self.db.list_calendar_events(request.from, request.to)?)
+    }
+
+    pub fn upsert_calendar_event(
+        &self,
+        request: UpsertCalendarEventRequest,
+    ) -> CoreResult<CalendarEventDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        self.db.upsert_calendar_event(
+            id,
+            request.calendar_account_id,
+            None,
+            &request.title,
+            request.starts_at,
+            request.ends_at,
+            request.location.as_deref(),
+            request.description.as_deref(),
+            request.all_day,
+            request.source_message_id,
+        )?;
+        Ok(CalendarEventDto {
+            id,
+            calendar_account_id: request.calendar_account_id,
+            ical_uid: None,
+            title: request.title,
+            starts_at: request.starts_at,
+            ends_at: request.ends_at,
+            location: request.location,
+            description: request.description,
+            all_day: request.all_day,
+            source_message_id: request.source_message_id,
+        })
+    }
+
+    pub fn delete_calendar_event(&self, id: Uuid) -> CoreResult<()> {
+        self.db.delete_calendar_event(id)?;
+        Ok(())
+    }
+
+    pub fn list_calendar_tasks(&self, include_completed: bool) -> CoreResult<Vec<CalendarTaskDto>> {
+        Ok(self.db.list_calendar_tasks(include_completed)?)
+    }
+
+    pub fn upsert_calendar_task(
+        &self,
+        request: UpsertCalendarTaskRequest,
+    ) -> CoreResult<CalendarTaskDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let now = chrono::Utc::now().timestamp();
+        self.db.upsert_calendar_task(
+            id,
+            request.calendar_account_id,
+            None,
+            &request.title,
+            request.due_at,
+            request.completed,
+            &request.notes,
+            request.source_message_id,
+        )?;
+        Ok(CalendarTaskDto {
+            id,
+            calendar_account_id: request.calendar_account_id,
+            ical_uid: None,
+            title: request.title,
+            due_at: request.due_at,
+            completed: request.completed,
+            notes: request.notes,
+            source_message_id: request.source_message_id,
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    pub fn delete_calendar_task(&self, id: Uuid) -> CoreResult<()> {
+        self.db.delete_calendar_task(id)?;
+        Ok(())
+    }
+
+    pub fn create_event_from_message(
+        &self,
+        message_id: Uuid,
+        starts_at: i64,
+        ends_at: Option<i64>,
+    ) -> CoreResult<CalendarEventDto> {
+        let detail = self.get_message(message_id)?;
+        self.upsert_calendar_event(UpsertCalendarEventRequest {
+            id: None,
+            calendar_account_id: None,
+            title: detail.summary.subject.clone(),
+            starts_at,
+            ends_at,
+            location: None,
+            description: Some(format!(
+                "From mail: {}\n{}",
+                detail.summary.from.email,
+                detail.body_text.unwrap_or(detail.summary.snippet)
+            )),
+            all_day: false,
+            source_message_id: Some(message_id),
+        })
+    }
+
+    pub fn create_task_from_message(
+        &self,
+        message_id: Uuid,
+        due_at: Option<i64>,
+    ) -> CoreResult<CalendarTaskDto> {
+        let detail = self.get_message(message_id)?;
+        self.upsert_calendar_task(UpsertCalendarTaskRequest {
+            id: None,
+            calendar_account_id: None,
+            title: detail.summary.subject.clone(),
+            due_at,
+            completed: false,
+            notes: format!("From mail: {}", detail.summary.from.email),
+            source_message_id: Some(message_id),
+        })
     }
 }
 

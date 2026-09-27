@@ -12,6 +12,7 @@ import type {
   SpellDictionaryDto,
 } from "@/shared/api/types";
 import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
+import { PgpKeysPanel } from "@/features/settings/PgpKeysPanel";
 import { RulesSpamPanel } from "@/features/settings/RulesSpamPanel";
 
 const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
@@ -876,6 +877,7 @@ export function SettingsDialog({
         </section>
 
         <OfflineMailboxPanel accounts={accounts} />
+        <PgpKeysPanel />
         <RulesSpamPanel accounts={accounts} />
 
         {error ? (

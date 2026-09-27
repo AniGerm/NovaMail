@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use novamail_ipc::{
-    AccountDto, AddressDto, AttachmentDto, AuthType, ContactAddress, ContactCustomField, ContactDto,
-    LabelDto, ListMessagesRequest, ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto,
-    MessageSortBy, MessageSummaryDto, OutboundQueueItemDto, OutboundStatus, RecipientSuggestion,
+    AccountDto, AddressDto, AttachmentDto, AuthType, CalendarAccountDto, CalendarEventDto,
+    CalendarTaskDto, ContactAddress, ContactCustomField, ContactDto, LabelDto, ListMessagesRequest,
+    ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto, MessageSortBy,
+    MessageSummaryDto, OutboundQueueItemDto, OutboundStatus, PgpKeyDto, RecipientSuggestion,
     RuleDto, SignatureDto, SnoozedMessageDto, SortDirection, ThreadListItemDto,
 };
 use parking_lot::Mutex;
@@ -2093,6 +2094,363 @@ impl Database {
 
     pub fn has_ai_insight(&self, message_id: Uuid, kind: &str) -> DbResult<bool> {
         Ok(self.get_ai_insight(message_id, kind)?.is_some())
+    }
+
+    // —— OpenPGP keyring ——
+
+    pub fn upsert_pgp_key(
+        &self,
+        fingerprint: &str,
+        user_ids: &[String],
+        has_secret: bool,
+        armored_public: &str,
+        armored_secret: Option<&str>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        let user_ids_json = serde_json::to_string(user_ids).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            r#"
+            INSERT INTO pgp_keys (fingerprint, user_ids_json, has_secret, armored_public, armored_secret, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(fingerprint) DO UPDATE SET
+              user_ids_json = excluded.user_ids_json,
+              has_secret = CASE WHEN excluded.has_secret = 1 THEN 1 ELSE pgp_keys.has_secret END,
+              armored_public = excluded.armored_public,
+              armored_secret = COALESCE(excluded.armored_secret, pgp_keys.armored_secret)
+            "#,
+            params![
+                fingerprint,
+                user_ids_json,
+                if has_secret { 1 } else { 0 },
+                armored_public,
+                armored_secret,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_pgp_keys(&self) -> DbResult<Vec<PgpKeyDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT fingerprint, user_ids_json, has_secret, created_at FROM pgp_keys ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let user_ids: Vec<String> =
+                serde_json::from_str(&row.get::<_, String>(1)?).unwrap_or_default();
+            Ok(PgpKeyDto {
+                fingerprint: row.get(0)?,
+                user_ids,
+                has_secret: row.get::<_, i64>(2)? != 0,
+                created_at: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn delete_pgp_key(&self, fingerprint: &str) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM pgp_keys WHERE fingerprint = ?1",
+            params![fingerprint],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_pgp_public(&self, fingerprint: &str) -> DbResult<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT armored_public FROM pgp_keys WHERE fingerprint = ?1",
+            params![fingerprint],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn get_pgp_secret(&self, fingerprint: &str) -> DbResult<Option<String>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT armored_secret FROM pgp_keys WHERE fingerprint = ?1 AND has_secret = 1",
+            params![fingerprint],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn find_pgp_secret_for_email(&self, email: &str) -> DbResult<Option<(String, String)>> {
+        let email = email.trim().to_ascii_lowercase();
+        let keys = self.list_pgp_keys()?;
+        for key in keys {
+            if !key.has_secret {
+                continue;
+            }
+            let matched = key.user_ids.iter().any(|uid| {
+                uid.to_ascii_lowercase().contains(&email)
+            });
+            if matched {
+                if let Some(secret) = self.get_pgp_secret(&key.fingerprint)? {
+                    return Ok(Some((key.fingerprint, secret)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn find_pgp_public_for_email(&self, email: &str) -> DbResult<Option<String>> {
+        let email = email.trim().to_ascii_lowercase();
+        let keys = self.list_pgp_keys()?;
+        for key in keys {
+            let matched = key.user_ids.iter().any(|uid| {
+                uid.to_ascii_lowercase().contains(&email)
+            });
+            if matched {
+                return self.get_pgp_public(&key.fingerprint);
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn list_pgp_secrets(&self) -> DbResult<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt =
+            conn.prepare("SELECT armored_secret FROM pgp_keys WHERE has_secret = 1 AND armored_secret IS NOT NULL")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn list_pgp_publics(&self) -> DbResult<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT armored_public FROM pgp_keys")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    // —— Calendar ——
+
+    pub fn upsert_calendar_account(
+        &self,
+        id: Uuid,
+        name: &str,
+        caldav_url: &str,
+        username: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            r#"
+            INSERT INTO calendar_accounts (id, name, caldav_url, username, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              caldav_url = excluded.caldav_url,
+              username = excluded.username
+            "#,
+            params![id.to_string(), name, caldav_url, username, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_calendar_accounts(&self) -> DbResult<Vec<CalendarAccountDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, caldav_url, username, created_at FROM calendar_accounts ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CalendarAccountDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                name: row.get(1)?,
+                caldav_url: row.get(2)?,
+                username: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn delete_calendar_account(&self, id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM calendar_accounts WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert_calendar_event(
+        &self,
+        id: Uuid,
+        calendar_account_id: Option<Uuid>,
+        ical_uid: Option<&str>,
+        title: &str,
+        starts_at: i64,
+        ends_at: Option<i64>,
+        location: Option<&str>,
+        description: Option<&str>,
+        all_day: bool,
+        source_message_id: Option<Uuid>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO calendar_events (
+              id, account_id, ical_uid, title, starts_at, ends_at, location, description,
+              calendar_account_id, all_day, source_message_id
+            ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(id) DO UPDATE SET
+              ical_uid = excluded.ical_uid,
+              title = excluded.title,
+              starts_at = excluded.starts_at,
+              ends_at = excluded.ends_at,
+              location = excluded.location,
+              description = excluded.description,
+              calendar_account_id = excluded.calendar_account_id,
+              all_day = excluded.all_day,
+              source_message_id = excluded.source_message_id
+            "#,
+            params![
+                id.to_string(),
+                ical_uid,
+                title,
+                starts_at,
+                ends_at,
+                location,
+                description,
+                calendar_account_id.map(|u| u.to_string()),
+                if all_day { 1 } else { 0 },
+                source_message_id.map(|u| u.to_string()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_calendar_events(&self, from: i64, to: i64) -> DbResult<Vec<CalendarEventDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, calendar_account_id, ical_uid, title, starts_at, ends_at, location,
+                   description, all_day, source_message_id
+            FROM calendar_events
+            WHERE starts_at <= ?2 AND (ends_at IS NULL OR ends_at >= ?1)
+            ORDER BY starts_at ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![from, to], |row| {
+            Ok(CalendarEventDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                calendar_account_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                ical_uid: row.get(2)?,
+                title: row.get(3)?,
+                starts_at: row.get(4)?,
+                ends_at: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                all_day: row.get::<_, i64>(8)? != 0,
+                source_message_id: row
+                    .get::<_, Option<String>>(9)?
+                    .map(parse_uuid)
+                    .transpose()?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn delete_calendar_event(&self, id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM calendar_events WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert_calendar_task(
+        &self,
+        id: Uuid,
+        calendar_account_id: Option<Uuid>,
+        ical_uid: Option<&str>,
+        title: &str,
+        due_at: Option<i64>,
+        completed: bool,
+        notes: &str,
+        source_message_id: Option<Uuid>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            r#"
+            INSERT INTO calendar_tasks (
+              id, calendar_account_id, ical_uid, title, due_at, completed, notes,
+              source_message_id, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+              calendar_account_id = excluded.calendar_account_id,
+              ical_uid = excluded.ical_uid,
+              title = excluded.title,
+              due_at = excluded.due_at,
+              completed = excluded.completed,
+              notes = excluded.notes,
+              source_message_id = excluded.source_message_id,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                id.to_string(),
+                calendar_account_id.map(|u| u.to_string()),
+                ical_uid,
+                title,
+                due_at,
+                if completed { 1 } else { 0 },
+                notes,
+                source_message_id.map(|u| u.to_string()),
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_calendar_tasks(&self, include_completed: bool) -> DbResult<Vec<CalendarTaskDto>> {
+        let conn = self.conn.lock();
+        let sql = if include_completed {
+            "SELECT id, calendar_account_id, ical_uid, title, due_at, completed, notes, source_message_id, created_at, updated_at FROM calendar_tasks ORDER BY completed ASC, due_at IS NULL, due_at ASC"
+        } else {
+            "SELECT id, calendar_account_id, ical_uid, title, due_at, completed, notes, source_message_id, created_at, updated_at FROM calendar_tasks WHERE completed = 0 ORDER BY due_at IS NULL, due_at ASC"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CalendarTaskDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                calendar_account_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                ical_uid: row.get(2)?,
+                title: row.get(3)?,
+                due_at: row.get(4)?,
+                completed: row.get::<_, i64>(5)? != 0,
+                notes: row.get(6)?,
+                source_message_id: row
+                    .get::<_, Option<String>>(7)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn delete_calendar_task(&self, id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM calendar_tasks WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
     }
 }
 

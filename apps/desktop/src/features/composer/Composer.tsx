@@ -108,6 +108,8 @@ export function Composer({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sendLaterOpen, setSendLaterOpen] = useState(false);
+  const [pgpSign, setPgpSign] = useState(false);
+  const [pgpEncrypt, setPgpEncrypt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -126,6 +128,8 @@ export function Composer({
       setError(null);
       setStatus(null);
       setSendLaterOpen(false);
+      setPgpSign(false);
+      setPgpEncrypt(false);
       return;
     }
 
@@ -147,6 +151,8 @@ export function Composer({
     setError(null);
     setStatus(null);
     setSendLaterOpen(false);
+    setPgpSign(false);
+    setPgpEncrypt(false);
 
     if (!replyTo && !initialBody && accounts[0]?.id) {
       api
@@ -243,6 +249,8 @@ export function Composer({
         : [],
       attachments,
       draftId,
+      pgpSign,
+      pgpEncrypt,
     };
   }
 
@@ -421,6 +429,22 @@ export function Composer({
         </div>
 
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
+          <label className="mr-auto flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pgpSign}
+              onChange={(e) => setPgpSign(e.target.checked)}
+            />
+            {t("pgpSign")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pgpEncrypt}
+              onChange={(e) => setPgpEncrypt(e.target.checked)}
+            />
+            {t("pgpEncrypt")}
+          </label>
           <Button type="button" variant="secondary" onClick={onClose}>
             {t("discard")}
           </Button>

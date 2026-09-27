@@ -21,6 +21,7 @@ import {
 } from "@/features/mail/MessageList";
 import { QuickTriage } from "@/features/mail/QuickTriage";
 import { OfflinePromptDialog } from "@/features/mail/OfflinePromptDialog";
+import { CalendarPanel } from "@/features/calendar/CalendarPanel";
 import { PlannedPanel } from "@/features/mail/PlannedPanel";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
@@ -87,6 +88,7 @@ export function AppShell() {
   const [offlinePrompt, setOfflinePrompt] =
     useState<OfflinePromptEvent | null>(null);
   const [plannedOpen, setPlannedOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [plannedSummary, setPlannedSummary] =
     useState<PlannedSummaryDto | null>(null);
   const desktop = isDesktopShell();
@@ -320,6 +322,7 @@ export function AppShell() {
 
   const handleSelectAccountFilter = useCallback((accountId: string | null) => {
     setPlannedOpen(false);
+    setCalendarOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       accountId,
@@ -333,6 +336,7 @@ export function AppShell() {
   const handleSelectDrafts = useCallback(() => {
     selectMessage(null);
     setPlannedOpen(false);
+    setCalendarOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
@@ -346,6 +350,7 @@ export function AppShell() {
   const handleSelectSpam = useCallback(() => {
     selectMessage(null);
     setPlannedOpen(false);
+    setCalendarOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
@@ -359,6 +364,7 @@ export function AppShell() {
   const handleSelectOffline = useCallback(() => {
     selectMessage(null);
     setPlannedOpen(false);
+    setCalendarOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
@@ -371,6 +377,7 @@ export function AppShell() {
 
   const handleSelectPlanned = useCallback(() => {
     selectMessage(null);
+    setCalendarOpen(false);
     setPlannedOpen(true);
     setInboxFilters((prev) => ({
       ...prev,
@@ -382,6 +389,19 @@ export function AppShell() {
     }));
     refreshPlannedSummary();
   }, [refreshPlannedSummary, selectMessage]);
+
+  const handleSelectCalendar = useCallback(() => {
+    selectMessage(null);
+    setPlannedOpen(false);
+    setCalendarOpen(true);
+    setInboxFilters((prev) => ({
+      ...prev,
+      mailboxId: null,
+      mailboxRole: null,
+      localOnly: false,
+      snoozedOnly: false,
+    }));
+  }, [selectMessage]);
 
   const refreshMailQueries = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -541,6 +561,13 @@ export function AppShell() {
         group: t("cmdGroupNavigate"),
         keywords: "offline local only",
         onSelect: () => handleSelectOffline(),
+      },
+      {
+        id: "calendar",
+        label: t("calendar"),
+        group: t("cmdGroupNavigate"),
+        keywords: "calendar kalender tasks aufgaben",
+        onSelect: () => handleSelectCalendar(),
       },
       {
         id: "contacts",
@@ -752,6 +779,7 @@ export function AppShell() {
     handleForward,
     handleMarkSpam,
     handleSelectAccountFilter,
+    handleSelectCalendar,
     handleSelectDrafts,
     handleSelectOffline,
     handleSelectPlanned,
@@ -821,6 +849,7 @@ export function AppShell() {
             (plannedSummary?.snoozedCount ?? 0) +
             (plannedSummary?.outboundPendingCount ?? 0)
           }
+          calendarSelected={calendarOpen}
           syncStatus={syncStatus}
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
@@ -829,6 +858,7 @@ export function AppShell() {
           onSelectSpam={handleSelectSpam}
           onSelectOffline={handleSelectOffline}
           onSelectPlanned={handleSelectPlanned}
+          onSelectCalendar={handleSelectCalendar}
           onCompose={() => openComposer()}
           onSync={handleSync}
           onAddAccount={() => setAccountSetupOpen(true)}
@@ -871,6 +901,10 @@ export function AppShell() {
                 refreshPlannedSummary();
               }}
             />
+          </div>
+        ) : calendarOpen ? (
+          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+            <CalendarPanel />
           </div>
         ) : (
           <>
@@ -923,6 +957,40 @@ export function AppShell() {
                 }}
                 onSnooze={(preset) => {
                   void handleSnooze(preset);
+                }}
+                onCreateEvent={() => {
+                  if (!selectedMessageId) return;
+                  const startsAt = Math.floor(Date.now() / 1000) + 3600;
+                  void api
+                    .calendarEventFromMessage(
+                      selectedMessageId,
+                      startsAt,
+                      startsAt + 3600,
+                    )
+                    .then(() => {
+                      setCalendarOpen(true);
+                      setPlannedOpen(false);
+                      setSyncStatus(t("eventCreated"));
+                    })
+                    .catch((err) =>
+                      setSyncStatus((err as AppError).message),
+                    );
+                }}
+                onCreateTask={() => {
+                  if (!selectedMessageId) return;
+                  void api
+                    .calendarTaskFromMessage(
+                      selectedMessageId,
+                      Math.floor(Date.now() / 1000) + 86400,
+                    )
+                    .then(() => {
+                      setCalendarOpen(true);
+                      setPlannedOpen(false);
+                      setSyncStatus(t("taskCreated"));
+                    })
+                    .catch((err) =>
+                      setSyncStatus((err as AppError).message),
+                    );
                 }}
                 onReplySent={() => {
                   void refresh();

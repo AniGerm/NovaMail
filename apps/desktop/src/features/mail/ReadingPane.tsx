@@ -16,6 +16,7 @@ import { api } from "@/shared/api/client";
 import type {
   AppError,
   MessageDetailDto,
+  PgpDecryptResult,
   SnoozePreset,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
@@ -34,6 +35,8 @@ interface ReadingPaneProps {
   onMarkSpam?: () => void;
   onMarkNotSpam?: () => void;
   onSnooze?: (preset: SnoozePreset) => void;
+  onCreateEvent?: () => void;
+  onCreateTask?: () => void;
   onReplySent?: () => void;
 }
 
@@ -47,11 +50,14 @@ export function ReadingPane({
   onMarkSpam,
   onMarkNotSpam,
   onSnooze,
+  onCreateEvent,
+  onCreateTask,
   onReplySent,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
+  const [pgpResult, setPgpResult] = useState<PgpDecryptResult | null>(null);
   const [variantA, setVariantA] = useState<string | null>(null);
   const [variantB, setVariantB] = useState<string | null>(null);
   const [activeVariant, setActiveVariant] = useState<ReplyVariant>("a");
@@ -70,9 +76,16 @@ export function ReadingPane({
     setDraft("");
     setAiError(null);
     setSnoozeOpen(false);
+    setPgpResult(null);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
+    void api
+      .pgpInspectMessage(id)
+      .then((result) => {
+        if (!cancelled && result) setPgpResult(result);
+      })
+      .catch(() => undefined);
     void api
       .aiMessageInsights(id)
       .then((insights) => {
@@ -276,6 +289,16 @@ export function ReadingPane({
                 <ShieldAlert />
               </IconButton>
             )}
+            {onCreateEvent ? (
+              <Button type="button" size="sm" variant="ghost" onClick={onCreateEvent}>
+                {t("asEvent")}
+              </Button>
+            ) : null}
+            {onCreateTask ? (
+              <Button type="button" size="sm" variant="ghost" onClick={onCreateTask}>
+                {t("asTask")}
+              </Button>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--nova-ink-muted)]">
@@ -323,6 +346,25 @@ export function ReadingPane({
                 </li>
               ))}
             </ul>
+          </section>
+        ) : null}
+
+        {pgpResult ? (
+          <section
+            aria-label={t("pgpResult")}
+            className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-4 py-3"
+          >
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
+              {t("pgpResult")}
+              {pgpResult.signatureValid === true
+                ? ` · ${t("pgpSignatureValid")}`
+                : pgpResult.signatureValid === false
+                  ? ` · ${t("pgpSignatureInvalid")}`
+                  : ""}
+            </p>
+            <pre className="whitespace-pre-wrap text-sm leading-6">
+              {pgpResult.plaintext}
+            </pre>
           </section>
         ) : null}
 

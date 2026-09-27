@@ -166,6 +166,12 @@ pub struct SendMessageRequest {
     /// When sending an edited draft, delete this local draft after success.
     #[serde(default)]
     pub draft_id: Option<Uuid>,
+    /// Sign body with the account's OpenPGP secret key (matched by email).
+    #[serde(default)]
+    pub pgp_sign: bool,
+    /// Encrypt body to recipient public keys when available.
+    #[serde(default)]
+    pub pgp_encrypt: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
