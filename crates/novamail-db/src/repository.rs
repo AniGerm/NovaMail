@@ -17,7 +17,8 @@ use crate::models::{
     RuleRecord, SignatureRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN, FLAG_STARRED,
 };
 use novamail_ipc::{
-    AttachmentDto, ContactAddress, ContactCustomField, ContactDto, LabelDto, RuleDto, SignatureDto,
+    AddressDto, AttachmentDto, ContactAddress, ContactCustomField, ContactDto, LabelDto,
+    RecipientSuggestion, RuleDto, SignatureDto,
 };
 use crate::{DbError, DbResult};
 
@@ -442,7 +443,192 @@ impl Database {
                 message.raw_path,
             ],
         )?;
+        drop(conn);
+        let mut addrs = vec![message.from.clone()];
+        addrs.extend(message.to.iter().cloned());
+        addrs.extend(message.cc.iter().cloned());
+        self.remember_recipients(&addrs, message.date)?;
         Ok(())
+    }
+
+    pub fn remember_recipients(&self, addresses: &[AddressDto], seen_at: i64) -> DbResult<()> {
+        let conn = self.conn.lock();
+        for addr in addresses {
+            let email = addr.email.trim().to_ascii_lowercase();
+            if email.is_empty() || !email.contains('@') {
+                continue;
+            }
+            let name = addr
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("");
+            conn.execute(
+                r#"
+                INSERT INTO known_recipients (email, name, last_seen, seen_count)
+                VALUES (?1, ?2, ?3, 1)
+                ON CONFLICT(email) DO UPDATE SET
+                  name = CASE
+                    WHEN excluded.name != '' THEN excluded.name
+                    ELSE known_recipients.name
+                  END,
+                  last_seen = MAX(known_recipients.last_seen, excluded.last_seen),
+                  seen_count = known_recipients.seen_count + 1
+                "#,
+                params![email, name, seen_at],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Build/refresh the recipient index from recent message headers (idempotent).
+    pub fn backfill_known_recipients(&self, limit: usize) -> DbResult<usize> {
+        let rows: Vec<(String, String, String, i64)> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT from_json, to_json, cc_json, date
+                FROM messages
+                ORDER BY date DESC
+                LIMIT ?1
+                "#,
+            )?;
+            let mapped = stmt.query_map(params![limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            mapped.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut count = 0usize;
+        for (from_json, to_json, cc_json, date) in rows {
+            let mut addrs = Vec::new();
+            if let Ok(from) = serde_json::from_str::<AddressDto>(&from_json) {
+                addrs.push(from);
+            }
+            if let Ok(to) = serde_json::from_str::<Vec<AddressDto>>(&to_json) {
+                addrs.extend(to);
+            }
+            if let Ok(cc) = serde_json::from_str::<Vec<AddressDto>>(&cc_json) {
+                addrs.extend(cc);
+            }
+            count += addrs.len();
+            self.remember_recipients(&addrs, date)?;
+        }
+        Ok(count)
+    }
+
+    pub fn suggest_recipients(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> DbResult<Vec<RecipientSuggestion>> {
+        let needle = query.trim();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let known_count: i64 = {
+            let conn = self.conn.lock();
+            conn.query_row("SELECT COUNT(*) FROM known_recipients", [], |r| r.get(0))?
+        };
+        if known_count == 0 {
+            let _ = self.backfill_known_recipients(3_000);
+        }
+
+        let contacts = self.list_contacts(Some(needle))?;
+        let mut out: Vec<(u32, RecipientSuggestion)> = Vec::new();
+        let mut seen_emails = std::collections::HashSet::new();
+
+        for contact in contacts.into_iter().take(limit.saturating_mul(2)) {
+            for email in &contact.emails {
+                let email_l = email.trim().to_ascii_lowercase();
+                if email_l.is_empty() || !seen_emails.insert(email_l.clone()) {
+                    continue;
+                }
+                let score = contact_fuzzy_score(&contact, needle).unwrap_or(0) + 50;
+                out.push((
+                    score,
+                    RecipientSuggestion {
+                        email: email_l,
+                        name: Some(contact.display_name.clone()).filter(|s| !s.is_empty()),
+                        source: "contact".into(),
+                        in_contacts: true,
+                        contact_id: Some(contact.id),
+                    },
+                ));
+            }
+        }
+
+        let history: Vec<(String, String, i64, i64)> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT email, name, last_seen, seen_count
+                FROM known_recipients
+                ORDER BY seen_count DESC, last_seen DESC
+                LIMIT 2000
+                "#,
+            )?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            mapped.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let contact_emails: std::collections::HashSet<String> = {
+            let all = self.list_contacts(None)?;
+            all.into_iter()
+                .flat_map(|c| c.emails.into_iter().map(|e| e.to_ascii_lowercase()))
+                .collect()
+        };
+
+        for (email, name, _last_seen, seen_count) in history {
+            if seen_emails.contains(&email) {
+                continue;
+            }
+            let mut score = 0u32;
+            let mut hit = false;
+            if let Some(s) = fuzzy_match_score(&email, needle) {
+                hit = true;
+                score = score.max(s);
+            }
+            if let Some(s) = fuzzy_match_score(&name, needle) {
+                hit = true;
+                score = score.max(s + 20);
+            }
+            if !hit {
+                continue;
+            }
+            score = score.saturating_add((seen_count as u32).min(40));
+            let in_contacts = contact_emails.contains(&email);
+            seen_emails.insert(email.clone());
+            out.push((
+                score,
+                RecipientSuggestion {
+                    email,
+                    name: Some(name).filter(|s| !s.is_empty()),
+                    source: if in_contacts {
+                        "contact".into()
+                    } else {
+                        "history".into()
+                    },
+                    in_contacts,
+                    contact_id: None,
+                },
+            ));
+        }
+
+        out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.email.cmp(&b.1.email)));
+        Ok(out.into_iter().take(limit).map(|(_, s)| s).collect())
     }
 
     pub fn get_message(&self, id: Uuid) -> DbResult<MessageDetailDto> {

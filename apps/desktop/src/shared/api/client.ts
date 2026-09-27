@@ -9,6 +9,7 @@ import type {
   CardDavServerStatus,
   ContactDto,
   ContactsBookSettings,
+  RecipientSuggestion,
   ExportBackupResponse,
   ImportBackupResult,
   AiInstallOllamaResponse,
@@ -152,6 +153,8 @@ export const api = {
     call<string>("attachments_open_path", { attachmentId }),
   contactsList: (query?: string | null) =>
     call<ContactDto[]>("contacts_list", { query: query ?? null }),
+  recipientsSuggest: (query: string, limit = 12) =>
+    call<RecipientSuggestion[]>("recipients_suggest", { query, limit }),
   contactsUpsert: (request: UpsertContactRequest) =>
     call<ContactDto>("contacts_upsert", { request }),
   contactsDelete: (contactId: string) =>

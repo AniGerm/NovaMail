@@ -231,6 +231,11 @@ export const en: Translations = {
   saveContact: "Save contact",
   contactSaved: "Contact saved.",
   fuzzySearchContacts: "Search",
+  recipientSuggestions: "Recipient suggestions",
+  recipientFromContacts: "Address book",
+  recipientFromHistory: "Past mail",
+  addRecipientToContacts: "Add recipient to address book",
+  recipientAddedHint: "Contact prefilled from mail history",
   ldapLookup: "LDAP lookup",
   ldapSyncTitle: "LDAP sync",
   ldapSyncDescription:

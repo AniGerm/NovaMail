@@ -19,7 +19,7 @@ use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
     AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
     AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto, BackupAccount,
-    BackupAccountCredentials, BackupContact, BackupPayload,
+    BackupAccountCredentials, BackupContact, BackupPayload, RecipientSuggestion,
     CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
     ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
     LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
@@ -552,6 +552,16 @@ impl AppState {
 
     pub fn list_contacts(&self, query: Option<String>) -> CoreResult<Vec<ContactDto>> {
         Ok(self.db.list_contacts(query.as_deref())?)
+    }
+
+    pub fn suggest_recipients(
+        &self,
+        query: String,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<RecipientSuggestion>> {
+        Ok(self
+            .db
+            .suggest_recipients(&query, limit.unwrap_or(12) as usize)?)
     }
 
     pub fn upsert_contact(&self, request: UpsertContactRequest) -> CoreResult<ContactDto> {

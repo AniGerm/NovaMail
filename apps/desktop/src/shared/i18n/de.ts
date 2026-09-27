@@ -229,6 +229,11 @@ export const de = {
   saveContact: "Kontakt speichern",
   contactSaved: "Kontakt gespeichert.",
   fuzzySearchContacts: "Suche",
+  recipientSuggestions: "Empfängervorschläge",
+  recipientFromContacts: "Telefonbuch",
+  recipientFromHistory: "Bisherige Mails",
+  addRecipientToContacts: "Empfänger zum Telefonbuch hinzufügen",
+  recipientAddedHint: "Kontakt aus Mail-Historie vorausgefüllt",
   ldapLookup: "LDAP-Suche",
   ldapSyncTitle: "LDAP-Synchronisation",
   ldapSyncDescription:

@@ -73,6 +73,7 @@ pub fn run() {
             commands::attachments_list,
             commands::attachments_open_path,
             commands::contacts_list,
+            commands::recipients_suggest,
             commands::contacts_upsert,
             commands::contacts_delete,
             commands::carddav_start,

@@ -17,6 +17,7 @@ import type {
   ContactCustomField,
   ContactDto,
   ContactNameOrder,
+  ContactPrefill,
   ContactSortBy,
   ContactsBookSettings,
   UpsertContactRequest,
@@ -175,12 +176,28 @@ function sortKey(contact: ContactDto, sortBy: ContactSortBy): string {
   }
 }
 
+function prefillToDraft(prefill: ContactPrefill, workLabel: string): Draft {
+  return {
+    ...emptyDraft(),
+    displayName: prefill.displayName ?? "",
+    givenName: prefill.givenName ?? "",
+    familyName: prefill.familyName ?? "",
+    emails: (prefill.emails ?? []).join(", "),
+    notes: prefill.notes ?? "",
+    addresses: [emptyAddress(workLabel)],
+  };
+}
+
 export function ContactsDialog({
   open,
   onClose,
+  prefill = null,
+  onPrefillConsumed,
 }: {
   open: boolean;
   onClose: () => void;
+  prefill?: ContactPrefill | null;
+  onPrefillConsumed?: () => void;
 }) {
   const t = useT();
   const [panel, setPanel] = useState<Panel>("main");
@@ -228,6 +245,16 @@ export function ContactsDialog({
     refresh().catch((err) => setError((err as AppError).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query]);
+
+  useEffect(() => {
+    if (!open || !prefill) return;
+    setSelectedId(null);
+    setDraft(prefillToDraft(prefill, t("addressLabelWork")));
+    setPanel("main");
+    setError(null);
+    setStatusInfo(null);
+    onPrefillConsumed?.();
+  }, [open, prefill, onPrefillConsumed, t]);
 
   const selected = useMemo(
     () => contacts.find((c) => c.id === selectedId) ?? null,

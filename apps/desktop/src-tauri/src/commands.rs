@@ -2,7 +2,7 @@ use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
     AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
     AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
-    ContactDto, ContactsBookSettings,
+    ContactDto, ContactsBookSettings, RecipientSuggestion,
     ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
     ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
@@ -260,6 +260,18 @@ pub fn contacts_list(
     query: Option<String>,
 ) -> Result<Vec<ContactDto>, AppError> {
     state.app.list_contacts(query).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn recipients_suggest(
+    state: State<'_, DesktopState>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<RecipientSuggestion>, AppError> {
+    state
+        .app
+        .suggest_recipients(query, limit)
+        .map_err(map_err)
 }
 
 #[tauri::command]

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { Button, Input } from "@novamail/ui";
 
+import { RecipientField } from "@/features/composer/RecipientField";
 import { api } from "@/shared/api/client";
 import type {
   AccountDto,
+  AddressDto,
   AppError,
+  ContactPrefill,
   MessageDetailDto,
   OutgoingAttachment,
 } from "@/shared/api/types";
@@ -18,6 +21,25 @@ interface ComposerProps {
   initialSubject?: string;
   onClose: () => void;
   onSent: () => void;
+  onAddToContacts?: (prefill: ContactPrefill) => void;
+}
+
+function formatAddress(addr: AddressDto): string {
+  const name = addr.name?.trim();
+  if (name) return `${name} <${addr.email}>`;
+  return addr.email;
+}
+
+function parseRecipientToken(token: string): AddressDto {
+  const trimmed = token.trim();
+  const match = trimmed.match(/^(.*?)\s*<([^>]+)>$/);
+  if (match) {
+    return {
+      name: match[1]?.trim() || null,
+      email: (match[2] ?? "").trim(),
+    };
+  }
+  return { email: trimmed };
 }
 
 export function Composer({
@@ -28,6 +50,7 @@ export function Composer({
   initialSubject,
   onClose,
   onSent,
+  onAddToContacts,
 }: ComposerProps) {
   const t = useT();
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
@@ -41,7 +64,7 @@ export function Composer({
   useEffect(() => {
     if (!open) return;
     setAccountId((current) => current || accounts[0]?.id || "");
-    setTo(replyTo?.summary.from.email ?? "");
+    setTo(replyTo ? formatAddress(replyTo.summary.from) : "");
     setSubject(
       initialSubject ??
         (replyTo ? `Re: ${replyTo.summary.subject}` : ""),
@@ -99,7 +122,7 @@ export function Composer({
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean)
-          .map((email) => ({ email })),
+          .map(parseRecipientToken),
         cc: [],
         bcc: [],
         subject,
@@ -160,10 +183,11 @@ export function Composer({
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-sm">
-            <span>{t("to")}</span>
-            <Input required value={to} onChange={(e) => setTo(e.target.value)} />
-          </label>
+          <RecipientField
+            value={to}
+            onChange={setTo}
+            onAddToContacts={onAddToContacts}
+          />
           <label className="grid gap-1 text-sm">
             <span>{t("subject")}</span>
             <Input

@@ -56,6 +56,17 @@ pub struct ContactDto {
     pub updated_at: i64,
 }
 
+/// Suggestion for composer recipient autocomplete (contacts + mail history).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipientSuggestion {
+    pub email: String,
+    pub name: Option<String>,
+    pub source: String,
+    pub in_contacts: bool,
+    pub contact_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertContactRequest {

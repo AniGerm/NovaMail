@@ -195,6 +195,18 @@ const MIGRATIONS: &[&str] = &[
       value TEXT NOT NULL
     );
     "#,
+    // v4 — background recipient index for composer autocomplete
+    r#"
+    CREATE TABLE IF NOT EXISTS known_recipients (
+      email TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      last_seen INTEGER NOT NULL,
+      seen_count INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_known_recipients_last_seen
+      ON known_recipients(last_seen DESC);
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -247,7 +259,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

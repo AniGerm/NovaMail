@@ -229,6 +229,22 @@ export interface ContactDto {
   updatedAt: number;
 }
 
+export interface RecipientSuggestion {
+  email: string;
+  name?: string | null;
+  source: string;
+  inContacts: boolean;
+  contactId?: string | null;
+}
+
+export type ContactPrefill = {
+  displayName?: string;
+  givenName?: string;
+  familyName?: string;
+  emails?: string[];
+  notes?: string;
+};
+
 export interface UpsertContactRequest {
   id?: string | null;
   displayName: string;

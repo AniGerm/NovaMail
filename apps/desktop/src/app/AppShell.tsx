@@ -18,7 +18,13 @@ import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
-import type { AccountDto, AiSettings, AppError, MessageDetailDto } from "@/shared/api/types";
+import type {
+  AccountDto,
+  AiSettings,
+  AppError,
+  ContactPrefill,
+  MessageDetailDto,
+} from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 import { nextThemeMode, type ThemeMode } from "@/shared/theme/resolveTheme";
@@ -53,6 +59,10 @@ export function AppShell() {
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
   const [composerBody, setComposerBody] = useState("");
   const [composerSubject, setComposerSubject] = useState<string | undefined>();
+  const [contactPrefill, setContactPrefill] = useState<ContactPrefill | null>(
+    null,
+  );
+  const clearContactPrefill = useCallback(() => setContactPrefill(null), []);
   const [inboxFilters, setInboxFilters] =
     useState<InboxFilters>(defaultInboxFilters);
   const desktop = isDesktopShell();
@@ -524,6 +534,10 @@ export function AppShell() {
           setComposerSubject(undefined);
         }}
         onSent={refresh}
+        onAddToContacts={(prefill) => {
+          setContactPrefill(prefill);
+          setContactsOpen(true);
+        }}
       />
       <SettingsDialog
         open={settingsOpen}
@@ -533,7 +547,15 @@ export function AppShell() {
         }}
         accounts={accounts}
       />
-      <ContactsDialog open={contactsOpen} onClose={() => setContactsOpen(false)} />
+      <ContactsDialog
+        open={contactsOpen}
+        prefill={contactPrefill}
+        onPrefillConsumed={clearContactPrefill}
+        onClose={() => {
+          setContactsOpen(false);
+          setContactPrefill(null);
+        }}
+      />
       <QuickTriage
         open={triageOpen}
         messages={messages}
