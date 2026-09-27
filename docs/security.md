@@ -19,14 +19,15 @@
 |--------|------------|
 | Credential theft from DB | Secrets only in OS keyring |
 | HTML XSS from mail | ammonia sanitization before IPC |
-| Plugin escape | WASM + capability manifests (scaffold) |
+| Plugin escape | WASM plugin runtime is a **scaffold** (not shipped as a product surface yet) |
 | OAuth interception | localhost callback bound to 127.0.0.1 only |
 | OAuth token expiry | Automatic refresh before IMAP/SMTP when `expires_at` near |
-| Open CardDAV on LAN | HTTP Basic auth (generated password in settings) |
+| Open CardDAV / LDAP on LAN | **Trusted LAN only**; HTTP Basic auth (generated password in settings) — not for public internet |
 | Supply-chain updates | Signed releases (packaging phase) |
 
 ## Out of scope for MVP
 
-- Full OpenPGP key lifecycle UI
 - Remote image proxy
 - Multi-user OS profile isolation beyond keyring
+- Production-hardened CardDAV/LDAP exposure beyond the local network
+- Broad automated test coverage (expanding)
