@@ -559,16 +559,43 @@ export function SettingsDialog({
               variant="ghost"
               disabled={aiBusy || pullBusy}
               onClick={() => {
+                setError(null);
+                setAiStatus(t("aiSettingsRefreshing"));
                 void refreshAi()
-                  .then(() => setAiStatus(null))
-                  .catch((err) => setError((err as AppError).message));
+                  .then(() =>
+                    api.aiRuntimeStatus().then((runtime) => {
+                      const parts = [
+                        runtime.ollamaReachable
+                          ? t("aiRuntimeOllamaYes")
+                          : t("aiRuntimeOllamaNo"),
+                        runtime.nvidiaGpu
+                          ? t("aiRuntimeGpuYes")
+                          : t("aiRuntimeGpuNo"),
+                        runtime.models.length > 0
+                          ? t("aiSettingsModelsCount", {
+                              count: runtime.models.length,
+                            })
+                          : t("aiSettingsNoModels"),
+                      ];
+                      setAiStatus(
+                        `${t("aiSettingsRefreshed")} · ${parts.join(" · ")}`,
+                      );
+                      setAiRuntime(runtime);
+                    }),
+                  )
+                  .catch((err) => {
+                    setAiStatus(null);
+                    setError((err as AppError).message);
+                  });
               }}
             >
               {t("aiSettingsRefresh")}
             </Button>
           </div>
           {aiStatus ? (
-            <p className="text-xs text-[var(--nova-ink-muted)]">{aiStatus}</p>
+            <p className="text-xs text-[var(--nova-ink-muted)]" role="status">
+              {aiStatus}
+            </p>
           ) : null}
         </section>
 

@@ -42,6 +42,7 @@ interface MessageListProps {
   threads: ThreadListItemDto[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onToggleStar?: (messageId: string, starred: boolean) => void;
   total: number;
   filters: InboxFilters;
   onFiltersChange: (next: InboxFilters) => void;
@@ -67,6 +68,7 @@ export function MessageList({
   threads,
   selectedId,
   onSelect,
+  onToggleStar,
   total,
   filters,
   onFiltersChange,
@@ -416,9 +418,29 @@ export function MessageList({
                   >
                     {displayName(message.from)}
                   </span>
-                  <span className="shrink-0 text-xs text-[var(--nova-ink-muted)]">
-                    {formatMessageDate(message.date, locale)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={t("starMessage")}
+                      aria-pressed={message.starred}
+                      className="rounded p-0.5 text-[var(--nova-ink-muted)] hover:bg-[var(--nova-surface)] hover:text-[var(--nova-warning)]"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleStar?.(message.id, !message.starred);
+                      }}
+                    >
+                      <Star
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          message.starred &&
+                            "fill-[var(--nova-warning)] text-[var(--nova-warning)]",
+                        )}
+                      />
+                    </button>
+                    <span className="text-xs text-[var(--nova-ink-muted)]">
+                      {formatMessageDate(message.date, locale)}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span
@@ -433,9 +455,6 @@ export function MessageList({
                       ? message.snippet || message.subject || t("noSubject")
                       : message.subject || t("noSubject")}
                   </span>
-                  {message.starred ? (
-                    <Star className="h-3.5 w-3.5 fill-[var(--nova-warning)] text-[var(--nova-warning)]" />
-                  ) : null}
                   {message.hasAttachments ? (
                     <Paperclip className="h-3.5 w-3.5 text-[var(--nova-ink-muted)]" />
                   ) : null}

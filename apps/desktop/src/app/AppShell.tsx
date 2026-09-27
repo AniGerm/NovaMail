@@ -151,17 +151,27 @@ export function AppShell() {
     }
   }, [desktop, refresh, setSyncStatus, t]);
 
-  const handleToggleStar = useCallback(async () => {
-    if (!messageQuery.data || !desktop) return;
-    await api.messagesSetFlags({
-      messageId: messageQuery.data.summary.id,
-      starred: !messageQuery.data.summary.starred,
-    });
-    await queryClient.invalidateQueries({
-      queryKey: ["message", messageQuery.data.summary.id],
-    });
-    await queryClient.invalidateQueries({ queryKey: ["messages"] });
-  }, [desktop, messageQuery.data, queryClient]);
+  const handleToggleStar = useCallback(
+    async (messageId?: string, starred?: boolean) => {
+      if (!desktop) return;
+      const id = messageId ?? messageQuery.data?.summary.id;
+      if (!id) return;
+      const nextStarred =
+        starred ??
+        (messageQuery.data?.summary.id === id
+          ? !messageQuery.data.summary.starred
+          : true);
+      await api.messagesSetFlags({
+        messageId: id,
+        starred: nextStarred,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["message", id],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["messages"] });
+    },
+    [desktop, messageQuery.data, queryClient],
+  );
 
   const handleArchive = useCallback(async () => {
     if (!selectedMessageId || !desktop) return;
@@ -446,6 +456,9 @@ export function AppShell() {
                 threads={threads}
                 selectedId={selectedMessageId}
                 onSelect={selectMessage}
+                onToggleStar={(messageId, starred) => {
+                  void handleToggleStar(messageId, starred);
+                }}
                 total={listTotal}
                 filters={inboxFilters}
                 onFiltersChange={setInboxFilters}
@@ -468,7 +481,9 @@ export function AppShell() {
                 onForward={() => {
                   void handleForward();
                 }}
-                onToggleStar={handleToggleStar}
+                onToggleStar={() => {
+                  void handleToggleStar();
+                }}
                 onReplySent={() => {
                   void refresh();
                 }}

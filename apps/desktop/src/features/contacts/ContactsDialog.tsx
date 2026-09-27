@@ -42,14 +42,15 @@ type Draft = {
   ldapDn: string | null;
 };
 
-const emptyAddress = (): ContactAddress => ({
-  label: "WORK",
+const emptyAddress = (label = ""): ContactAddress => ({
+  label,
   street: "",
   city: "",
   region: "",
   postalCode: "",
   country: "",
 });
+
 
 const emptyDraft = (): Draft => ({
   id: null,
@@ -248,7 +249,10 @@ export function ContactsDialog({
 
   function startNew() {
     setSelectedId(null);
-    setDraft(emptyDraft());
+    setDraft({
+      ...emptyDraft(),
+      addresses: [emptyAddress(t("addressLabelWork"))],
+    });
     setError(null);
     setStatusInfo(null);
     setPanel("main");
@@ -256,7 +260,11 @@ export function ContactsDialog({
 
   function selectContact(contact: ContactDto) {
     setSelectedId(contact.id);
-    setDraft(contactToDraft(contact));
+    const next = contactToDraft(contact);
+    if (!contact.addresses?.length) {
+      next.addresses = [emptyAddress(t("addressLabelWork"))];
+    }
+    setDraft(next);
     setError(null);
     setStatusInfo(null);
     setPanel("main");
@@ -784,7 +792,10 @@ export function ContactsDialog({
                     onClick={() =>
                       setDraft((prev) => ({
                         ...prev,
-                        addresses: [...prev.addresses, emptyAddress()],
+                        addresses: [
+                          ...prev.addresses,
+                          emptyAddress(t("addressLabelWork")),
+                        ],
                       }))
                     }
                   >
@@ -796,15 +807,14 @@ export function ContactsDialog({
                     key={`addr-${index}`}
                     className="grid gap-2 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] p-2 md:grid-cols-2"
                   >
-                    <Input
-                      placeholder={t("addressLabel")}
+                    <AddressLabelField
                       value={address.label}
-                      onChange={(e) =>
+                      onChange={(label) =>
                         setDraft((prev) => {
                           const addresses = [...prev.addresses];
                           addresses[index] = {
                             ...addresses[index],
-                            label: e.target.value,
+                            label,
                           };
                           return { ...prev, addresses };
                         })
@@ -1071,6 +1081,94 @@ export function ContactsDialog({
         <Button onClick={onClose}>{t("done")}</Button>
       </DialogActions>
     </Dialog>
+  );
+}
+
+function AddressLabelField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const t = useT();
+  const presets = [
+    t("addressLabelWork"),
+    t("addressLabelHome"),
+    t("addressLabelMobile"),
+    t("addressLabelOffice"),
+    t("addressLabelOther"),
+  ];
+  const normalized = (() => {
+    const upper = value.trim().toUpperCase();
+    if (upper === "WORK" || upper === "OFFICE") return t("addressLabelWork");
+    if (upper === "HOME") return t("addressLabelHome");
+    if (upper === "CELL" || upper === "MOBILE") return t("addressLabelMobile");
+    return value;
+  })();
+  const isPreset = presets.includes(normalized);
+  const [customMode, setCustomMode] = useState(
+    Boolean(normalized) && !isPreset,
+  );
+
+  useEffect(() => {
+    setCustomMode(Boolean(normalized) && !presets.includes(normalized));
+    // presets are locale-stable for a render locale
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalized]);
+
+  if (customMode) {
+    return (
+      <div className="grid gap-1">
+        <Input
+          list="novamail-address-labels"
+          placeholder={t("addressLabelPlaceholder")}
+          value={normalized}
+          onChange={(e) => onChange(e.target.value)}
+          autoFocus
+        />
+        <datalist id="novamail-address-labels">
+          {presets.map((label) => (
+            <option key={label} value={label} />
+          ))}
+        </datalist>
+        <button
+          type="button"
+          className="justify-self-start text-xs text-[var(--nova-accent)]"
+          onClick={() => {
+            setCustomMode(false);
+            onChange(t("addressLabelWork"));
+          }}
+        >
+          ← {t("addressLabelWork")}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <select
+      className="h-11 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 text-sm"
+      value={normalized || ""}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (next === "__custom__") {
+          setCustomMode(true);
+          onChange("");
+          return;
+        }
+        onChange(next);
+      }}
+      aria-label={t("addressLabel")}
+    >
+      <option value="">{t("addressLabelPlaceholder")}</option>
+      {presets.map((label) => (
+        <option key={label} value={label}>
+          {label}
+        </option>
+      ))}
+      <option value="__custom__">{t("addressLabelCustom")}</option>
+    </select>
   );
 }
 
