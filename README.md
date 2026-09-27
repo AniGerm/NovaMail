@@ -26,7 +26,7 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Virtualized message list for large mailboxes
 - Reading pane with HTML sanitization (safe rendering)
 - Favorites (star), archive, delete, **snooze**
-- Dedicated **Drafts**, **Spam**, **Offline**, and **Planned** views in the sidebar
+- Dedicated **Drafts**, **Spam**, **Offline**, **Planned**, and **Calendar** views in the sidebar
 - **Snooze**: hide a message until later today / tomorrow morning / next Monday; it returns via a local job tick
 - **Planned**: snoozed mail + scheduled outbound sends in one place (unsnooze / cancel)
 
