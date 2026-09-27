@@ -195,6 +195,11 @@ pub fn run() {
             commands::calendar_tasks_delete,
             commands::calendar_event_from_message,
             commands::calendar_task_from_message,
+            commands::calendar_collections_list,
+            commands::calendar_collections_upsert,
+            commands::calendar_collections_set_default,
+            commands::calendar_invitations_list,
+            commands::calendar_invitations_respond,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");

@@ -120,12 +120,16 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 
 ### Calendar & tasks (CalDAV)
 
-- Sidebar **Calendar** with day / week view
+- Opens **without a mail account** — offline-first local “Personal” calendar
+- Day (timed grid) / week views; event sheet with time, location, notes, reminder, calendar picker
+- Multiple calendars with **color**, visibility, and one **main calendar**
+- Invitation **Inbox** (iMIP `METHOD:REQUEST` from mail): Accept / Decline / Maybe
 - Local events and tasks; create from any mail (“As event” / “As task”) or from AI-detected time links
 - CalDAV accounts: URL + username/password (password in OS keyring)
 - **Discover calendars** (PROPFIND principal → calendar-home → collections)
-- Sync pulls VEVENT and VTODO into the local store
-- **Write-back**: new/updated events PUT as `.ics`; deletes remove the remote object (Nextcloud / generic CalDAV + Basic auth)
+- Sync pulls VEVENT and VTODO into the local store (per collection)
+- **Write-back**: new/updated events PUT as `.ics` with `VALARM`; deletes remove the remote object (Nextcloud / generic CalDAV + Basic auth)
+- Reminder due checks on the jobs tick (logged / surfaced via sync status)
 
 ### Backup & security
 

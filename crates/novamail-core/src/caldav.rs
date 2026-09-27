@@ -21,6 +21,10 @@ pub struct ParsedEvent {
     pub location: Option<String>,
     pub description: Option<String>,
     pub all_day: bool,
+    pub status: String,
+    /// Reminder offsets in minutes before start.
+    pub reminder_minutes: Vec<i64>,
+    pub organizer: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +231,8 @@ pub fn build_vevent_ics(
     location: Option<&str>,
     description: Option<&str>,
     all_day: bool,
+    status: &str,
+    reminder_minutes: &[i64],
 ) -> String {
     let end = ends_at.unwrap_or(starts_at + 3600);
     let (dtstart, dtend) = if all_day {
@@ -255,12 +261,20 @@ pub fn build_vevent_ics(
             format!("DTEND:{dtend}")
         },
         format!("SUMMARY:{}", escape_ical_text(title)),
+        format!("STATUS:{}", status.to_ascii_uppercase()),
     ];
     if let Some(loc) = location.filter(|s| !s.is_empty()) {
         lines.push(format!("LOCATION:{}", escape_ical_text(loc)));
     }
     if let Some(desc) = description.filter(|s| !s.is_empty()) {
         lines.push(format!("DESCRIPTION:{}", escape_ical_text(desc)));
+    }
+    for minutes in reminder_minutes {
+        lines.push("BEGIN:VALARM".into());
+        lines.push("ACTION:DISPLAY".into());
+        lines.push(format!("DESCRIPTION:{}", escape_ical_text(title)));
+        lines.push(format!("TRIGGER:-PT{minutes}M"));
+        lines.push("END:VALARM".into());
     }
     lines.push("END:VEVENT".into());
     lines.push("END:VCALENDAR".into());
@@ -517,6 +531,24 @@ fn parse_vevents(ical: &str) -> Vec<ParsedEvent> {
             .unwrap_or_else(|| "(no title)".into());
         let (starts_at, all_day) = parse_ical_time(props.get("DTSTART").map(String::as_str));
         let ends_at = parse_ical_time(props.get("DTEND").map(String::as_str)).0;
+        let status = props
+            .get("STATUS")
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_else(|| "confirmed".into());
+        let organizer = props.get("ORGANIZER").map(|v| {
+            v.trim_start_matches("mailto:")
+                .trim_start_matches("MAILTO:")
+                .to_string()
+        });
+        let mut reminder_minutes = Vec::new();
+        for alarm in split_components(&block, "VALARM") {
+            let alarm_props = parse_props(&alarm);
+            if let Some(trigger) = alarm_props.get("TRIGGER") {
+                if let Some(mins) = parse_trigger_minutes(trigger) {
+                    reminder_minutes.push(mins);
+                }
+            }
+        }
         events.push(ParsedEvent {
             uid,
             title,
@@ -525,9 +557,47 @@ fn parse_vevents(ical: &str) -> Vec<ParsedEvent> {
             location: props.get("LOCATION").cloned(),
             description: props.get("DESCRIPTION").cloned(),
             all_day,
+            status,
+            reminder_minutes,
+            organizer,
         });
     }
     events
+}
+
+fn parse_trigger_minutes(trigger: &str) -> Option<i64> {
+    // -PT15M / -P1DT2H
+    let t = trigger.trim().to_ascii_uppercase();
+    if !t.starts_with('-') {
+        return Some(0);
+    }
+    let t = t.trim_start_matches('-').trim_start_matches('P');
+    let mut minutes = 0i64;
+    if let Some(day_split) = t.split_once('D') {
+        minutes += day_split.0.parse::<i64>().ok()? * 24 * 60;
+        let rest = day_split.1.trim_start_matches('T');
+        if let Some(h) = rest.split_once('H') {
+            minutes += h.0.parse::<i64>().unwrap_or(0) * 60;
+            if let Some(m) = h.1.split_once('M') {
+                minutes += m.0.parse::<i64>().unwrap_or(0);
+            }
+        } else if let Some(m) = rest.split_once('M') {
+            minutes += m.0.parse::<i64>().unwrap_or(0);
+        }
+        return Some(minutes);
+    }
+    let t = t.trim_start_matches('T');
+    if let Some(h) = t.split_once('H') {
+        minutes += h.0.parse::<i64>().ok()? * 60;
+        if let Some(m) = h.1.split_once('M') {
+            minutes += m.0.parse::<i64>().unwrap_or(0);
+        }
+        return Some(minutes);
+    }
+    if let Some(m) = t.split_once('M') {
+        return m.0.parse().ok();
+    }
+    None
 }
 
 fn parse_vtodos(ical: &str) -> Vec<ParsedTask> {
@@ -618,11 +688,15 @@ mod tests {
             Some("Zoom"),
             None,
             false,
+            "confirmed",
+            &[15],
         );
         assert!(ics.contains("UID:abc-123"));
         assert!(ics.contains("SUMMARY:Standup"));
         assert!(ics.contains("LOCATION:Zoom"));
         assert!(ics.contains("BEGIN:VEVENT"));
+        assert!(ics.contains("BEGIN:VALARM"));
+        assert!(ics.contains("TRIGGER:-PT15M"));
     }
 }
 

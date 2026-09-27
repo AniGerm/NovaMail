@@ -222,6 +222,11 @@ export function AppShell() {
             setSyncStatus(t("sendLaterSent", { count: report.sentLater }));
           }
         }
+        if ((report.calendarReminders ?? 0) > 0) {
+          setSyncStatus(
+            t("calendarReminderDue", { count: report.calendarReminders ?? 0 }),
+          );
+        }
       })
       .then((fn) => {
         unlisten = fn;
@@ -868,22 +873,9 @@ export function AppShell() {
           onOpenTriage={() => setTriageOpen(true)}
         />
 
-        {accounts.length === 0 ? (
-          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
-            <EmptyState
-              className="w-full"
-              title={t("welcomeTitle")}
-              description={t("welcomeDescription")}
-              action={
-                <button
-                  type="button"
-                  className="mt-2 text-[var(--nova-accent)]"
-                  onClick={() => setAccountSetupOpen(true)}
-                >
-                  {t("addAccount")}
-                </button>
-              }
-            />
+        {calendarOpen ? (
+          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+            <CalendarPanel />
           </div>
         ) : plannedOpen ? (
           <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
@@ -902,9 +894,22 @@ export function AppShell() {
               }}
             />
           </div>
-        ) : calendarOpen ? (
-          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
-            <CalendarPanel />
+        ) : accounts.length === 0 ? (
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+            <EmptyState
+              className="w-full"
+              title={t("welcomeTitle")}
+              description={t("welcomeDescription")}
+              action={
+                <button
+                  type="button"
+                  className="mt-2 text-[var(--nova-accent)]"
+                  onClick={() => setAccountSetupOpen(true)}
+                >
+                  {t("addAccount")}
+                </button>
+              }
+            />
           </div>
         ) : (
           <>
@@ -971,7 +976,23 @@ export function AppShell() {
                       startsAt,
                       endsAt,
                     )
-                    .then(() => {
+                    .then(async (created) => {
+                      if (suggestion?.location) {
+                        await api.calendarEventsUpsert({
+                          id: created.id,
+                          collectionId: created.collectionId,
+                          calendarAccountId: created.calendarAccountId,
+                          title: created.title,
+                          startsAt: created.startsAt,
+                          endsAt: created.endsAt,
+                          location: suggestion.location,
+                          description: created.description,
+                          allDay: created.allDay,
+                          sourceMessageId: created.sourceMessageId,
+                          reminders: created.reminders ?? [{ minutes: 15 }],
+                          status: created.status ?? "confirmed",
+                        });
+                      }
                       setCalendarOpen(true);
                       setPlannedOpen(false);
                       setSyncStatus(t("eventCreated"));

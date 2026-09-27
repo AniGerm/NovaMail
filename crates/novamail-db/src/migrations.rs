@@ -286,6 +286,51 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE calendar_events ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE calendar_events ADD COLUMN source_message_id TEXT;
     "#,
+    // v9 — collections, richer events, invitations
+    r#"
+    CREATE TABLE IF NOT EXISTS calendar_collections (
+      id TEXT PRIMARY KEY NOT NULL,
+      calendar_account_id TEXT REFERENCES calendar_accounts(id) ON DELETE CASCADE,
+      href TEXT,
+      display_name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#1e3a5f',
+      is_visible INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      ctag TEXT,
+      sync_token TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_collections_account
+      ON calendar_collections(calendar_account_id);
+
+    ALTER TABLE calendar_events ADD COLUMN collection_id TEXT;
+    ALTER TABLE calendar_events ADD COLUMN reminders_json TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE calendar_events ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed';
+    ALTER TABLE calendar_events ADD COLUMN organizer TEXT;
+    ALTER TABLE calendar_events ADD COLUMN attendees_json TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE calendar_events ADD COLUMN etag TEXT;
+    ALTER TABLE calendar_events ADD COLUMN href TEXT;
+    ALTER TABLE calendar_events ADD COLUMN reminder_fired_at INTEGER;
+
+    CREATE TABLE IF NOT EXISTS calendar_invitations (
+      id TEXT PRIMARY KEY NOT NULL,
+      message_id TEXT,
+      ical_uid TEXT NOT NULL,
+      title TEXT NOT NULL,
+      starts_at INTEGER NOT NULL,
+      ends_at INTEGER,
+      location TEXT,
+      description TEXT,
+      organizer TEXT,
+      partstat TEXT NOT NULL DEFAULT 'needs-action',
+      payload_ics TEXT NOT NULL DEFAULT '',
+      received_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_invitations_partstat
+      ON calendar_invitations(partstat, received_at DESC);
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -338,7 +383,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

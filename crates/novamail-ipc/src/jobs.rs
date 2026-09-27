@@ -92,6 +92,10 @@ pub struct JobsTickReport {
     pub woke_snoozes: u32,
     pub sent_later: u32,
     pub failed_later: u32,
+    #[serde(default)]
+    pub calendar_reminders: u32,
+    #[serde(default)]
+    pub scanned_invites: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

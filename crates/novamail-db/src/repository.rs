@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use novamail_ipc::{
-    AccountDto, AddressDto, AttachmentDto, AuthType, CalendarAccountDto, CalendarEventDto,
+    AccountDto, AddressDto, AttachmentDto, AuthType, CalendarAccountDto, CalendarAttendeeDto,
+    CalendarCollectionDto, CalendarEventDto, CalendarInvitationDto, CalendarReminderDto,
     CalendarTaskDto, ContactAddress, ContactCustomField, ContactDto, LabelDto, ListMessagesRequest,
     ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto, MessageSortBy,
     MessageSummaryDto, OutboundQueueItemDto, OutboundStatus, PgpKeyDto, RecipientSuggestion,
@@ -2279,10 +2280,136 @@ impl Database {
         Ok(())
     }
 
+    pub fn ensure_local_default_collection(&self) -> DbResult<CalendarCollectionDto> {
+        if let Some(existing) = self.list_calendar_collections()?.into_iter().find(|c| c.is_default)
+        {
+            return Ok(existing);
+        }
+        if let Some(any) = self.list_calendar_collections()?.into_iter().next() {
+            self.set_default_calendar_collection(any.id)?;
+            return Ok(self
+                .list_calendar_collections()?
+                .into_iter()
+                .find(|c| c.id == any.id)
+                .unwrap_or(any));
+        }
+        let id = Uuid::new_v4();
+        self.upsert_calendar_collection(
+            id,
+            None,
+            None,
+            "Personal",
+            "#1e3a5f",
+            true,
+            true,
+        )?;
+        self.list_calendar_collections()?
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| DbError::Invalid("failed to create local calendar".into()))
+    }
+
+    pub fn upsert_calendar_collection(
+        &self,
+        id: Uuid,
+        calendar_account_id: Option<Uuid>,
+        href: Option<&str>,
+        display_name: &str,
+        color: &str,
+        is_visible: bool,
+        is_default: bool,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        if is_default {
+            conn.execute("UPDATE calendar_collections SET is_default = 0", [])?;
+        }
+        conn.execute(
+            r#"
+            INSERT INTO calendar_collections (
+              id, calendar_account_id, href, display_name, color, is_visible, is_default, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+              calendar_account_id = excluded.calendar_account_id,
+              href = excluded.href,
+              display_name = excluded.display_name,
+              color = excluded.color,
+              is_visible = excluded.is_visible,
+              is_default = excluded.is_default
+            "#,
+            params![
+                id.to_string(),
+                calendar_account_id.map(|u| u.to_string()),
+                href,
+                display_name,
+                color,
+                if is_visible { 1 } else { 0 },
+                if is_default { 1 } else { 0 },
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_default_calendar_collection(&self, id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute("UPDATE calendar_collections SET is_default = 0", [])?;
+        conn.execute(
+            "UPDATE calendar_collections SET is_default = 1 WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_calendar_collections(&self) -> DbResult<Vec<CalendarCollectionDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, calendar_account_id, href, display_name, color, is_visible, is_default
+            FROM calendar_collections
+            ORDER BY is_default DESC, display_name ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CalendarCollectionDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                calendar_account_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                href: row.get(2)?,
+                display_name: row.get(3)?,
+                color: row.get(4)?,
+                is_visible: row.get::<_, i64>(5)? != 0,
+                is_default: row.get::<_, i64>(6)? != 0,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_calendar_collection(&self, id: Uuid) -> DbResult<Option<CalendarCollectionDto>> {
+        Ok(self
+            .list_calendar_collections()?
+            .into_iter()
+            .find(|c| c.id == id))
+    }
+
+    pub fn find_collection_by_href(
+        &self,
+        account_id: Uuid,
+        href: &str,
+    ) -> DbResult<Option<CalendarCollectionDto>> {
+        Ok(self
+            .list_calendar_collections()?
+            .into_iter()
+            .find(|c| c.calendar_account_id == Some(account_id) && c.href.as_deref() == Some(href)))
+    }
+
     pub fn upsert_calendar_event(
         &self,
         id: Uuid,
         calendar_account_id: Option<Uuid>,
+        collection_id: Option<Uuid>,
         ical_uid: Option<&str>,
         title: &str,
         starts_at: i64,
@@ -2291,14 +2418,21 @@ impl Database {
         description: Option<&str>,
         all_day: bool,
         source_message_id: Option<Uuid>,
+        reminders_json: &str,
+        status: &str,
+        organizer: Option<&str>,
+        attendees_json: &str,
+        etag: Option<&str>,
+        href: Option<&str>,
     ) -> DbResult<()> {
         let conn = self.conn.lock();
         conn.execute(
             r#"
             INSERT INTO calendar_events (
               id, account_id, ical_uid, title, starts_at, ends_at, location, description,
-              calendar_account_id, all_day, source_message_id
-            ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+              calendar_account_id, all_day, source_message_id, collection_id, reminders_json,
+              status, organizer, attendees_json, etag, href
+            ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             ON CONFLICT(id) DO UPDATE SET
               ical_uid = excluded.ical_uid,
               title = excluded.title,
@@ -2308,7 +2442,14 @@ impl Database {
               description = excluded.description,
               calendar_account_id = excluded.calendar_account_id,
               all_day = excluded.all_day,
-              source_message_id = excluded.source_message_id
+              source_message_id = excluded.source_message_id,
+              collection_id = excluded.collection_id,
+              reminders_json = excluded.reminders_json,
+              status = excluded.status,
+              organizer = excluded.organizer,
+              attendees_json = excluded.attendees_json,
+              etag = excluded.etag,
+              href = excluded.href
             "#,
             params![
                 id.to_string(),
@@ -2321,6 +2462,13 @@ impl Database {
                 calendar_account_id.map(|u| u.to_string()),
                 if all_day { 1 } else { 0 },
                 source_message_id.map(|u| u.to_string()),
+                collection_id.map(|u| u.to_string()),
+                reminders_json,
+                status,
+                organizer,
+                attendees_json,
+                etag,
+                href,
             ],
         )?;
         Ok(())
@@ -2330,34 +2478,121 @@ impl Database {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, calendar_account_id, ical_uid, title, starts_at, ends_at, location,
-                   description, all_day, source_message_id
-            FROM calendar_events
-            WHERE starts_at <= ?2 AND (ends_at IS NULL OR ends_at >= ?1)
-            ORDER BY starts_at ASC
+            SELECT e.id, e.calendar_account_id, e.collection_id, e.ical_uid, e.title, e.starts_at,
+                   e.ends_at, e.location, e.description, e.all_day, e.source_message_id,
+                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color
+            FROM calendar_events e
+            LEFT JOIN calendar_collections c ON c.id = e.collection_id
+            WHERE e.starts_at <= ?2 AND (e.ends_at IS NULL OR e.ends_at >= ?1)
+              AND (e.collection_id IS NULL OR c.is_visible = 1 OR c.id IS NULL)
+            ORDER BY e.starts_at ASC
             "#,
         )?;
         let rows = stmt.query_map(params![from, to], |row| {
+            let reminders_raw: String = row.get(11)?;
+            let attendees_raw: String = row.get(14)?;
             Ok(CalendarEventDto {
                 id: parse_uuid(row.get::<_, String>(0)?)?,
                 calendar_account_id: row
                     .get::<_, Option<String>>(1)?
                     .map(parse_uuid)
                     .transpose()?,
-                ical_uid: row.get(2)?,
-                title: row.get(3)?,
-                starts_at: row.get(4)?,
-                ends_at: row.get(5)?,
-                location: row.get(6)?,
-                description: row.get(7)?,
-                all_day: row.get::<_, i64>(8)? != 0,
-                source_message_id: row
-                    .get::<_, Option<String>>(9)?
+                collection_id: row
+                    .get::<_, Option<String>>(2)?
                     .map(parse_uuid)
                     .transpose()?,
+                ical_uid: row.get(3)?,
+                title: row.get(4)?,
+                starts_at: row.get(5)?,
+                ends_at: row.get(6)?,
+                location: row.get(7)?,
+                description: row.get(8)?,
+                all_day: row.get::<_, i64>(9)? != 0,
+                source_message_id: row
+                    .get::<_, Option<String>>(10)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                reminders: parse_reminders_json(&reminders_raw),
+                status: row.get(12)?,
+                organizer: row.get(13)?,
+                attendees: parse_attendees_json(&attendees_raw),
+                color: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_calendar_event(&self, id: Uuid) -> DbResult<Option<CalendarEventDto>> {
+        Ok(self
+            .list_calendar_events(0, i64::MAX)?
+            .into_iter()
+            .find(|e| e.id == id))
+    }
+
+    pub fn list_due_calendar_reminders(&self, now: i64) -> DbResult<Vec<CalendarEventDto>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT e.id, e.calendar_account_id, e.collection_id, e.ical_uid, e.title, e.starts_at,
+                   e.ends_at, e.location, e.description, e.all_day, e.source_message_id,
+                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color
+            FROM calendar_events e
+            LEFT JOIN calendar_collections c ON c.id = e.collection_id
+            WHERE e.reminder_fired_at IS NULL
+              AND e.starts_at >= ?1 - 86400
+              AND e.starts_at <= ?1 + 86400
+            "#,
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            let reminders_raw: String = row.get(11)?;
+            let attendees_raw: String = row.get(14)?;
+            Ok(CalendarEventDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                calendar_account_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                collection_id: row
+                    .get::<_, Option<String>>(2)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                ical_uid: row.get(3)?,
+                title: row.get(4)?,
+                starts_at: row.get(5)?,
+                ends_at: row.get(6)?,
+                location: row.get(7)?,
+                description: row.get(8)?,
+                all_day: row.get::<_, i64>(9)? != 0,
+                source_message_id: row
+                    .get::<_, Option<String>>(10)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                reminders: parse_reminders_json(&reminders_raw),
+                status: row.get(12)?,
+                organizer: row.get(13)?,
+                attendees: parse_attendees_json(&attendees_raw),
+                color: row.get(15)?,
+            })
+        })?;
+        let events = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(events
+            .into_iter()
+            .filter(|e| {
+                e.reminders.iter().any(|r| {
+                    let fire_at = e.starts_at - r.minutes * 60;
+                    fire_at <= now && e.starts_at + 3600 >= now
+                })
+            })
+            .collect())
+    }
+
+    pub fn mark_calendar_reminder_fired(&self, id: Uuid, at: i64) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE calendar_events SET reminder_fired_at = ?2 WHERE id = ?1",
+            params![id.to_string(), at],
+        )?;
+        Ok(())
     }
 
     pub fn delete_calendar_event(&self, id: Uuid) -> DbResult<()> {
@@ -2452,6 +2687,286 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn upsert_calendar_invitation(
+        &self,
+        id: Uuid,
+        message_id: Option<Uuid>,
+        ical_uid: &str,
+        title: &str,
+        starts_at: i64,
+        ends_at: Option<i64>,
+        location: Option<&str>,
+        description: Option<&str>,
+        organizer: Option<&str>,
+        partstat: &str,
+        payload_ics: &str,
+        received_at: i64,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO calendar_invitations (
+              id, message_id, ical_uid, title, starts_at, ends_at, location, description,
+              organizer, partstat, payload_ics, received_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              starts_at = excluded.starts_at,
+              ends_at = excluded.ends_at,
+              location = excluded.location,
+              description = excluded.description,
+              organizer = excluded.organizer,
+              partstat = CASE
+                WHEN calendar_invitations.partstat = 'needs-action' THEN excluded.partstat
+                ELSE calendar_invitations.partstat
+              END,
+              payload_ics = excluded.payload_ics
+            "#,
+            params![
+                id.to_string(),
+                message_id.map(|u| u.to_string()),
+                ical_uid,
+                title,
+                starts_at,
+                ends_at,
+                location,
+                description,
+                organizer,
+                partstat,
+                payload_ics,
+                received_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_calendar_invitations(
+        &self,
+        pending_only: bool,
+    ) -> DbResult<Vec<CalendarInvitationDto>> {
+        let conn = self.conn.lock();
+        let sql = if pending_only {
+            "SELECT id, message_id, ical_uid, title, starts_at, ends_at, location, description, organizer, partstat, received_at FROM calendar_invitations WHERE partstat = 'needs-action' ORDER BY starts_at ASC"
+        } else {
+            "SELECT id, message_id, ical_uid, title, starts_at, ends_at, location, description, organizer, partstat, received_at FROM calendar_invitations ORDER BY received_at DESC"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CalendarInvitationDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                message_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                ical_uid: row.get(2)?,
+                title: row.get(3)?,
+                starts_at: row.get(4)?,
+                ends_at: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                organizer: row.get(8)?,
+                partstat: row.get(9)?,
+                received_at: row.get(10)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_calendar_invitation(
+        &self,
+        id: Uuid,
+    ) -> DbResult<Option<(CalendarInvitationDto, String)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, ical_uid, title, starts_at, ends_at, location, description, organizer, partstat, received_at, payload_ics FROM calendar_invitations WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id.to_string()])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        Ok(Some((
+            CalendarInvitationDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                message_id: row
+                    .get::<_, Option<String>>(1)?
+                    .map(parse_uuid)
+                    .transpose()?,
+                ical_uid: row.get(2)?,
+                title: row.get(3)?,
+                starts_at: row.get(4)?,
+                ends_at: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                organizer: row.get(8)?,
+                partstat: row.get(9)?,
+                received_at: row.get(10)?,
+            },
+            row.get(11)?,
+        )))
+    }
+
+    pub fn set_invitation_partstat(&self, id: Uuid, partstat: &str) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE calendar_invitations SET partstat = ?2 WHERE id = ?1",
+            params![id.to_string(), partstat],
+        )?;
+        Ok(())
+    }
+
+    /// Scan message bodies for VCALENDAR METHOD:REQUEST (lightweight iMIP).
+    pub fn scan_messages_for_invites(&self, limit: i64) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, body_text, date FROM messages
+            WHERE body_text LIKE '%BEGIN:VCALENDAR%'
+              AND (body_text LIKE '%METHOD:REQUEST%' OR body_text LIKE '%METHOD:REQUEST%')
+            ORDER BY date DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok((
+                parse_uuid(row.get::<_, String>(0)?)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let candidates: Vec<_> = rows.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        drop(conn);
+        let mut count = 0u32;
+        for (message_id, body, date) in candidates {
+            if let Some(invite) = crate_parse_imip_invite(&body) {
+                let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, invite.uid.as_bytes());
+                self.upsert_calendar_invitation(
+                    id,
+                    Some(message_id),
+                    &invite.uid,
+                    &invite.title,
+                    invite.starts_at,
+                    invite.ends_at,
+                    invite.location.as_deref(),
+                    invite.description.as_deref(),
+                    invite.organizer.as_deref(),
+                    "needs-action",
+                    &invite.payload,
+                    date,
+                )?;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+}
+
+struct ParsedImip {
+    uid: String,
+    title: String,
+    starts_at: i64,
+    ends_at: Option<i64>,
+    location: Option<String>,
+    description: Option<String>,
+    organizer: Option<String>,
+    payload: String,
+}
+
+fn crate_parse_imip_invite(body: &str) -> Option<ParsedImip> {
+    let start = body.find("BEGIN:VCALENDAR")?;
+    let end = body.find("END:VCALENDAR")?;
+    let payload = body[start..end + "END:VCALENDAR".len()].to_string();
+    if !payload.to_ascii_uppercase().contains("METHOD:REQUEST") {
+        return None;
+    }
+    let upper = payload.to_ascii_uppercase();
+    let vevent_start = upper.find("BEGIN:VEVENT")?;
+    let vevent_end = upper.find("END:VEVENT")?;
+    let block = &payload[vevent_start..vevent_end];
+    let mut uid = String::new();
+    let mut title = "(invitation)".to_string();
+    let mut starts_at = 0i64;
+    let mut ends_at = None;
+    let mut location = None;
+    let mut description = None;
+    let mut organizer = None;
+    for line in block.replace("\r\n ", "").replace("\n ", "").lines() {
+        let line = line.trim();
+        let Some((key_part, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key_part
+            .split(';')
+            .next()
+            .unwrap_or(key_part)
+            .to_ascii_uppercase();
+        match key.as_str() {
+            "UID" => uid = value.to_string(),
+            "SUMMARY" => title = value.to_string(),
+            "DTSTART" => {
+                starts_at = parse_simple_ical_ts(value);
+            }
+            "DTEND" => {
+                let t = parse_simple_ical_ts(value);
+                if t > 0 {
+                    ends_at = Some(t);
+                }
+            }
+            "LOCATION" => location = Some(value.to_string()),
+            "DESCRIPTION" => description = Some(value.to_string()),
+            "ORGANIZER" => {
+                organizer = Some(
+                    value
+                        .trim_start_matches("mailto:")
+                        .trim_start_matches("MAILTO:")
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+    if uid.is_empty() || starts_at == 0 {
+        return None;
+    }
+    Some(ParsedImip {
+        uid,
+        title,
+        starts_at,
+        ends_at,
+        location,
+        description,
+        organizer,
+        payload,
+    })
+}
+
+fn parse_simple_ical_ts(raw: &str) -> i64 {
+    let compact: String = raw.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if compact.len() == 8 {
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(&compact, "%Y%m%d") {
+            return date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        }
+    }
+    if compact.len() >= 15 {
+        let slice = if compact.ends_with('Z') {
+            &compact[..15]
+        } else {
+            &compact[..15]
+        };
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(slice, "%Y%m%dT%H%M%S") {
+            return dt.and_utc().timestamp();
+        }
+    }
+    0
+}
+
+fn parse_reminders_json(raw: &str) -> Vec<CalendarReminderDto> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn parse_attendees_json(raw: &str) -> Vec<CalendarAttendeeDto> {
+    serde_json::from_str(raw).unwrap_or_default()
 }
 
 fn map_label_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<LabelDto> {

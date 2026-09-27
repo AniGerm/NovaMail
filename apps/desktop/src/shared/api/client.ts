@@ -45,8 +45,12 @@ import type {
   OfflinePromptEvent,
   AccountQuotaDto,
   CalendarAccountDto,
+  CalendarCollectionDto,
   CalendarEventDto,
+  CalendarInvitationDto,
+  CalendarReminderDto,
   CalendarTaskDto,
+  InvitationResponse,
   JobsTickReport,
   OutboundQueueItemDto,
   PgpDecryptResult,
@@ -379,6 +383,7 @@ export const api = {
     caldavUrl: string;
     username: string;
     password?: string | null;
+    collections?: { href: string; displayName: string }[];
   }) => call<CalendarAccountDto>("calendar_accounts_upsert", { request }),
   calendarAccountsDelete: (id: string) =>
     call<void>("calendar_accounts_delete", { id }),
@@ -392,11 +397,25 @@ export const api = {
     call<{ href: string; displayName: string }[]>("calendar_discover", {
       request,
     }),
+  calendarCollectionsList: () =>
+    call<CalendarCollectionDto[]>("calendar_collections_list"),
+  calendarCollectionsUpsert: (request: {
+    id?: string | null;
+    calendarAccountId?: string | null;
+    href?: string | null;
+    displayName: string;
+    color: string;
+    isVisible?: boolean;
+    isDefault?: boolean;
+  }) => call<CalendarCollectionDto>("calendar_collections_upsert", { request }),
+  calendarCollectionsSetDefault: (id: string) =>
+    call<CalendarCollectionDto>("calendar_collections_set_default", { id }),
   calendarEventsList: (from: number, to: number) =>
     call<CalendarEventDto[]>("calendar_events_list", { request: { from, to } }),
   calendarEventsUpsert: (request: {
     id?: string | null;
     calendarAccountId?: string | null;
+    collectionId?: string | null;
     title: string;
     startsAt: number;
     endsAt?: number | null;
@@ -404,6 +423,8 @@ export const api = {
     description?: string | null;
     allDay?: boolean;
     sourceMessageId?: string | null;
+    reminders?: CalendarReminderDto[];
+    status?: string | null;
   }) => call<CalendarEventDto>("calendar_events_upsert", { request }),
   calendarEventsDelete: (id: string) =>
     call<void>("calendar_events_delete", { id }),
@@ -436,6 +457,14 @@ export const api = {
     call<CalendarTaskDto>("calendar_task_from_message", {
       messageId,
       dueAt: dueAt ?? null,
+    }),
+  calendarInvitationsList: (pendingOnly = true) =>
+    call<CalendarInvitationDto[]>("calendar_invitations_list", {
+      pendingOnly,
+    }),
+  calendarInvitationsRespond: (id: string, response: InvitationResponse) =>
+    call<CalendarInvitationDto>("calendar_invitations_respond", {
+      request: { id, response },
     }),
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),

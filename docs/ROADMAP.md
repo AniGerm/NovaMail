@@ -27,6 +27,10 @@
 - [x] CalDAV Kalender + Tasks (Phase 4)
 - [x] AI-Terminvorschläge (klickbare Links in der Lesepane)
 - [x] CalDAV Discovery + Write-back (Nextcloud / generic)
+- [x] Offline-Kalender ohne Mail-Konto + lokaler Hauptkalender
+- [x] Multi-Kalender (Farbe, Sichtbarkeit, Hauptkalender)
+- [x] Termin-Editor (Zeit, Ort, Notizen, Erinnerung)
+- [x] Kalender-Inbox (iMIP Annehmen / Ablehnen / Vielleicht)
 
 ## Linux Killer Features
 
@@ -39,6 +43,7 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 | KF3 | OpenPGP (Sequoia) + Key-UI | erledigt |
 | KF4 | CalDAV Kalender + Tasks | erledigt |
 | KF5 | AI-Terminvorschläge + CalDAV Write-back | erledigt |
+| KF6 | Office-Kalender (Offline, Farben, Editor, Inbox) | erledigt |
 
 ## Production phases
 

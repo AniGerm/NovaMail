@@ -2,9 +2,9 @@ use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
-    CalDavCollectionDto, CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus,
-    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto, DiscoverCalDavRequest,
-    ExportBackupRequest,
+    CalDavCollectionDto, CalendarAccountDto, CalendarCollectionDto, CalendarEventDto,
+    CalendarInvitationDto, CalendarTaskDto, CardDavServerStatus, ContactsBookSettings,
+    ContactsShareMode, ContactsShareStatus, ContactDto, DiscoverCalDavRequest, ExportBackupRequest,
     ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest, ImportBackupResult,
     JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
     ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
@@ -12,15 +12,16 @@ use novamail_ipc::{
     MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy,
     OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
     OutboundQueueItemDto, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest, PgpKeyDto,
-    PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion, RuleDto,
-    SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest, SendMessageRequest,
-    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto, SpellDictionaryDto,
-    SpellcheckStatus, SuggestRepliesMessageRequest, SuggestRepliesMessageResponse,
-    SuggestReplyMessageRequest, SuggestReplyMessageResponse, SummarizeMessageRequest,
-    SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    UpsertCalendarAccountRequest, UpsertCalendarEventRequest, UpsertCalendarTaskRequest,
-    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion,
+    RespondInvitationRequest, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
+    SendLaterRequest, SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest,
+    SetMessageLabelsRequest, SignatureDto, SnoozeRequest, SnoozedMessageDto, SpamScoreDto,
+    SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus, SuggestRepliesMessageRequest,
+    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertCalendarAccountRequest, UpsertCalendarCollectionRequest, UpsertCalendarEventRequest,
+    UpsertCalendarTaskRequest, UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest,
+    UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -1006,5 +1007,54 @@ pub fn calendar_task_from_message(
     state
         .app
         .create_task_from_message(message_id, due_at)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_collections_list(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<CalendarCollectionDto>, AppError> {
+    state.app.list_calendar_collections().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_collections_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertCalendarCollectionRequest,
+) -> Result<CalendarCollectionDto, AppError> {
+    state.app.upsert_calendar_collection(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_collections_set_default(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<CalendarCollectionDto, AppError> {
+    state
+        .app
+        .set_default_calendar_collection(id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn calendar_invitations_list(
+    state: State<'_, DesktopState>,
+    pending_only: Option<bool>,
+) -> Result<Vec<CalendarInvitationDto>, AppError> {
+    state
+        .app
+        .list_calendar_invitations(pending_only.unwrap_or(true))
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn calendar_invitations_respond(
+    state: State<'_, DesktopState>,
+    request: RespondInvitationRequest,
+) -> Result<CalendarInvitationDto, AppError> {
+    state
+        .app
+        .respond_calendar_invitation(request)
+        .await
         .map_err(map_err)
 }

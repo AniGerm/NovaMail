@@ -48,3 +48,7 @@ Ziel: Funktionen, die NovaMail auf Linux klar von Thunderbird/Evolution/Geary ab
 
 - [x] AI-Terminvorschläge aus Ollama als klickbare Links
 - [x] CalDAV Discovery + PUT/DELETE Write-back (Nextcloud/generic; Google OAuth später)
+- [x] Offline-Kalender ohne Mail-Konto
+- [x] Multi-Kalender Farben / Sichtbarkeit / Hauptkalender
+- [x] Termin-Editor (Zeit, Ort, Notizen, Erinnerung)
+- [x] Kalender-Inbox (iMIP)

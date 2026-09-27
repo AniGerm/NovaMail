@@ -269,9 +269,30 @@ export interface CalendarAccountDto {
   createdAt: number;
 }
 
+export interface CalendarCollectionDto {
+  id: string;
+  calendarAccountId?: string | null;
+  href?: string | null;
+  displayName: string;
+  color: string;
+  isVisible: boolean;
+  isDefault: boolean;
+}
+
+export interface CalendarReminderDto {
+  minutes: number;
+}
+
+export interface CalendarAttendeeDto {
+  email: string;
+  name?: string | null;
+  partstat?: string | null;
+}
+
 export interface CalendarEventDto {
   id: string;
   calendarAccountId?: string | null;
+  collectionId?: string | null;
   icalUid?: string | null;
   title: string;
   startsAt: number;
@@ -280,6 +301,11 @@ export interface CalendarEventDto {
   description?: string | null;
   allDay: boolean;
   sourceMessageId?: string | null;
+  reminders?: CalendarReminderDto[];
+  status?: string;
+  organizer?: string | null;
+  attendees?: CalendarAttendeeDto[];
+  color?: string | null;
 }
 
 export interface CalendarTaskDto {
@@ -294,6 +320,22 @@ export interface CalendarTaskDto {
   createdAt: number;
   updatedAt: number;
 }
+
+export interface CalendarInvitationDto {
+  id: string;
+  messageId?: string | null;
+  icalUid: string;
+  title: string;
+  startsAt: number;
+  endsAt?: number | null;
+  location?: string | null;
+  description?: string | null;
+  organizer?: string | null;
+  partstat: string;
+  receivedAt: number;
+}
+
+export type InvitationResponse = "accept" | "decline" | "tentative";
 
 export type SnoozePreset =
   | "laterToday"
@@ -344,6 +386,8 @@ export interface JobsTickReport {
   wokeSnoozes: number;
   sentLater: number;
   failedLater: number;
+  calendarReminders?: number;
+  scannedInvites?: number;
 }
 
 export interface PlannedSummaryDto {

@@ -23,25 +23,26 @@ use novamail_ipc::{
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalDavCollectionDto,
-    CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus, ContactDto,
-    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, DiscoverCalDavRequest,
-    EventSuggestionDto, ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto,
-    FolderPolicyDto, ImportBackupRequest, ImportBackupResult, JobsTickReport,
-    LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
-    ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
-    MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
-    OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto, OfflineMailboxAccountPolicy,
-    OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
-    OutboundQueueItemDto, OutboundStatus, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest,
-    PgpKeyDto, PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion,
+    CalendarAccountDto, CalendarCollectionDto, CalendarEventDto, CalendarInvitationDto,
+    CalendarReminderDto, CalendarTaskDto, CardDavServerStatus, ContactDto, ContactsBookSettings,
+    ContactsShareMode, ContactsShareStatus, DiscoverCalDavRequest, EventSuggestionDto,
+    ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, FolderPolicyDto,
+    ImportBackupRequest, ImportBackupResult, InvitationResponse, JobsTickReport, LabelDto,
+    LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListCalendarRangeRequest,
+    ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailboxDto, MessageAiInsights,
+    MessageDetailDto, MessageSummaryDto, MoveMessageRequest, OAuthExchangeRequest,
+    OAuthExchangeResponse, OAuthTokensDto, OfflineMailboxAccountPolicy, OfflineMailboxMode,
+    OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto,
+    OutboundStatus, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest, PgpKeyDto,
+    PgpVerifyResult, PlannedSummaryDto, ProviderPreset, RecipientSuggestion, RespondInvitationRequest,
     RetentionModeDto, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest,
     SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
     SignatureDto, SnoozePreset, SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto,
     SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
     SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
     SyncProgressEvent, SyncRequest, SyncResult, UpsertCalendarAccountRequest,
-    UpsertCalendarEventRequest, UpsertCalendarTaskRequest, UpsertContactRequest, UpsertLabelRequest,
-    UpsertRuleRequest, UpsertSignatureRequest,
+    UpsertCalendarCollectionRequest, UpsertCalendarEventRequest, UpsertCalendarTaskRequest,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
     archive_remote, delete_remote, move_remote, offload_message_remote, probe_account_quota,
@@ -670,11 +671,31 @@ impl AppState {
     pub async fn run_jobs_tick(&self) -> CoreResult<JobsTickReport> {
         let woke_snoozes = self.wake_due_snoozes()?;
         let (sent_later, failed_later) = self.flush_outbound_queue().await?;
+        let calendar_reminders = self.fire_due_calendar_reminders()?;
+        let scanned_invites = self.db.scan_messages_for_invites(40).unwrap_or(0);
         Ok(JobsTickReport {
             woke_snoozes,
             sent_later,
             failed_later,
+            calendar_reminders,
+            scanned_invites,
         })
+    }
+
+    fn fire_due_calendar_reminders(&self) -> CoreResult<u32> {
+        let now = chrono::Utc::now().timestamp();
+        let due = self.db.list_due_calendar_reminders(now)?;
+        let mut n = 0u32;
+        for event in due {
+            tracing::info!(
+                title = %event.title,
+                starts_at = event.starts_at,
+                "calendar reminder due"
+            );
+            self.db.mark_calendar_reminder_fired(event.id, now)?;
+            n += 1;
+        }
+        Ok(n)
     }
 
     pub async fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
@@ -2648,6 +2669,14 @@ impl AppState {
 
     // —— Calendar / Tasks ——
 
+    const COLLECTION_COLORS: &'static [&'static str] = &[
+        "#1e3a5f", "#0f766e", "#166534", "#b45309", "#be123c", "#334155",
+    ];
+
+    pub fn ensure_calendar_ready(&self) -> CoreResult<CalendarCollectionDto> {
+        Ok(self.db.ensure_local_default_collection()?)
+    }
+
     pub fn list_calendar_accounts(&self) -> CoreResult<Vec<CalendarAccountDto>> {
         Ok(self.db.list_calendar_accounts()?)
     }
@@ -2656,6 +2685,7 @@ impl AppState {
         &self,
         request: UpsertCalendarAccountRequest,
     ) -> CoreResult<CalendarAccountDto> {
+        let _ = self.ensure_calendar_ready()?;
         let id = request.id.unwrap_or_else(Uuid::new_v4);
         self.db.upsert_calendar_account(
             id,
@@ -2668,6 +2698,46 @@ impl AppState {
                 self.secrets.store_calendar_password(id, &password)?;
             }
         }
+        if !request.collections.is_empty() {
+            let make_default = self
+                .db
+                .list_calendar_collections()?
+                .iter()
+                .all(|c| c.calendar_account_id.is_none());
+            for (idx, col) in request.collections.iter().enumerate() {
+                let col_id = Uuid::new_v5(
+                    &Uuid::NAMESPACE_URL,
+                    format!("{}:{}", id, col.href).as_bytes(),
+                );
+                let color = Self::COLLECTION_COLORS[idx % Self::COLLECTION_COLORS.len()];
+                self.db.upsert_calendar_collection(
+                    col_id,
+                    Some(id),
+                    Some(&col.href),
+                    &col.display_name,
+                    color,
+                    true,
+                    make_default && idx == 0,
+                )?;
+            }
+        } else {
+            // Single-URL account: treat caldav_url as the collection.
+            let col_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("{id}:root").as_bytes());
+            let has_default = self
+                .db
+                .list_calendar_collections()?
+                .iter()
+                .any(|c| c.is_default);
+            self.db.upsert_calendar_collection(
+                col_id,
+                Some(id),
+                Some(&request.caldav_url),
+                &request.name,
+                Self::COLLECTION_COLORS[0],
+                true,
+                !has_default,
+            )?;
+        }
         self.db
             .list_calendar_accounts()?
             .into_iter()
@@ -2678,7 +2748,39 @@ impl AppState {
     pub fn delete_calendar_account(&self, id: Uuid) -> CoreResult<()> {
         let _ = self.secrets.delete_calendar_password(id);
         self.db.delete_calendar_account(id)?;
+        let _ = self.ensure_calendar_ready()?;
         Ok(())
+    }
+
+    pub fn list_calendar_collections(&self) -> CoreResult<Vec<CalendarCollectionDto>> {
+        let _ = self.ensure_calendar_ready()?;
+        Ok(self.db.list_calendar_collections()?)
+    }
+
+    pub fn upsert_calendar_collection(
+        &self,
+        request: UpsertCalendarCollectionRequest,
+    ) -> CoreResult<CalendarCollectionDto> {
+        let id = request.id.unwrap_or_else(Uuid::new_v4);
+        self.db.upsert_calendar_collection(
+            id,
+            request.calendar_account_id,
+            request.href.as_deref(),
+            &request.display_name,
+            &request.color,
+            request.is_visible,
+            request.is_default,
+        )?;
+        self.db
+            .get_calendar_collection(id)?
+            .ok_or_else(|| CoreError::Message("calendar collection missing after upsert".into()))
+    }
+
+    pub fn set_default_calendar_collection(&self, id: Uuid) -> CoreResult<CalendarCollectionDto> {
+        self.db.set_default_calendar_collection(id)?;
+        self.db
+            .get_calendar_collection(id)?
+            .ok_or_else(|| CoreError::Message("calendar collection not found".into()))
     }
 
     pub async fn sync_calendar_account(&self, id: Uuid) -> CoreResult<(u32, u32)> {
@@ -2692,42 +2794,68 @@ impl AppState {
             .secrets
             .load_calendar_password(id)?
             .unwrap_or_default();
-        let result =
-            crate::caldav::sync_calendar(&account.caldav_url, &account.username, &password).await?;
+        let collections: Vec<_> = self
+            .db
+            .list_calendar_collections()?
+            .into_iter()
+            .filter(|c| c.calendar_account_id == Some(id) && c.is_visible)
+            .collect();
+        let targets = if collections.is_empty() {
+            vec![(None, account.caldav_url.clone())]
+        } else {
+            collections
+                .into_iter()
+                .filter_map(|c| c.href.clone().map(|h| (Some(c.id), h)))
+                .collect()
+        };
         let mut events = 0u32;
-        for event in result.events {
-            let local_id = Uuid::new_v4();
-            // Stable id from ical uid when possible
-            let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, event.uid.as_bytes());
-            let _ = local_id;
-            self.db.upsert_calendar_event(
-                id,
-                Some(account.id),
-                Some(&event.uid),
-                &event.title,
-                event.starts_at,
-                event.ends_at,
-                event.location.as_deref(),
-                event.description.as_deref(),
-                event.all_day,
-                None,
-            )?;
-            events += 1;
-        }
         let mut tasks = 0u32;
-        for task in result.tasks {
-            let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, task.uid.as_bytes());
-            self.db.upsert_calendar_task(
-                id,
-                Some(account.id),
-                Some(&task.uid),
-                &task.title,
-                task.due_at,
-                task.completed,
-                &task.notes,
-                None,
-            )?;
-            tasks += 1;
+        for (collection_id, href) in targets {
+            let result =
+                crate::caldav::sync_calendar(&href, &account.username, &password).await?;
+            for event in result.events {
+                let event_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, event.uid.as_bytes());
+                let reminders: Vec<CalendarReminderDto> = event
+                    .reminder_minutes
+                    .iter()
+                    .map(|m| CalendarReminderDto { minutes: *m })
+                    .collect();
+                let reminders_json = serde_json::to_string(&reminders).unwrap_or_else(|_| "[]".into());
+                self.db.upsert_calendar_event(
+                    event_id,
+                    Some(account.id),
+                    collection_id,
+                    Some(&event.uid),
+                    &event.title,
+                    event.starts_at,
+                    event.ends_at,
+                    event.location.as_deref(),
+                    event.description.as_deref(),
+                    event.all_day,
+                    None,
+                    &reminders_json,
+                    &event.status,
+                    event.organizer.as_deref(),
+                    "[]",
+                    None,
+                    None,
+                )?;
+                events += 1;
+            }
+            for task in result.tasks {
+                let task_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, task.uid.as_bytes());
+                self.db.upsert_calendar_task(
+                    task_id,
+                    Some(account.id),
+                    Some(&task.uid),
+                    &task.title,
+                    task.due_at,
+                    task.completed,
+                    &task.notes,
+                    None,
+                )?;
+                tasks += 1;
+            }
         }
         Ok((events, tasks))
     }
@@ -2736,6 +2864,7 @@ impl AppState {
         &self,
         request: ListCalendarRangeRequest,
     ) -> CoreResult<Vec<CalendarEventDto>> {
+        let _ = self.ensure_calendar_ready()?;
         Ok(self.db.list_calendar_events(request.from, request.to)?)
     }
 
@@ -2762,11 +2891,32 @@ impl AppState {
         &self,
         request: UpsertCalendarEventRequest,
     ) -> CoreResult<CalendarEventDto> {
+        let default = self.ensure_calendar_ready()?;
+        let collection_id = request.collection_id.or(Some(default.id));
+        let collection = match collection_id {
+            Some(cid) => self.db.get_calendar_collection(cid)?,
+            None => None,
+        };
+        let calendar_account_id = request
+            .calendar_account_id
+            .or_else(|| collection.as_ref().and_then(|c| c.calendar_account_id));
         let id = request.id.unwrap_or_else(Uuid::new_v4);
-        let ical_uid = id.to_string();
+        let existing = self.db.get_calendar_event(id)?;
+        let ical_uid = existing
+            .as_ref()
+            .and_then(|e| e.ical_uid.clone())
+            .unwrap_or_else(|| id.to_string());
+        let status = request
+            .status
+            .clone()
+            .unwrap_or_else(|| "confirmed".into());
+        let reminders_json =
+            serde_json::to_string(&request.reminders).unwrap_or_else(|_| "[]".into());
+        let color = collection.as_ref().map(|c| c.color.clone());
         self.db.upsert_calendar_event(
             id,
-            request.calendar_account_id,
+            calendar_account_id,
+            collection_id,
             Some(&ical_uid),
             &request.title,
             request.starts_at,
@@ -2775,27 +2925,40 @@ impl AppState {
             request.description.as_deref(),
             request.all_day,
             request.source_message_id,
+            &reminders_json,
+            &status,
+            None,
+            "[]",
+            None,
+            collection.as_ref().and_then(|c| c.href.as_deref()),
         )?;
-        if let Some(account_id) = request.calendar_account_id {
-            if let Err(err) = self
-                .push_event_to_caldav(
-                    account_id,
-                    &ical_uid,
-                    &request.title,
-                    request.starts_at,
-                    request.ends_at,
-                    request.location.as_deref(),
-                    request.description.as_deref(),
-                    request.all_day,
-                )
-                .await
-            {
-                tracing::warn!(error = %err, "CalDAV event upload failed; kept locally");
+        if let (Some(account_id), Some(col)) = (calendar_account_id, collection.as_ref()) {
+            if let Some(href) = col.href.as_deref() {
+                let minutes: Vec<i64> = request.reminders.iter().map(|r| r.minutes).collect();
+                if let Err(err) = self
+                    .push_event_to_caldav(
+                        account_id,
+                        href,
+                        &ical_uid,
+                        &request.title,
+                        request.starts_at,
+                        request.ends_at,
+                        request.location.as_deref(),
+                        request.description.as_deref(),
+                        request.all_day,
+                        &status,
+                        &minutes,
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %err, "CalDAV event upload failed; kept locally");
+                }
             }
         }
         Ok(CalendarEventDto {
             id,
-            calendar_account_id: request.calendar_account_id,
+            calendar_account_id,
+            collection_id,
             ical_uid: Some(ical_uid),
             title: request.title,
             starts_at: request.starts_at,
@@ -2804,12 +2967,18 @@ impl AppState {
             description: request.description,
             all_day: request.all_day,
             source_message_id: request.source_message_id,
+            reminders: request.reminders,
+            status,
+            organizer: None,
+            attendees: vec![],
+            color,
         })
     }
 
     async fn push_event_to_caldav(
         &self,
         account_id: Uuid,
+        collection_url: &str,
         ical_uid: &str,
         title: &str,
         starts_at: i64,
@@ -2817,6 +2986,8 @@ impl AppState {
         location: Option<&str>,
         description: Option<&str>,
         all_day: bool,
+        status: &str,
+        reminder_minutes: &[i64],
     ) -> CoreResult<()> {
         let account = self
             .db
@@ -2836,9 +3007,11 @@ impl AppState {
             location,
             description,
             all_day,
+            status,
+            reminder_minutes,
         );
         crate::caldav::put_vevent(
-            &account.caldav_url,
+            collection_url,
             &account.username,
             &password,
             ical_uid,
@@ -2848,31 +3021,37 @@ impl AppState {
     }
 
     pub async fn delete_calendar_event(&self, id: Uuid) -> CoreResult<()> {
-        // Load before delete for remote cleanup.
-        let events = self.db.list_calendar_events(0, i64::MAX)?;
-        let existing = events.into_iter().find(|e| e.id == id);
+        let existing = self.db.get_calendar_event(id)?;
         self.db.delete_calendar_event(id)?;
         if let Some(event) = existing {
-            if let (Some(account_id), Some(uid)) = (event.calendar_account_id, event.ical_uid) {
-                let account = self
-                    .db
-                    .list_calendar_accounts()?
-                    .into_iter()
-                    .find(|a| a.id == account_id);
-                if let Some(account) = account {
-                    let password = self
-                        .secrets
-                        .load_calendar_password(account_id)?
-                        .unwrap_or_default();
-                    if let Err(err) = crate::caldav::delete_object(
-                        &account.caldav_url,
-                        &account.username,
-                        &password,
-                        &uid,
-                    )
-                    .await
-                    {
-                        tracing::warn!(error = %err, "CalDAV event delete failed");
+            if let (Some(account_id), Some(uid), Some(collection_id)) = (
+                event.calendar_account_id,
+                event.ical_uid,
+                event.collection_id,
+            ) {
+                if let Some(col) = self.db.get_calendar_collection(collection_id)? {
+                    if let Some(href) = col.href {
+                        let account = self
+                            .db
+                            .list_calendar_accounts()?
+                            .into_iter()
+                            .find(|a| a.id == account_id);
+                        if let Some(account) = account {
+                            let password = self
+                                .secrets
+                                .load_calendar_password(account_id)?
+                                .unwrap_or_default();
+                            if let Err(err) = crate::caldav::delete_object(
+                                &href,
+                                &account.username,
+                                &password,
+                                &uid,
+                            )
+                            .await
+                            {
+                                tracing::warn!(error = %err, "CalDAV event delete failed");
+                            }
+                        }
                     }
                 }
             }
@@ -2927,14 +3106,20 @@ impl AppState {
         calendar_account_id: Option<Uuid>,
     ) -> CoreResult<CalendarEventDto> {
         let detail = self.get_message(message_id)?;
-        // Prefer an explicit account; otherwise first CalDAV account for online write-back.
-        let account_id = match calendar_account_id {
-            Some(id) => Some(id),
-            None => self.db.list_calendar_accounts()?.into_iter().next().map(|a| a.id),
+        let default = self.ensure_calendar_ready()?;
+        let collection = if let Some(aid) = calendar_account_id {
+            self.db
+                .list_calendar_collections()?
+                .into_iter()
+                .find(|c| c.calendar_account_id == Some(aid))
+                .unwrap_or(default)
+        } else {
+            default
         };
         self.upsert_calendar_event(UpsertCalendarEventRequest {
             id: None,
-            calendar_account_id: account_id,
+            calendar_account_id: collection.calendar_account_id,
+            collection_id: Some(collection.id),
             title: detail.summary.subject.clone(),
             starts_at,
             ends_at,
@@ -2946,6 +3131,8 @@ impl AppState {
             )),
             all_day: false,
             source_message_id: Some(message_id),
+            reminders: vec![CalendarReminderDto { minutes: 15 }],
+            status: Some("confirmed".into()),
         })
         .await
     }
@@ -2965,6 +3152,62 @@ impl AppState {
             notes: format!("From mail: {}", detail.summary.from.email),
             source_message_id: Some(message_id),
         })
+    }
+
+    pub fn list_calendar_invitations(
+        &self,
+        pending_only: bool,
+    ) -> CoreResult<Vec<CalendarInvitationDto>> {
+        let _ = self.db.scan_messages_for_invites(40);
+        Ok(self.db.list_calendar_invitations(pending_only)?)
+    }
+
+    pub async fn respond_calendar_invitation(
+        &self,
+        request: RespondInvitationRequest,
+    ) -> CoreResult<CalendarInvitationDto> {
+        let (invite, _ics) = self
+            .db
+            .get_calendar_invitation(request.id)?
+            .ok_or_else(|| CoreError::Message("invitation not found".into()))?;
+        let partstat = match request.response {
+            InvitationResponse::Accept => "accepted",
+            InvitationResponse::Decline => "declined",
+            InvitationResponse::Tentative => "tentative",
+        };
+        if matches!(
+            request.response,
+            InvitationResponse::Accept | InvitationResponse::Tentative
+        ) {
+            let default = self.ensure_calendar_ready()?;
+            let status = if matches!(request.response, InvitationResponse::Tentative) {
+                "tentative"
+            } else {
+                "confirmed"
+            };
+            let _ = self
+                .upsert_calendar_event(UpsertCalendarEventRequest {
+                    id: None,
+                    calendar_account_id: default.calendar_account_id,
+                    collection_id: Some(default.id),
+                    title: invite.title.clone(),
+                    starts_at: invite.starts_at,
+                    ends_at: invite.ends_at,
+                    location: invite.location.clone(),
+                    description: invite.description.clone(),
+                    all_day: false,
+                    source_message_id: invite.message_id,
+                    reminders: vec![CalendarReminderDto { minutes: 15 }],
+                    status: Some(status.into()),
+                })
+                .await?;
+        }
+        self.db.set_invitation_partstat(request.id, partstat)?;
+        self.db
+            .list_calendar_invitations(false)?
+            .into_iter()
+            .find(|i| i.id == request.id)
+            .ok_or_else(|| CoreError::Message("invitation missing after respond".into()))
     }
 }
 
