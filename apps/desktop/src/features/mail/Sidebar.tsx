@@ -9,6 +9,7 @@ import {
   BookUser,
   FilePenLine,
   HardDrive,
+  Clock3,
   ShieldAlert,
   Zap,
 } from "lucide-react";
@@ -24,6 +25,8 @@ interface SidebarProps {
   draftsSelected?: boolean;
   spamSelected?: boolean;
   offlineSelected?: boolean;
+  plannedSelected?: boolean;
+  plannedCount?: number;
   syncStatus: string | null;
   themeMode: ThemeMode;
   onSelectUnified: () => void;
@@ -31,6 +34,7 @@ interface SidebarProps {
   onSelectDrafts: () => void;
   onSelectSpam: () => void;
   onSelectOffline: () => void;
+  onSelectPlanned: () => void;
   onCompose: () => void;
   onSync: () => void;
   onAddAccount: () => void;
@@ -46,6 +50,8 @@ export function Sidebar({
   draftsSelected = false,
   spamSelected = false,
   offlineSelected = false,
+  plannedSelected = false,
+  plannedCount = 0,
   syncStatus,
   themeMode,
   onSelectUnified,
@@ -53,6 +59,7 @@ export function Sidebar({
   onSelectDrafts,
   onSelectSpam,
   onSelectOffline,
+  onSelectPlanned,
   onCompose,
   onSync,
   onAddAccount,
@@ -117,7 +124,8 @@ export function Sidebar({
             selectedAccountId === null &&
             !draftsSelected &&
             !spamSelected &&
-            !offlineSelected
+            !offlineSelected &&
+            !plannedSelected
               ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
               : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
           }
@@ -160,6 +168,21 @@ export function Sidebar({
         >
           <HardDrive size={18} />
           {t("offlineMailbox")}
+        </button>
+        <button
+          type="button"
+          onClick={onSelectPlanned}
+          className={
+            plannedSelected
+              ? "flex h-11 items-center justify-between gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+              : "flex h-11 items-center justify-between gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          }
+        >
+          <span className="flex items-center gap-3">
+            <Clock3 size={18} />
+            {t("planned")}
+          </span>
+          {plannedCount > 0 ? <Badge>{plannedCount}</Badge> : null}
         </button>
         <button
           type="button"
@@ -206,7 +229,8 @@ export function Sidebar({
                       selectedAccountId === account.id &&
                       !draftsSelected &&
                       !spamSelected &&
-                      !offlineSelected
+                      !offlineSelected &&
+                      !plannedSelected
                         ? "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-2 py-2 text-left text-sm text-[var(--nova-accent)]"
                         : "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--nova-surface-2)]"
                     }

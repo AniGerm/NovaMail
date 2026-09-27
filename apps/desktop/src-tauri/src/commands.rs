@@ -4,18 +4,19 @@ use novamail_ipc::{
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
     CardDavServerStatus, ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto,
     ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest,
-    ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
-    LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailProvider,
-    MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
-    OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy, OfflineMailboxMode,
-    OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent, ProviderPreset,
-    RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
-    SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SpamScoreDto, SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus,
-    SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
-    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
-    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
-    UpsertRuleRequest, UpsertSignatureRequest,
+    ImportBackupResult, JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest,
+    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto,
+    MessageSummaryDto, MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse,
+    OfflineMailboxAccountPolicy, OfflineMailboxMode, OfflineMailboxSettingsDto,
+    OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto, PlannedSummaryDto,
+    ProviderPreset, RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
+    SendLaterRequest, SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest,
+    SetMessageLabelsRequest, SignatureDto, SnoozeRequest, SnoozedMessageDto, SpamScoreDto,
+    SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus, SuggestRepliesMessageRequest,
+    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -701,6 +702,72 @@ pub fn offline_mailbox_enable_from_prompt(
         .app
         .enable_offline_from_prompt(account_id, mode)
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_snooze(
+    state: State<'_, DesktopState>,
+    request: SnoozeRequest,
+) -> Result<i64, AppError> {
+    state.app.snooze_message(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_unsnooze(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.unsnooze_message(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_list_snoozed(
+    state: State<'_, DesktopState>,
+    limit: Option<u32>,
+) -> Result<Vec<SnoozedMessageDto>, AppError> {
+    state
+        .app
+        .list_snoozed(limit.unwrap_or(200))
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_send_later(
+    state: State<'_, DesktopState>,
+    request: SendLaterRequest,
+) -> Result<Uuid, AppError> {
+    state.app.enqueue_send_later(request).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn outbound_list(
+    state: State<'_, DesktopState>,
+    limit: Option<u32>,
+) -> Result<Vec<OutboundQueueItemDto>, AppError> {
+    state
+        .app
+        .list_outbound_queue(limit.unwrap_or(200))
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn outbound_cancel(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(), AppError> {
+    state.app.cancel_outbound(id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn planned_summary(
+    state: State<'_, DesktopState>,
+) -> Result<PlannedSummaryDto, AppError> {
+    state.app.planned_summary().map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn jobs_tick(state: State<'_, DesktopState>) -> Result<JobsTickReport, AppError> {
+    state.app.run_jobs_tick().await.map_err(map_err)
 }
 
 #[tauri::command]

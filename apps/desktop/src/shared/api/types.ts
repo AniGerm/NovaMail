@@ -72,6 +72,8 @@ export interface MessageSummaryDto {
   accountEmail: string;
   /** True when the message was offloaded from IMAP and exists only locally. */
   localOnly?: boolean;
+  /** Unix seconds when a snooze ends; absent when not snoozed. */
+  snoozedUntil?: number | null;
 }
 
 export interface MessageDetailDto {
@@ -103,6 +105,8 @@ export interface ListMessagesRequest {
   mailboxRole?: string | null;
   /** When true, only messages offloaded from IMAP (`localOnly`). */
   localOnly?: boolean;
+  /** When true, only currently snoozed messages. */
+  snoozedOnly?: boolean;
   limit: number;
   offset: number;
   query?: string | null;
@@ -234,6 +238,62 @@ export interface SendMessageRequest {
   references: string[];
   attachments: OutgoingAttachment[];
   draftId?: string | null;
+}
+
+export type SnoozePreset =
+  | "laterToday"
+  | "tomorrowMorning"
+  | "nextMonday"
+  | "custom";
+
+export interface SnoozeRequest {
+  messageId: string;
+  preset: SnoozePreset;
+  wakeAt?: number | null;
+}
+
+export interface SnoozedMessageDto {
+  messageId: string;
+  accountId: string;
+  wakeAt: number;
+  subject: string;
+  fromEmail: string;
+  accountEmail: string;
+}
+
+export type OutboundStatus =
+  | "pending"
+  | "sending"
+  | "sent"
+  | "failed"
+  | "cancelled";
+
+export interface SendLaterRequest {
+  sendAt: number;
+  message: SendMessageRequest;
+}
+
+export interface OutboundQueueItemDto {
+  id: string;
+  accountId: string;
+  accountEmail: string;
+  subject: string;
+  toSummary: string;
+  sendAt: number;
+  status: OutboundStatus;
+  lastError?: string | null;
+  createdAt: number;
+}
+
+export interface JobsTickReport {
+  wokeSnoozes: number;
+  sentLater: number;
+  failedLater: number;
+}
+
+export interface PlannedSummaryDto {
+  snoozedCount: number;
+  outboundPendingCount: number;
 }
 
 export interface SaveDraftRequest {

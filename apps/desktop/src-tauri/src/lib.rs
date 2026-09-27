@@ -30,6 +30,27 @@ pub fn run() {
             let handle_offline = app.handle().clone();
             let app_for_ai = state.app.clone();
             let app_for_offline = state.app.clone();
+            let app_for_jobs = state.app.clone();
+            let handle_jobs = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Immediate catch-up after restart, then every 60s.
+                loop {
+                    match app_for_jobs.run_jobs_tick().await {
+                        Ok(report) => {
+                            if report.woke_snoozes > 0
+                                || report.sent_later > 0
+                                || report.failed_later > 0
+                            {
+                                let _ = handle_jobs.emit("jobs://tick", &report);
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "jobs tick failed");
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+            });
             let _sync_task = scheduler.spawn(
                 move |event| {
                     let _ = handle.emit("sync://progress", &event);
@@ -139,6 +160,14 @@ pub fn run() {
             commands::offline_mailbox_run,
             commands::offline_mailbox_dismiss_prompt,
             commands::offline_mailbox_enable_from_prompt,
+            commands::messages_snooze,
+            commands::messages_unsnooze,
+            commands::messages_list_snoozed,
+            commands::messages_send_later,
+            commands::outbound_list,
+            commands::outbound_cancel,
+            commands::planned_summary,
+            commands::jobs_tick,
             commands::signatures_list,
             commands::signatures_upsert,
             commands::signatures_delete,

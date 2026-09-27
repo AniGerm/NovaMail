@@ -44,6 +44,12 @@ import type {
   OfflineOffloadReport,
   OfflinePromptEvent,
   AccountQuotaDto,
+  JobsTickReport,
+  OutboundQueueItemDto,
+  PlannedSummaryDto,
+  SendLaterRequest,
+  SnoozeRequest,
+  SnoozedMessageDto,
   RuleDto,
   SaveDraftRequest,
   SendMessageRequest,
@@ -293,6 +299,27 @@ export const api = {
   ): Promise<UnlistenFn> => {
     if (!isTauri()) return () => undefined;
     return listen<OfflinePromptEvent>("offline://prompt", (event) => {
+      handler(event.payload);
+    });
+  },
+  messagesSnooze: (request: SnoozeRequest) =>
+    call<number>("messages_snooze", { request }),
+  messagesUnsnooze: (messageId: string) =>
+    call<void>("messages_unsnooze", { messageId }),
+  messagesListSnoozed: (limit = 200) =>
+    call<SnoozedMessageDto[]>("messages_list_snoozed", { limit }),
+  messagesSendLater: (request: SendLaterRequest) =>
+    call<string>("messages_send_later", { request }),
+  outboundList: (limit = 200) =>
+    call<OutboundQueueItemDto[]>("outbound_list", { limit }),
+  outboundCancel: (id: string) => call<void>("outbound_cancel", { id }),
+  plannedSummary: () => call<PlannedSummaryDto>("planned_summary"),
+  jobsTick: () => call<JobsTickReport>("jobs_tick"),
+  onJobsTick: async (
+    handler: (event: JobsTickReport) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<JobsTickReport>("jobs://tick", (event) => {
       handler(event.payload);
     });
   },

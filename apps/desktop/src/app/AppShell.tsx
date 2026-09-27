@@ -15,6 +15,7 @@ import {
 } from "@/features/mail/MessageList";
 import { QuickTriage } from "@/features/mail/QuickTriage";
 import { OfflinePromptDialog } from "@/features/mail/OfflinePromptDialog";
+import { PlannedPanel } from "@/features/mail/PlannedPanel";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -26,6 +27,8 @@ import type {
   ContactPrefill,
   MessageDetailDto,
   OfflinePromptEvent,
+  PlannedSummaryDto,
+  SnoozePreset,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
@@ -72,6 +75,9 @@ export function AppShell() {
     useState<InboxFilters>(defaultInboxFilters);
   const [offlinePrompt, setOfflinePrompt] =
     useState<OfflinePromptEvent | null>(null);
+  const [plannedOpen, setPlannedOpen] = useState(false);
+  const [plannedSummary, setPlannedSummary] =
+    useState<PlannedSummaryDto | null>(null);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
 
@@ -165,6 +171,41 @@ export function AppShell() {
     };
   }, [desktop]);
 
+  const refreshPlannedSummary = useCallback(() => {
+    if (!desktop) return;
+    void api
+      .plannedSummary()
+      .then(setPlannedSummary)
+      .catch(() => setPlannedSummary(null));
+  }, [desktop]);
+
+  useEffect(() => {
+    refreshPlannedSummary();
+  }, [refreshPlannedSummary]);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onJobsTick((report) => {
+        if (report.wokeSnoozes > 0 || report.sentLater > 0) {
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          refreshPlannedSummary();
+          if (report.wokeSnoozes > 0) {
+            setSyncStatus(t("snoozeWoke", { count: report.wokeSnoozes }));
+          } else if (report.sentLater > 0) {
+            setSyncStatus(t("sendLaterSent", { count: report.sentLater }));
+          }
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop, queryClient, refreshPlannedSummary, setSyncStatus, t]);
+
   const refresh = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["accounts"] }),
@@ -255,53 +296,95 @@ export function AppShell() {
   );
 
   const handleSelectAccountFilter = useCallback((accountId: string | null) => {
+    setPlannedOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       accountId,
       mailboxId: null,
       mailboxRole: null,
       localOnly: false,
+      snoozedOnly: false,
     }));
   }, []);
 
   const handleSelectDrafts = useCallback(() => {
     selectMessage(null);
+    setPlannedOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
       mailboxRole: "drafts",
       localOnly: false,
+      snoozedOnly: false,
       viewMode: "flat",
     }));
   }, [selectMessage]);
 
   const handleSelectSpam = useCallback(() => {
     selectMessage(null);
+    setPlannedOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
       mailboxRole: "junk",
       localOnly: false,
+      snoozedOnly: false,
       viewMode: "flat",
     }));
   }, [selectMessage]);
 
   const handleSelectOffline = useCallback(() => {
     selectMessage(null);
+    setPlannedOpen(false);
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
       mailboxRole: null,
       localOnly: true,
+      snoozedOnly: false,
       viewMode: "flat",
     }));
   }, [selectMessage]);
+
+  const handleSelectPlanned = useCallback(() => {
+    selectMessage(null);
+    setPlannedOpen(true);
+    setInboxFilters((prev) => ({
+      ...prev,
+      mailboxId: null,
+      mailboxRole: null,
+      localOnly: false,
+      snoozedOnly: true,
+      viewMode: "flat",
+    }));
+    refreshPlannedSummary();
+  }, [refreshPlannedSummary, selectMessage]);
 
   const refreshMailQueries = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
     void queryClient.invalidateQueries({ queryKey: ["message"] });
     void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
   }, [queryClient]);
+
+  const handleSnooze = useCallback(
+    async (preset: SnoozePreset) => {
+      if (!selectedMessageId || !desktop) return;
+      await api.messagesSnooze({ messageId: selectedMessageId, preset });
+      selectMessage(null);
+      refreshMailQueries();
+      refreshPlannedSummary();
+      setSyncStatus(t("snoozeDone"));
+    },
+    [
+      desktop,
+      refreshMailQueries,
+      refreshPlannedSummary,
+      selectMessage,
+      selectedMessageId,
+      setSyncStatus,
+      t,
+    ],
+  );
 
   const handleMarkSpam = useCallback(async () => {
     if (!selectedMessageId) return;
@@ -372,11 +455,15 @@ export function AppShell() {
       },
       "mod+k": () => setCommandPaletteOpen(true),
       ",": () => setSettingsOpen(true),
+      h: () => {
+        void handleSnooze("laterToday");
+      },
     }),
     [
       handleArchive,
       handleDelete,
       handleForward,
+      handleSnooze,
       messageQuery.data,
       navigateList,
       setCommandPaletteOpen,
@@ -411,6 +498,33 @@ export function AppShell() {
         id: "drafts",
         label: t("drafts"),
         onSelect: () => handleSelectDrafts(),
+      },
+      {
+        id: "planned",
+        label: t("cmdPlanned"),
+        onSelect: () => handleSelectPlanned(),
+      },
+      {
+        id: "snooze-later-today",
+        label: t("cmdSnoozeLaterToday"),
+        hint: "H",
+        onSelect: () => {
+          void handleSnooze("laterToday");
+        },
+      },
+      {
+        id: "snooze-tomorrow",
+        label: t("cmdSnoozeTomorrow"),
+        onSelect: () => {
+          void handleSnooze("tomorrowMorning");
+        },
+      },
+      {
+        id: "snooze-monday",
+        label: t("cmdSnoozeMonday"),
+        onSelect: () => {
+          void handleSnooze("nextMonday");
+        },
       },
       {
         id: "contacts",
@@ -477,6 +591,8 @@ export function AppShell() {
       handleDelete,
       handleForward,
       handleSelectDrafts,
+      handleSelectPlanned,
+      handleSnooze,
       handleSync,
       setAccountSetupOpen,
       setComposerOpen,
@@ -532,6 +648,11 @@ export function AppShell() {
           draftsSelected={inboxFilters.mailboxRole === "drafts"}
           spamSelected={inboxFilters.mailboxRole === "junk"}
           offlineSelected={inboxFilters.localOnly}
+          plannedSelected={plannedOpen}
+          plannedCount={
+            (plannedSummary?.snoozedCount ?? 0) +
+            (plannedSummary?.outboundPendingCount ?? 0)
+          }
           syncStatus={syncStatus}
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
@@ -539,6 +660,7 @@ export function AppShell() {
           onSelectDrafts={handleSelectDrafts}
           onSelectSpam={handleSelectSpam}
           onSelectOffline={handleSelectOffline}
+          onSelectPlanned={handleSelectPlanned}
           onCompose={() => {
             setReplyTo(null);
             setEditingDraft(null);
@@ -569,6 +691,23 @@ export function AppShell() {
                   {t("addAccount")}
                 </button>
               }
+            />
+          </div>
+        ) : plannedOpen ? (
+          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+            <PlannedPanel
+              onOpenMessage={(id) => {
+                setPlannedOpen(false);
+                setInboxFilters((prev) => ({
+                  ...prev,
+                  snoozedOnly: false,
+                }));
+                selectMessage(id);
+              }}
+              onChanged={() => {
+                refreshMailQueries();
+                refreshPlannedSummary();
+              }}
             />
           </div>
         ) : (
@@ -620,6 +759,9 @@ export function AppShell() {
                 onMarkNotSpam={() => {
                   void handleMarkNotSpam();
                 }}
+                onSnooze={(preset) => {
+                  void handleSnooze(preset);
+                }}
                 onReplySent={() => {
                   void refresh();
                 }}
@@ -661,7 +803,10 @@ export function AppShell() {
           setComposerSubject(undefined);
           setEditingDraft(null);
         }}
-        onSent={refresh}
+        onSent={async () => {
+          await refresh();
+          refreshPlannedSummary();
+        }}
         onDraftSaved={refresh}
         onAddToContacts={(prefill) => {
           setContactPrefill(prefill);

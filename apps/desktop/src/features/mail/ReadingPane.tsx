@@ -8,11 +8,16 @@ import {
   Paperclip,
   ShieldAlert,
   ShieldCheck,
+  Clock3,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
-import type { AppError, MessageDetailDto } from "@/shared/api/types";
+import type {
+  AppError,
+  MessageDetailDto,
+  SnoozePreset,
+} from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
@@ -28,6 +33,7 @@ interface ReadingPaneProps {
   onToggleStar: () => void;
   onMarkSpam?: () => void;
   onMarkNotSpam?: () => void;
+  onSnooze?: (preset: SnoozePreset) => void;
   onReplySent?: () => void;
 }
 
@@ -40,6 +46,7 @@ export function ReadingPane({
   onToggleStar,
   onMarkSpam,
   onMarkNotSpam,
+  onSnooze,
   onReplySent,
 }: ReadingPaneProps) {
   const t = useT();
@@ -52,6 +59,7 @@ export function ReadingPane({
   const [aiBusy, setAiBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -61,6 +69,7 @@ export function ReadingPane({
     setActiveVariant("a");
     setDraft("");
     setAiError(null);
+    setSnoozeOpen(false);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
@@ -205,7 +214,7 @@ export function ReadingPane({
           <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
             {current.summary.subject || t("noSubject")}
           </h2>
-          <div className="flex items-center gap-1">
+          <div className="relative flex items-center gap-1">
             <IconButton label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
@@ -221,6 +230,43 @@ export function ReadingPane({
             <IconButton label={t("forward")} onClick={onForward}>
               <Forward />
             </IconButton>
+            {onSnooze ? (
+              <>
+                <IconButton
+                  label={t("snooze")}
+                  onClick={() => setSnoozeOpen((open) => !open)}
+                >
+                  <Clock3 />
+                </IconButton>
+                {snoozeOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                  >
+                    {(
+                      [
+                        ["laterToday", t("snoozeLaterToday")],
+                        ["tomorrowMorning", t("snoozeTomorrowMorning")],
+                        ["nextMonday", t("snoozeNextMonday")],
+                      ] as const
+                    ).map(([preset, label]) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        role="menuitem"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        onClick={() => {
+                          setSnoozeOpen(false);
+                          onSnooze(preset);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             {inSpamFolder ? (
               <IconButton label={t("markNotSpam")} onClick={onMarkNotSpam}>
                 <ShieldCheck />

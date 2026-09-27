@@ -28,6 +28,7 @@ impl SearchService {
             unified: false,
             mailbox_role: None,
             local_only: false,
+            snoozed_only: false,
             limit: request.limit,
             offset: request.offset,
             query: Some(request.query),

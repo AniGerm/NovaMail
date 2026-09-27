@@ -4,8 +4,8 @@ use std::sync::Arc;
 use novamail_ipc::{
     AccountDto, AddressDto, AttachmentDto, AuthType, ContactAddress, ContactCustomField, ContactDto,
     LabelDto, ListMessagesRequest, ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto,
-    MessageSortBy, MessageSummaryDto, RecipientSuggestion, RuleDto, SignatureDto, SortDirection,
-    ThreadListItemDto,
+    MessageSortBy, MessageSummaryDto, OutboundQueueItemDto, OutboundStatus, RecipientSuggestion,
+    RuleDto, SignatureDto, SnoozedMessageDto, SortDirection, ThreadListItemDto,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -803,6 +803,7 @@ impl Database {
                             has_attachments: row.get::<_, i64>(10)? != 0,
                             account_email: row.get(11)?,
                             local_only: row.get::<_, i64>(17)? != 0,
+                            snoozed_until: None,
                         },
                         body_text: row.get(12)?,
                         body_html: row.get(13)?,
@@ -816,6 +817,7 @@ impl Database {
             .optional()?
             .ok_or_else(|| DbError::NotFound(format!("message {id}")))?
         };
+        detail.summary.snoozed_until = self.snooze_wake_at(detail.summary.id)?;
         detail.attachments = self.list_attachments(detail.summary.id)?;
         Ok(detail)
     }
@@ -889,6 +891,11 @@ impl Database {
         let mut messages = Vec::new();
         for row in rows {
             messages.push(row?);
+        }
+        drop(stmt);
+        drop(conn);
+        if req.snoozed_only {
+            self.hydrate_snoozed_until(&mut messages)?;
         }
         Ok((messages, total))
     }
@@ -1407,6 +1414,255 @@ impl Database {
             |row| row.get(0),
         )?;
         Ok(size)
+    }
+
+    pub fn snooze_wake_at(&self, message_id: Uuid) -> DbResult<Option<i64>> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        let wake: Option<i64> = conn
+            .query_row(
+                "SELECT wake_at FROM snoozed_messages WHERE message_id = ?1 AND wake_at > ?2",
+                params![message_id.to_string(), now],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(wake)
+    }
+
+    pub fn snooze_message(
+        &self,
+        message_id: Uuid,
+        account_id: Uuid,
+        wake_at: i64,
+        previous_mailbox_id: Option<Uuid>,
+    ) -> DbResult<()> {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO snoozed_messages (message_id, account_id, wake_at, previous_mailbox_id, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(message_id) DO UPDATE SET
+              wake_at = excluded.wake_at,
+              previous_mailbox_id = excluded.previous_mailbox_id
+            "#,
+            params![
+                message_id.to_string(),
+                account_id.to_string(),
+                wake_at,
+                previous_mailbox_id.map(|id| id.to_string()),
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn unsnooze_message(&self, message_id: Uuid) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM snoozed_messages WHERE message_id = ?1",
+            params![message_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_due_snoozes(&self, now: i64) -> DbResult<Vec<Uuid>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT message_id FROM snoozed_messages WHERE wake_at <= ?1 ORDER BY wake_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            let id: String = row.get(0)?;
+            Ok(Uuid::parse_str(&id).map_err(|e| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+            })?)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn count_active_snoozes(&self) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM snoozed_messages WHERE wake_at > ?1",
+            params![now],
+            |row| row.get(0),
+        )?;
+        Ok(n as u32)
+    }
+
+    pub fn list_snoozed_messages(&self, limit: u32) -> DbResult<Vec<SnoozedMessageDto>> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().timestamp();
+        let limit = limit.max(1).min(500) as i64;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT s.message_id, s.account_id, s.wake_at, m.subject, m.from_json, a.email
+            FROM snoozed_messages s
+            JOIN messages m ON m.id = s.message_id
+            JOIN accounts a ON a.id = s.account_id
+            WHERE s.wake_at > ?1
+            ORDER BY s.wake_at ASC
+            LIMIT ?2
+            "#,
+        )?;
+        let rows = stmt.query_map(params![now, limit], |row| {
+            let from: AddressDto = serde_json::from_str(&row.get::<_, String>(4)?)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            Ok(SnoozedMessageDto {
+                message_id: parse_uuid(row.get::<_, String>(0)?)?,
+                account_id: parse_uuid(row.get::<_, String>(1)?)?,
+                wake_at: row.get(2)?,
+                subject: row.get(3)?,
+                from_email: from.email,
+                account_email: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn hydrate_snoozed_until(
+        &self,
+        messages: &mut [MessageSummaryDto],
+    ) -> DbResult<()> {
+        for message in messages.iter_mut() {
+            message.snoozed_until = self.snooze_wake_at(message.id)?;
+        }
+        Ok(())
+    }
+
+    pub fn enqueue_outbound(
+        &self,
+        id: Uuid,
+        account_id: Uuid,
+        payload_json: &str,
+        send_at: i64,
+    ) -> DbResult<()> {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO outbound_queue
+              (id, account_id, payload_json, send_at, status, last_error, created_at, sent_at)
+            VALUES (?1, ?2, ?3, ?4, 'pending', NULL, ?5, NULL)
+            "#,
+            params![
+                id.to_string(),
+                account_id.to_string(),
+                payload_json,
+                send_at,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_due_outbound(&self, now: i64, limit: u32) -> DbResult<Vec<(Uuid, Uuid, String)>> {
+        let conn = self.conn.lock();
+        let limit = limit.max(1).min(50) as i64;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, account_id, payload_json
+            FROM outbound_queue
+            WHERE status IN ('pending', 'failed') AND send_at <= ?1
+            ORDER BY send_at ASC
+            LIMIT ?2
+            "#,
+        )?;
+        let rows = stmt.query_map(params![now, limit], |row| {
+            Ok((
+                parse_uuid(row.get::<_, String>(0)?)?,
+                parse_uuid(row.get::<_, String>(1)?)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn set_outbound_status(
+        &self,
+        id: Uuid,
+        status: OutboundStatus,
+        last_error: Option<&str>,
+        sent_at: Option<i64>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            UPDATE outbound_queue
+            SET status = ?2, last_error = ?3, sent_at = COALESCE(?4, sent_at)
+            WHERE id = ?1
+            "#,
+            params![
+                id.to_string(),
+                status.as_str(),
+                last_error,
+                sent_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_outbound(&self, id: Uuid) -> DbResult<()> {
+        self.set_outbound_status(id, OutboundStatus::Cancelled, None, None)
+    }
+
+    pub fn count_pending_outbound(&self) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM outbound_queue WHERE status IN ('pending', 'failed')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(n as u32)
+    }
+
+    pub fn list_outbound_queue(&self, limit: u32) -> DbResult<Vec<OutboundQueueItemDto>> {
+        let conn = self.conn.lock();
+        let limit = limit.max(1).min(500) as i64;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT o.id, o.account_id, a.email, o.payload_json, o.send_at, o.status,
+                   o.last_error, o.created_at
+            FROM outbound_queue o
+            JOIN accounts a ON a.id = o.account_id
+            WHERE o.status IN ('pending', 'failed', 'sending')
+            ORDER BY o.send_at ASC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            let payload: String = row.get(3)?;
+            let (subject, to_summary) = parse_outbound_preview(&payload);
+            Ok(OutboundQueueItemDto {
+                id: parse_uuid(row.get::<_, String>(0)?)?,
+                account_id: parse_uuid(row.get::<_, String>(1)?)?,
+                account_email: row.get(2)?,
+                subject,
+                to_summary,
+                send_at: row.get(4)?,
+                status: OutboundStatus::parse(&row.get::<_, String>(5)?),
+                last_error: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// Message IDs in mailboxes with the given role whose `date` is older than `cutoff` (unix secs).
@@ -2056,6 +2312,7 @@ fn map_message_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSumma
         has_attachments: row.get::<_, i64>(10)? != 0,
         account_email: row.get(11)?,
         local_only: row.get::<_, i64>(12).unwrap_or(0) != 0,
+        snoozed_until: None,
     })
 }
 
@@ -2087,6 +2344,37 @@ fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
     // Offline mailbox virtual folder: all local-only messages (optionally per account).
     if req.local_only {
         where_parts.push("coalesce(m.local_only, 0) != 0".into());
+        if let Some(account_id) = req.account_id {
+            where_parts.push("m.account_id = ?1".into());
+            bind_ids.push(account_id.to_string());
+        }
+        if req.unread_only {
+            where_parts.push(format!("(m.flags & {FLAG_SEEN}) = 0"));
+        }
+        if req.starred_only {
+            where_parts.push(format!("(m.flags & {FLAG_STARRED}) != 0"));
+        }
+        if req.has_attachments {
+            where_parts.push("m.has_attachments != 0".into());
+        }
+        if let Some(query) = &req.query {
+            if !query.trim().is_empty() {
+                where_parts.push(format!(
+                    "m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH '{}')",
+                    escape_fts(query)
+                ));
+            }
+        }
+        let where_sql = format!("WHERE {}", where_parts.join(" AND "));
+        return (where_sql, bind_ids);
+    }
+
+    // Snoozed virtual folder: currently sleeping messages.
+    if req.snoozed_only {
+        let now = chrono::Utc::now().timestamp();
+        where_parts.push(format!(
+            "EXISTS (SELECT 1 FROM snoozed_messages s WHERE s.message_id = m.id AND s.wake_at > {now})"
+        ));
         if let Some(account_id) = req.account_id {
             where_parts.push("m.account_id = ?1".into());
             bind_ids.push(account_id.to_string());
@@ -2168,6 +2456,14 @@ fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
     } else if let Some(account_id) = req.account_id {
         where_parts.push("m.account_id = ?1".into());
         bind_ids.push(account_id.to_string());
+    }
+
+    // Hide actively snoozed mail from normal inbox/mailbox views.
+    {
+        let now = chrono::Utc::now().timestamp();
+        where_parts.push(format!(
+            "NOT EXISTS (SELECT 1 FROM snoozed_messages s WHERE s.message_id = m.id AND s.wake_at > {now})"
+        ));
     }
 
     if req.unread_only {
@@ -2261,6 +2557,29 @@ fn escape_fts(query: &str) -> String {
     } else {
         tokens.join(" ")
     }
+}
+
+fn parse_outbound_preview(payload_json: &str) -> (String, String) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload_json) else {
+        return ("(queued)".into(), String::new());
+    };
+    let subject = value
+        .get("subject")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(no subject)")
+        .to_string();
+    let to_summary = value
+        .get("to")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.get("email").and_then(|e| e.as_str()))
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    (subject, to_summary)
 }
 
 #[cfg(test)]
@@ -2378,6 +2697,7 @@ mod tests {
                 unified: true,
                 mailbox_role: None,
                 local_only: false,
+                snoozed_only: false,
                 limit: 50,
                 offset: 0,
                 query: None,
@@ -2401,6 +2721,7 @@ mod tests {
                 unified: true,
                 mailbox_role: None,
                 local_only: false,
+                snoozed_only: false,
                 limit: 50,
                 offset: 0,
                 query: None,
@@ -2497,6 +2818,7 @@ mod tests {
                 unified: false,
                 mailbox_role: None,
                 local_only: true,
+                snoozed_only: false,
                 limit: 50,
                 offset: 0,
                 query: None,
@@ -2514,5 +2836,118 @@ mod tests {
             .list_offload_candidates(account.id, 10_000, true, 10)
             .unwrap();
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn snooze_hides_from_inbox_until_wake() {
+        let db = Database::open_in_memory().unwrap();
+        let account = sample_account();
+        db.insert_account(&account).unwrap();
+        let mailbox = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id: account.id,
+            name: "INBOX".into(),
+            role: Some("inbox".into()),
+            uidvalidity: Some(1),
+            uidnext: Some(2),
+            unread_count: 0,
+            total_count: 1,
+        };
+        db.upsert_mailbox(&mailbox).unwrap();
+        let thread_id = Uuid::new_v4();
+        db.upsert_thread(&ThreadRecord {
+            id: thread_id,
+            account_id: account.id,
+            subject: "Snooze me".into(),
+            last_message_at: 100,
+            message_count: 1,
+            unread_count: 1,
+            participants: vec![AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            }],
+            snippet: "Snooze me".into(),
+        })
+        .unwrap();
+        let message_id = Uuid::new_v4();
+        db.insert_message(&MessageRecord {
+            id: message_id,
+            account_id: account.id,
+            mailbox_id: mailbox.id,
+            thread_id,
+            uid: Some(1),
+            message_id: Some("<snooze@example.com>".into()),
+            in_reply_to: None,
+            references: vec![],
+            subject: "Snooze me".into(),
+            from: AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            },
+            to: vec![],
+            cc: vec![],
+            date: 100,
+            flags: 0,
+            snippet: "Snooze me".into(),
+            body_text: Some("hi".into()),
+            body_html: None,
+            has_attachments: false,
+            raw_path: None,
+            local_only: false,
+            offline_at: None,
+            size_bytes: Some(2),
+        })
+        .unwrap();
+
+        let future = chrono::Utc::now().timestamp() + 3_600;
+        db.snooze_message(message_id, account.id, future, Some(mailbox.id))
+            .unwrap();
+        assert_eq!(db.count_active_snoozes().unwrap(), 1);
+
+        let (_, inbox_total) = db
+            .list_messages(&ListMessagesRequest {
+                mailbox_id: None,
+                account_id: None,
+                unified: true,
+                mailbox_role: None,
+                local_only: false,
+                snoozed_only: false,
+                limit: 50,
+                offset: 0,
+                query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Desc,
+            })
+            .unwrap();
+        assert_eq!(inbox_total, 0);
+
+        let (snoozed, snoozed_total) = db
+            .list_messages(&ListMessagesRequest {
+                mailbox_id: None,
+                account_id: None,
+                unified: false,
+                mailbox_role: None,
+                local_only: false,
+                snoozed_only: true,
+                limit: 50,
+                offset: 0,
+                query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Desc,
+            })
+            .unwrap();
+        assert_eq!(snoozed_total, 1);
+        assert_eq!(snoozed[0].snoozed_until, Some(future));
+
+        let due = db.list_due_snoozes(future + 1).unwrap();
+        assert_eq!(due, vec![message_id]);
+        db.unsnooze_message(message_id).unwrap();
+        assert_eq!(db.count_active_snoozes().unwrap(), 0);
     }
 }

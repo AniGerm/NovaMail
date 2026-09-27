@@ -24,18 +24,20 @@ use novamail_ipc::{
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
     ContactDto, ContactsBookSettings, ContactsShareMode, ContactsShareStatus,
     ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, FolderPolicyDto,
-    ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest,
-    LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
+    ImportBackupRequest, ImportBackupResult, JobsTickReport, LabelDto, LdapSearchRequest,
+    LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
     MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto,
     OfflineMailboxAccountPolicy, OfflineMailboxMode, OfflineMailboxSettingsDto,
-    OfflineOffloadReport, OfflinePromptEvent, ProviderPreset, RecipientSuggestion,
-    RetentionModeDto, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
-    SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
-    SignatureDto, SpamScoreDto, SpamSettingsDto, SuggestRepliesMessageRequest,
-    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
-    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
-    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
+    OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto, OutboundStatus,
+    PlannedSummaryDto, ProviderPreset, RecipientSuggestion, RetentionModeDto, RuleDto,
+    SaveDraftRequest, SearchRequest, SearchResponse, SendLaterRequest, SendMessageRequest,
+    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
+    SnoozePreset, SnoozeRequest, SnoozedMessageDto, SpamScoreDto, SpamSettingsDto,
+    SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
+    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
+    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
+    UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
     archive_remote, delete_remote, move_remote, offload_message_remote, probe_account_quota,
@@ -506,6 +508,133 @@ impl AppState {
             let _ = self.db.delete_message(id);
         }
         Ok(())
+    }
+
+    pub fn snooze_message(&self, request: SnoozeRequest) -> CoreResult<i64> {
+        let detail = self.db.get_message(request.message_id)?;
+        let wake_at = resolve_snooze_wake(request.preset, request.wake_at)?;
+        self.db.snooze_message(
+            request.message_id,
+            detail.summary.account_id,
+            wake_at,
+            Some(detail.summary.mailbox_id),
+        )?;
+        Ok(wake_at)
+    }
+
+    pub fn unsnooze_message(&self, message_id: Uuid) -> CoreResult<()> {
+        self.db.unsnooze_message(message_id)?;
+        Ok(())
+    }
+
+    pub fn list_snoozed(&self, limit: u32) -> CoreResult<Vec<SnoozedMessageDto>> {
+        Ok(self.db.list_snoozed_messages(limit)?)
+    }
+
+    pub fn wake_due_snoozes(&self) -> CoreResult<u32> {
+        let now = chrono::Utc::now().timestamp();
+        let due = self.db.list_due_snoozes(now)?;
+        let mut woke = 0u32;
+        for message_id in due {
+            self.db.unsnooze_message(message_id)?;
+            woke += 1;
+        }
+        Ok(woke)
+    }
+
+    pub fn enqueue_send_later(&self, request: SendLaterRequest) -> CoreResult<Uuid> {
+        let now = chrono::Utc::now().timestamp();
+        if request.send_at <= now {
+            return Err(CoreError::Message(
+                "send_at must be in the future".into(),
+            ));
+        }
+        let _ = self.db.get_account(request.message.account_id)?;
+        if request.message.to.is_empty() {
+            return Err(CoreError::Message("at least one recipient required".into()));
+        }
+        let id = Uuid::new_v4();
+        let payload = serde_json::to_string(&request.message)
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        self.db.enqueue_outbound(
+            id,
+            request.message.account_id,
+            &payload,
+            request.send_at,
+        )?;
+        Ok(id)
+    }
+
+    pub fn list_outbound_queue(&self, limit: u32) -> CoreResult<Vec<OutboundQueueItemDto>> {
+        Ok(self.db.list_outbound_queue(limit)?)
+    }
+
+    pub fn cancel_outbound(&self, id: Uuid) -> CoreResult<()> {
+        self.db.cancel_outbound(id)?;
+        Ok(())
+    }
+
+    pub fn planned_summary(&self) -> CoreResult<PlannedSummaryDto> {
+        Ok(PlannedSummaryDto {
+            snoozed_count: self.db.count_active_snoozes()?,
+            outbound_pending_count: self.db.count_pending_outbound()?,
+        })
+    }
+
+    pub async fn flush_outbound_queue(&self) -> CoreResult<(u32, u32)> {
+        let now = chrono::Utc::now().timestamp();
+        let due = self.db.list_due_outbound(now, 20)?;
+        let mut sent = 0u32;
+        let mut failed = 0u32;
+        for (id, _account_id, payload) in due {
+            let request: SendMessageRequest = match serde_json::from_str(&payload) {
+                Ok(r) => r,
+                Err(err) => {
+                    let _ = self.db.set_outbound_status(
+                        id,
+                        OutboundStatus::Failed,
+                        Some(&err.to_string()),
+                        None,
+                    );
+                    failed += 1;
+                    continue;
+                }
+            };
+            let _ = self
+                .db
+                .set_outbound_status(id, OutboundStatus::Sending, None, None);
+            match self.send_message(request).await {
+                Ok(()) => {
+                    let _ = self.db.set_outbound_status(
+                        id,
+                        OutboundStatus::Sent,
+                        None,
+                        Some(chrono::Utc::now().timestamp()),
+                    );
+                    sent += 1;
+                }
+                Err(err) => {
+                    let _ = self.db.set_outbound_status(
+                        id,
+                        OutboundStatus::Failed,
+                        Some(&err.to_string()),
+                        None,
+                    );
+                    failed += 1;
+                }
+            }
+        }
+        Ok((sent, failed))
+    }
+
+    pub async fn run_jobs_tick(&self) -> CoreResult<JobsTickReport> {
+        let woke_snoozes = self.wake_due_snoozes()?;
+        let (sent_later, failed_later) = self.flush_outbound_queue().await?;
+        Ok(JobsTickReport {
+            woke_snoozes,
+            sent_later,
+            failed_later,
+        })
     }
 
     pub async fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
@@ -2345,6 +2474,56 @@ impl AppState {
         };
         Ok((result.score, result.rationale, result.provider))
     }
+}
+
+fn resolve_snooze_wake(preset: SnoozePreset, custom: Option<i64>) -> CoreResult<i64> {
+    use chrono::{Datelike, Duration, Local};
+    let now = Local::now();
+    let wake = match preset {
+        SnoozePreset::Custom => {
+            let Some(ts) = custom else {
+                return Err(CoreError::Message(
+                    "custom snooze requires wake_at".into(),
+                ));
+            };
+            if ts <= now.timestamp() {
+                return Err(CoreError::Message(
+                    "wake_at must be in the future".into(),
+                ));
+            }
+            return Ok(ts);
+        }
+        SnoozePreset::LaterToday => {
+            let later = now + Duration::hours(3);
+            let evening = now
+                .date_naive()
+                .and_hms_opt(18, 0, 0)
+                .and_then(|ndt| ndt.and_local_timezone(Local).single())
+                .unwrap_or(later);
+            if evening > now {
+                evening
+            } else {
+                later
+            }
+        }
+        SnoozePreset::TomorrowMorning => {
+            let tomorrow = (now + Duration::days(1)).date_naive();
+            tomorrow
+                .and_hms_opt(9, 0, 0)
+                .and_then(|ndt| ndt.and_local_timezone(Local).single())
+                .unwrap_or(now + Duration::days(1))
+        }
+        SnoozePreset::NextMonday => {
+            let weekday = now.weekday().num_days_from_monday();
+            let days_ahead = if weekday == 0 { 7 } else { 7 - weekday };
+            let target = (now + Duration::days(i64::from(days_ahead))).date_naive();
+            target
+                .and_hms_opt(9, 0, 0)
+                .and_then(|ndt| ndt.and_local_timezone(Local).single())
+                .unwrap_or(now + Duration::days(i64::from(days_ahead)))
+        }
+    };
+    Ok(wake.timestamp())
 }
 
 fn insight_text(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<Option<String>> {

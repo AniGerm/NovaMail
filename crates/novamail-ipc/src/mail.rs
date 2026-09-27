@@ -38,6 +38,9 @@ pub struct MessageSummaryDto {
     /// True when the message was offloaded from IMAP and exists only locally.
     #[serde(default)]
     pub local_only: bool,
+    /// When set, message is snoozed until this unix timestamp.
+    #[serde(default)]
+    pub snoozed_until: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +100,9 @@ pub struct ListMessagesRequest {
     /// When true, only messages that were offloaded from IMAP (`local_only`).
     #[serde(default)]
     pub local_only: bool,
+    /// When true, only currently snoozed messages (`wake_at > now`).
+    #[serde(default)]
+    pub snoozed_only: bool,
     pub limit: u32,
     pub offset: u32,
     pub query: Option<String>,

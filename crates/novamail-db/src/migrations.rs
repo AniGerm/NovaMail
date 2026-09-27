@@ -218,6 +218,33 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_messages_offline_at
       ON messages(offline_at);
     "#,
+    // v6 — snooze + send later
+    r#"
+    CREATE TABLE IF NOT EXISTS snoozed_messages (
+      message_id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      wake_at INTEGER NOT NULL,
+      previous_mailbox_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_snoozed_wake
+      ON snoozed_messages(wake_at);
+
+    CREATE TABLE IF NOT EXISTS outbound_queue (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      send_at INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      sent_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_outbound_due
+      ON outbound_queue(status, send_at);
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -270,7 +297,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

@@ -36,6 +36,8 @@ export interface InboxFilters {
   mailboxRole: string | null;
   /** Virtual folder: messages kept only locally after IMAP offload */
   localOnly: boolean;
+  /** Virtual folder: currently snoozed messages */
+  snoozedOnly: boolean;
   sortBy: MessageSortBy;
   sortDir: SortDirection;
   viewMode: InboxViewMode;
@@ -467,6 +469,11 @@ export function MessageList({
                       {t("localOnlyBadge")}
                     </span>
                   ) : null}
+                  {message.snoozedUntil ? (
+                    <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
+                      {t("snoozedBadge")}
+                    </span>
+                  ) : null}
                 </div>
                 {!indented ? (
                   <p className="truncate text-xs text-[var(--nova-ink-muted)]">
@@ -515,12 +522,15 @@ export function buildListRequest(
   const mailboxSelected = Boolean(filters.mailboxId);
   const roleSelected = Boolean(filters.mailboxRole);
   const offlineSelected = filters.localOnly;
+  const snoozedSelected = filters.snoozedOnly;
   return {
-    mailboxId: offlineSelected ? null : filters.mailboxId,
+    mailboxId: offlineSelected || snoozedSelected ? null : filters.mailboxId,
     accountId: mailboxSelected ? null : filters.accountId,
-    unified: !mailboxSelected && !roleSelected && !offlineSelected,
-    mailboxRole: offlineSelected ? null : filters.mailboxRole,
+    unified:
+      !mailboxSelected && !roleSelected && !offlineSelected && !snoozedSelected,
+    mailboxRole: offlineSelected || snoozedSelected ? null : filters.mailboxRole,
     localOnly: offlineSelected,
+    snoozedOnly: snoozedSelected,
     limit: 200,
     offset: 0,
     query: searchQuery || null,
@@ -540,6 +550,7 @@ export const defaultInboxFilters: InboxFilters = {
   mailboxId: null,
   mailboxRole: null,
   localOnly: false,
+  snoozedOnly: false,
   sortBy: "date",
   sortDir: "desc",
   viewMode: "threads",

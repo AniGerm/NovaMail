@@ -55,6 +55,32 @@ function parseRecipientToken(token: string): AddressDto {
   return { email: trimmed };
 }
 
+function resolveSendAt(
+  preset: "laterToday" | "tomorrowMorning" | "nextMonday",
+): number {
+  const now = new Date();
+  if (preset === "laterToday") {
+    const evening = new Date(now);
+    evening.setHours(18, 0, 0, 0);
+    if (evening.getTime() > now.getTime()) {
+      return Math.floor(evening.getTime() / 1000);
+    }
+    return Math.floor((now.getTime() + 3 * 60 * 60 * 1000) / 1000);
+  }
+  if (preset === "tomorrowMorning") {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    return Math.floor(tomorrow.getTime() / 1000);
+  }
+  const day = now.getDay(); // 0=Sun … 6=Sat
+  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
+  const monday = new Date(now);
+  monday.setDate(monday.getDate() + daysUntilMonday);
+  monday.setHours(9, 0, 0, 0);
+  return Math.floor(monday.getTime() / 1000);
+}
+
 export function Composer({
   open,
   accounts,
@@ -78,6 +104,7 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sendLaterOpen, setSendLaterOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -95,6 +122,7 @@ export function Composer({
       setAttachments([]);
       setError(null);
       setStatus(null);
+      setSendLaterOpen(false);
       return;
     }
 
@@ -111,6 +139,7 @@ export function Composer({
     setAttachments([]);
     setError(null);
     setStatus(null);
+    setSendLaterOpen(false);
 
     if (!replyTo && !initialBody && accounts[0]?.id) {
       api
@@ -192,6 +221,24 @@ export function Composer({
     }
   }
 
+  function buildSendRequest() {
+    return {
+      accountId,
+      to: recipients(),
+      cc: [],
+      bcc: [],
+      subject,
+      bodyText,
+      bodyHtml,
+      inReplyTo: replyTo?.messageId ?? null,
+      references: replyTo
+        ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
+        : [],
+      attachments,
+      draftId,
+    };
+  }
+
   async function handleSend(event: React.FormEvent) {
     event.preventDefault();
     if (!accountId) {
@@ -206,21 +253,39 @@ export function Composer({
     setError(null);
     setStatus(null);
     try {
-      await api.messagesSend({
-        accountId,
-        to: recipients(),
-        cc: [],
-        bcc: [],
-        subject,
-        bodyText,
-        bodyHtml,
-        inReplyTo: replyTo?.messageId ?? null,
-        references: replyTo
-          ? [...replyTo.references, replyTo.messageId ?? ""].filter(Boolean)
-          : [],
-        attachments,
-        draftId,
+      await api.messagesSend(buildSendRequest());
+      onSent();
+      onClose();
+      setBodyHtml("<p><br></p>");
+      setBodyText("");
+      setDraftId(null);
+      setAttachments([]);
+    } catch (err) {
+      setError((err as AppError).message || t("sendFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSendLater(sendAt: number) {
+    if (!accountId) {
+      setError(t("addAccountBeforeSend"));
+      return;
+    }
+    if (!bodyText.trim()) {
+      setError(t("messageEmpty"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    setSendLaterOpen(false);
+    try {
+      await api.messagesSendLater({
+        sendAt,
+        message: buildSendRequest(),
       });
+      setStatus(t("sendLaterDone"));
       onSent();
       onClose();
       setBodyHtml("<p><br></p>");
@@ -348,7 +413,7 @@ export function Composer({
           ) : null}
         </div>
 
-        <footer className="flex flex-wrap justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
           <Button type="button" variant="secondary" onClick={onClose}>
             {t("discard")}
           </Button>
@@ -363,6 +428,42 @@ export function Composer({
           >
             {busy ? t("savingDraft") : t("saveDraft")}
           </Button>
+          <div className="relative">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setSendLaterOpen((open) => !open)}
+            >
+              {t("sendLater")}
+            </Button>
+            {sendLaterOpen ? (
+              <div
+                role="menu"
+                className="absolute bottom-full right-0 z-20 mb-1 min-w-[12rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+              >
+                {(
+                  [
+                    ["laterToday", t("snoozeLaterToday")],
+                    ["tomorrowMorning", t("snoozeTomorrowMorning")],
+                    ["nextMonday", t("snoozeNextMonday")],
+                  ] as const
+                ).map(([preset, label]) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => {
+                      void handleSendLater(resolveSendAt(preset));
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <Button type="submit" disabled={busy}>
             {busy ? t("sending") : t("send")}
           </Button>

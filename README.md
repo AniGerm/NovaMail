@@ -25,14 +25,16 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Sort by date, subject, from, attachments (asc/desc)
 - Virtualized message list for large mailboxes
 - Reading pane with HTML sanitization (safe rendering)
-- Favorites (star), archive, delete
-- Dedicated **Drafts** and **Spam** views in the sidebar
-- **Offline** view for messages kept only on this device
+- Favorites (star), archive, delete, **snooze**
+- Dedicated **Drafts**, **Spam**, **Offline**, and **Planned** views in the sidebar
+- **Snooze**: hide a message until later today / tomorrow morning / next Monday; it returns via a local job tick
+- **Planned**: snoozed mail + scheduled outbound sends in one place (unsnooze / cancel)
 
 ### Compose & editing
 
 - Compose, reply, forward
 - Save / edit drafts
+- **Send later** with the same presets (queued locally; sent when the app is running)
 - Rich text editor: bold, italic, underline, lists, indent, fonts, sizes
 - Attach files when sending; open downloaded attachments locally
 - Signatures (per account / default)
@@ -42,8 +44,8 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 ### Search & productivity
 
 - Full-text search over local mail (SQLite FTS5) — online **and** offline copies
-- Command palette (`Ctrl/Cmd+K`)
-- Keyboard shortcuts: `c` compose, `r` reply, `f` forward, `e` archive, `#` delete, `t` Quick Sort, `j`/`k` navigate, `/` search, and more
+- Command palette (`Ctrl/Cmd+K`) — compose, triage, planned, snooze presets, sync, settings, …
+- Keyboard shortcuts: `c` compose, `r` reply, `f` forward, `e` archive, `#` delete, `h` snooze later today, `t` Quick Sort, `j`/`k` navigate, `/` search, and more
 - **Quick Sort** triage: Keep / Delete / Preview (hotkeys)
 - Labels (create, assign, manage)
 - Mail rules engine: predicates (from / to / subject / body / always) and actions (read/unread, star, label, move, spam, delete)

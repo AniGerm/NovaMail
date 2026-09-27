@@ -133,6 +133,7 @@ mod tests {
             has_attachments: false,
             account_email: "me@example.com".into(),
             local_only: false,
+            snoozed_until: None,
         }
     }
 
