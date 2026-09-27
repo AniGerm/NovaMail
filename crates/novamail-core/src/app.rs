@@ -671,21 +671,22 @@ impl AppState {
     pub async fn run_jobs_tick(&self) -> CoreResult<JobsTickReport> {
         let woke_snoozes = self.wake_due_snoozes()?;
         let (sent_later, failed_later) = self.flush_outbound_queue().await?;
-        let calendar_reminders = self.fire_due_calendar_reminders()?;
+        let reminder_titles = self.fire_due_calendar_reminders()?;
         let scanned_invites = self.db.scan_messages_for_invites(40).unwrap_or(0);
         Ok(JobsTickReport {
             woke_snoozes,
             sent_later,
             failed_later,
-            calendar_reminders,
+            calendar_reminders: reminder_titles.len() as u32,
             scanned_invites,
+            reminder_titles,
         })
     }
 
-    fn fire_due_calendar_reminders(&self) -> CoreResult<u32> {
+    fn fire_due_calendar_reminders(&self) -> CoreResult<Vec<String>> {
         let now = chrono::Utc::now().timestamp();
         let due = self.db.list_due_calendar_reminders(now)?;
-        let mut n = 0u32;
+        let mut titles = Vec::new();
         for event in due {
             tracing::info!(
                 title = %event.title,
@@ -693,9 +694,9 @@ impl AppState {
                 "calendar reminder due"
             );
             self.db.mark_calendar_reminder_fired(event.id, now)?;
-            n += 1;
+            titles.push(event.title);
         }
-        Ok(n)
+        Ok(titles)
     }
 
     pub async fn save_draft(&self, request: SaveDraftRequest) -> CoreResult<MessageDetailDto> {
@@ -3202,12 +3203,79 @@ impl AppState {
                 })
                 .await?;
         }
+        if let Err(err) = self.send_imip_reply(&invite, partstat).await {
+            tracing::warn!(error = %err, "iMIP REPLY send failed; RSVP kept locally");
+        }
         self.db.set_invitation_partstat(request.id, partstat)?;
         self.db
             .list_calendar_invitations(false)?
             .into_iter()
             .find(|i| i.id == request.id)
             .ok_or_else(|| CoreError::Message("invitation missing after respond".into()))
+    }
+
+    async fn send_imip_reply(
+        &self,
+        invite: &CalendarInvitationDto,
+        partstat: &str,
+    ) -> CoreResult<()> {
+        let Some(organizer) = invite.organizer.as_ref().filter(|s| !s.is_empty()) else {
+            return Ok(());
+        };
+        let (account_id, attendee_email) = if let Some(message_id) = invite.message_id {
+            let detail = self.db.get_message(message_id)?;
+            let rec = self.db.get_account(detail.summary.account_id)?;
+            (rec.id, rec.email)
+        } else {
+            let account = self
+                .db
+                .list_accounts()?
+                .into_iter()
+                .next()
+                .ok_or_else(|| CoreError::Message("no mail account for iMIP reply".into()))?;
+            (account.id, account.email)
+        };
+        let reply_ics = crate::caldav::build_imip_reply(
+            &invite.ical_uid,
+            &invite.title,
+            invite.starts_at,
+            invite.ends_at,
+            organizer,
+            &attendee_email,
+            partstat,
+        );
+        let data_base64 = B64.encode(reply_ics.as_bytes());
+        let subject = match partstat {
+            "declined" => format!("Declined: {}", invite.title),
+            "tentative" => format!("Tentative: {}", invite.title),
+            _ => format!("Accepted: {}", invite.title),
+        };
+        self.send_message(SendMessageRequest {
+            account_id,
+            to: vec![AddressDto {
+                name: None,
+                email: organizer.clone(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject,
+            body_text: format!(
+                "NovaMail RSVP ({partstat}) for \"{}\".\n\n",
+                invite.title
+            ),
+            body_html: None,
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![novamail_ipc::OutgoingAttachment {
+                filename: "invite-reply.ics".into(),
+                mime: "text/calendar; method=REPLY".into(),
+                data_base64,
+            }],
+            draft_id: None,
+            pgp_sign: false,
+            pgp_encrypt: false,
+        })
+        .await
     }
 }
 

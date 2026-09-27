@@ -18,6 +18,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let state = DesktopState::new()?;
             let scheduler = SyncScheduler::new(
@@ -40,8 +41,26 @@ pub fn run() {
                             if report.woke_snoozes > 0
                                 || report.sent_later > 0
                                 || report.failed_later > 0
+                                || report.calendar_reminders > 0
                             {
                                 let _ = handle_jobs.emit("jobs://tick", &report);
+                            }
+                            if report.calendar_reminders > 0 {
+                                use tauri_plugin_notification::NotificationExt;
+                                let body = if report.reminder_titles.len() == 1 {
+                                    report.reminder_titles[0].clone()
+                                } else {
+                                    format!(
+                                        "{} reminders",
+                                        report.calendar_reminders
+                                    )
+                                };
+                                let _ = handle_jobs
+                                    .notification()
+                                    .builder()
+                                    .title("NovaMail Calendar")
+                                    .body(body)
+                                    .show();
                             }
                         }
                         Err(err) => {

@@ -289,6 +289,34 @@ export function CalendarPanel() {
                   {formatDayLabel(days[0]?.start ?? anchor, locale)}
                 </div>
                 <div className="relative">
+                  {(() => {
+                    const dayStart =
+                      days[0]?.dayStart ?? Math.floor(anchor / 1000);
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    const gridStart = dayStart + hourSlots[0]! * 3600;
+                    const gridEnd =
+                      dayStart + (hourSlots[hourSlots.length - 1]! + 1) * 3600;
+                    const showNow =
+                      nowSec >= gridStart &&
+                      nowSec < gridEnd &&
+                      startOfDay(Date.now()) ===
+                        startOfDay((days[0]?.start ?? anchor));
+                    if (!showNow) return null;
+                    const slotH = 52;
+                    const minutesFromGrid =
+                      (nowSec - gridStart) / 60;
+                    const top = (minutesFromGrid / 60) * slotH;
+                    return (
+                      <div
+                        className="pointer-events-none absolute left-14 right-0 z-10 flex items-center"
+                        style={{ top }}
+                        aria-hidden
+                      >
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-danger)]" />
+                        <span className="h-px flex-1 bg-[var(--nova-danger)]" />
+                      </div>
+                    );
+                  })()}
                   {hourSlots.map((hour) => {
                     const slotStart =
                       (days[0]?.dayStart ?? Math.floor(anchor / 1000)) +

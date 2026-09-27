@@ -388,6 +388,7 @@ export interface JobsTickReport {
   failedLater: number;
   calendarReminders?: number;
   scannedInvites?: number;
+  reminderTitles?: string[];
 }
 
 export interface PlannedSummaryDto {

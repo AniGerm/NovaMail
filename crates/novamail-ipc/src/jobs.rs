@@ -96,6 +96,9 @@ pub struct JobsTickReport {
     pub calendar_reminders: u32,
     #[serde(default)]
     pub scanned_invites: u32,
+    /// Titles of events whose reminders just fired (for desktop notifications).
+    #[serde(default)]
+    pub reminder_titles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

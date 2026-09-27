@@ -380,6 +380,7 @@ export const de = {
   calendarDecline: "Ablehnen",
   calendarMaybe: "Vielleicht",
   calendarInviteUpdated: "Einladung aktualisiert.",
+  calendarInviteInInbox: "Terminanfrage — antworten unter Kalender → Inbox.",
   calendarManage: "Kalender",
   calendarMain: "Hauptkalender",
   calendarSetMain: "Als Hauptkalender",

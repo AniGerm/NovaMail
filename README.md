@@ -131,7 +131,7 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - **Discover calendars** (PROPFIND principal → calendar-home → collections)
 - Sync pulls VEVENT and VTODO into the local store (per collection)
 - **Write-back**: new/updated events PUT as `.ics` with `VALARM`; deletes remove the remote object (Nextcloud / generic CalDAV + Basic auth)
-- Reminder due checks on the jobs tick (logged / surfaced via sync status)
+- Reminder due checks on the jobs tick → desktop notification + status bar
 
 ### Backup & security
 

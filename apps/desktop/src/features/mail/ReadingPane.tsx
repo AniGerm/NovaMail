@@ -70,6 +70,7 @@ export function ReadingPane({
   const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [invitePending, setInvitePending] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -82,9 +83,26 @@ export function ReadingPane({
     setSnoozeOpen(false);
     setPgpResult(null);
     setEventSuggestions([]);
+    setInvitePending(false);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
+    const body = `${message?.bodyText ?? ""}\n${message?.bodyHtml ?? ""}`;
+    const looksLikeInvite =
+      /BEGIN:VCALENDAR/i.test(body) && /METHOD:REQUEST/i.test(body);
+    if (looksLikeInvite) {
+      setInvitePending(true);
+    }
+    void api
+      .calendarInvitationsList(true)
+      .then((invites) => {
+        if (!cancelled) {
+          setInvitePending(
+            looksLikeInvite || invites.some((i) => i.messageId === id),
+          );
+        }
+      })
+      .catch(() => undefined);
     void api
       .pgpInspectMessage(id)
       .then((result) => {
@@ -330,6 +348,11 @@ export function ReadingPane({
         {aiError ? (
           <p className="mt-3 text-sm text-[var(--nova-danger)]" role="alert">
             {aiError}
+          </p>
+        ) : null}
+        {invitePending ? (
+          <p className="mt-3 text-sm text-[var(--nova-accent)]">
+            {t("calendarInviteInInbox")}
           </p>
         ) : null}
       </header>

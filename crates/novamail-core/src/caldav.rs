@@ -223,6 +223,46 @@ pub async fn delete_object(
     Ok(())
 }
 
+/// Build a minimal iMIP `METHOD:REPLY` calendar body for RSVP.
+pub fn build_imip_reply(
+    uid: &str,
+    title: &str,
+    starts_at: i64,
+    ends_at: Option<i64>,
+    organizer: &str,
+    attendee_email: &str,
+    partstat: &str,
+) -> String {
+    let end = ends_at.unwrap_or(starts_at + 3600);
+    let partstat_lower = partstat.to_ascii_lowercase();
+    let partstat_ical = match partstat_lower.as_str() {
+        "accepted" => "ACCEPTED",
+        "declined" => "DECLINED",
+        "tentative" => "TENTATIVE",
+        _ => "ACCEPTED",
+    };
+    [
+        "BEGIN:VCALENDAR".into(),
+        "VERSION:2.0".into(),
+        "PRODID:-//NovaMail//EN".into(),
+        "METHOD:REPLY".into(),
+        "BEGIN:VEVENT".into(),
+        format!("UID:{uid}"),
+        format!("DTSTAMP:{}", format_ical_utc(chrono::Utc::now().timestamp())),
+        format!("DTSTART:{}", format_ical_utc(starts_at)),
+        format!("DTEND:{}", format_ical_utc(end)),
+        format!("SUMMARY:{}", escape_ical_text(title)),
+        format!("ORGANIZER:mailto:{organizer}"),
+        format!(
+            "ATTENDEE;PARTSTAT={partstat_ical}:mailto:{attendee_email}"
+        ),
+        "END:VEVENT".into(),
+        "END:VCALENDAR".into(),
+    ]
+    .join("\r\n")
+        + "\r\n"
+}
+
 pub fn build_vevent_ics(
     uid: &str,
     title: &str,
@@ -697,6 +737,22 @@ mod tests {
         assert!(ics.contains("BEGIN:VEVENT"));
         assert!(ics.contains("BEGIN:VALARM"));
         assert!(ics.contains("TRIGGER:-PT15M"));
+    }
+
+    #[test]
+    fn builds_imip_reply() {
+        let ics = build_imip_reply(
+            "uid-1",
+            "Sync",
+            1_700_000_000,
+            Some(1_700_003_600),
+            "org@example.com",
+            "me@example.com",
+            "accepted",
+        );
+        assert!(ics.contains("METHOD:REPLY"));
+        assert!(ics.contains("PARTSTAT=ACCEPTED"));
+        assert!(ics.contains("mailto:me@example.com"));
     }
 }
 

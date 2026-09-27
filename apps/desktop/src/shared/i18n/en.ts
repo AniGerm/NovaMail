@@ -382,6 +382,7 @@ export const en: Translations = {
   calendarDecline: "Decline",
   calendarMaybe: "Maybe",
   calendarInviteUpdated: "Invitation updated.",
+  calendarInviteInInbox: "Meeting invitation — open Calendar → Inbox to respond.",
   calendarManage: "Calendars",
   calendarMain: "Main",
   calendarSetMain: "Set as main",
