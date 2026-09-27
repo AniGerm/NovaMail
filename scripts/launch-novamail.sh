@@ -48,7 +48,16 @@ binary_stale() {
 }
 
 # Avoid stacking multiple instances (looks like a hang / crash on second launch).
-if pgrep -f "${BIN}" >/dev/null 2>&1; then
+# Match by /proc/*/exe so we never kill/match this launcher shell.
+already_running=0
+for proc in /proc/[0-9]*; do
+  exe="$(readlink "$proc/exe" 2>/dev/null || true)"
+  if [[ "$exe" == "$BIN" || "$exe" == *"/novamail-desktop" ]]; then
+    already_running=1
+    break
+  fi
+done
+if ((already_running)); then
   echo "NovaMail already running — focusing existing window." >>"$LOG_FILE"
   if command -v wmctrl >/dev/null 2>&1; then
     wmctrl -a NovaMail 2>/dev/null || true
