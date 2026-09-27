@@ -253,6 +253,18 @@ export function ContactsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query]);
 
+  // While CardDAV is the hub, poll so edits from phone/printer show up here too.
+  useEffect(() => {
+    if (!open || !carddav?.running) return;
+    const timer = window.setInterval(() => {
+      refresh().catch(() => {
+        /* keep quiet during background poll */
+      });
+    }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, carddav?.running, query]);
+
   useEffect(() => {
     if (!open || !prefill) return;
     setSelectedId(null);
@@ -503,23 +515,46 @@ export function ContactsDialog({
             </Button>
           </section>
 
-          <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-            <h3 className="font-medium">{t("cardDavServer")}</h3>
+          <section className="grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+            <div className="grid gap-1">
+              <h3 className="font-medium">{t("cardDavServer")}</h3>
+              <p className="text-xs text-[var(--nova-ink-muted)]">
+                {t("cardDavHubModeHint")}
+              </p>
+            </div>
+
+            <label className="flex items-center justify-between gap-3 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] px-3 py-2">
+              <span className="text-sm font-medium">{t("cardDavHubMode")}</span>
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--nova-accent)]"
+                checked={Boolean(carddav?.running)}
+                disabled={busy}
+                onChange={() => {
+                  void toggleCardDav();
+                }}
+                aria-label={t("cardDavHubMode")}
+              />
+            </label>
+
             <p className="text-xs text-[var(--nova-ink-muted)]">
               {carddav?.running
                 ? t("cardDavRunning", {
-                    url: carddav.addressbookUrl,
                     count: carddav.contactCount,
                   })
                 : t("cardDavStopped")}
             </p>
+
             {carddav?.addressbookUrl ? (
-              <Input
-                readOnly
-                value={carddav.addressbookUrl}
-                onFocus={(e) => e.currentTarget.select()}
-                aria-label="CardDAV URL"
-              />
+              <label className="grid gap-1 text-xs">
+                <span>{t("cardDavUrlLabel")}</span>
+                <Input
+                  readOnly
+                  value={carddav.addressbookUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  aria-label={t("cardDavUrlLabel")}
+                />
+              </label>
             ) : null}
             {carddav?.username ? (
               <label className="grid gap-1 text-xs">
@@ -541,18 +576,25 @@ export function ContactsDialog({
                 />
               </label>
             ) : null}
+
+            <div className="grid gap-1 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-muted,transparent)] text-xs text-[var(--nova-ink-muted)]">
+              <p className="font-medium text-[var(--nova-ink)]">
+                {t("cardDavConnectTitle")}
+              </p>
+              <p>{t("cardDavConnectStep1")}</p>
+              <p>{t("cardDavConnectStep2")}</p>
+              <p>{t("cardDavConnectStep3")}</p>
+              <p>{t("cardDavConnectStep4")}</p>
+              <p>{t("cardDavDeviceHint")}</p>
+              <p>{t("cardDavSyncHint")}</p>
+            </div>
+
             <p className="text-xs text-[var(--nova-ink-muted)]">
               {t("cardDavAuthHint")}
             </p>
             <p className="text-xs text-[var(--nova-ink-muted)]">
               {t("cardDavTlsHint")}
             </p>
-            <p className="text-xs text-[var(--nova-ink-muted)]">
-              {t("cardDavDeviceHint")}
-            </p>
-            <Button type="button" size="sm" disabled={busy} onClick={toggleCardDav}>
-              {carddav?.running ? t("stopCardDav") : t("startCardDav")}
-            </Button>
           </section>
 
           <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">

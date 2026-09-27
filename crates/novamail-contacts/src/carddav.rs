@@ -264,6 +264,14 @@ async fn handle(
 
 fn addressbook_listing(store: &Arc<dyn ContactStore>) -> Response<Full<Bytes>> {
     let contacts = store.list().unwrap_or_default();
+    // Stable collection tag so CardDAV clients detect remote edits (phone/printer)
+    // and re-sync instead of caching forever.
+    let collection_tag = contacts
+        .iter()
+        .map(|c| c.updated_at)
+        .max()
+        .unwrap_or(0)
+        .max(contacts.len() as i64);
     let mut responses = String::new();
     responses.push_str(&format!(
         r#"  <d:response>
@@ -273,12 +281,13 @@ fn addressbook_listing(store: &Arc<dyn ContactStore>) -> Response<Full<Bytes>> {
         <d:displayname>NovaMail Address Book</d:displayname>
         <d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>
         <d:getetag>"{etag}"</d:getetag>
+        <cs:getctag xmlns:cs="http://calendarserver.org/ns/">{etag}</cs:getctag>
       </d:prop>
       <d:status>HTTP/1.1 200 OK</d:status>
     </d:propstat>
   </d:response>
 "#,
-        etag = chrono::Utc::now().timestamp()
+        etag = collection_tag
     ));
     for contact in contacts {
         let href = format!("{BOOK_PATH}{}.vcf", contact.id);

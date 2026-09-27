@@ -234,20 +234,35 @@ export const en: Translations = {
   contactSortDescending: "Descending (Z–A)",
   saveBookSettings: "Save settings",
   bookSettingsSaved: "Address book settings saved.",
-  cardDavServer: "CardDAV server (shared address book)",
-  cardDavRunning: "Running at {url} · {count} contacts",
+  cardDavServer: "Shared address book (main PC)",
+  cardDavHubMode: "This device is the main PC",
+  cardDavHubModeHint:
+    "NovaMail is the CardDAV server. Other apps (phone, printer, fax) connect here as clients — there is no separate NovaMail client mode.",
+  cardDavRunning: "On · {count} contacts · other devices can connect",
   cardDavStopped:
-    "Stopped — start so phones, printers, and fax share the same address book.",
+    "Off — contacts stay local in NovaMail only. Turn on so phones/printers share the same book.",
+  cardDavConnectTitle: "How to connect a device (client)",
+  cardDavConnectStep1:
+    "1. Turn on the main-PC switch above (this computer must be running and reachable).",
+  cardDavConnectStep2:
+    "2. On the phone/printer: add a new CardDAV / Contacts account (not IMAP/email).",
+  cardDavConnectStep3:
+    "3. Enter the server URL, username, and password from here (same Wi‑Fi or VPN).",
+  cardDavConnectStep4:
+    "4. Start sync. Edits on the device land in NovaMail, and other clients pick them up on their next sync.",
   cardDavDeviceHint:
-    "Other devices connect to this CardDAV URL on the main PC (same LAN or VPN). That keeps one shared address book — no copying backup files around.",
+    "iOS example: Settings → Contacts → Accounts → Add Account → Other → CardDAV. Android: often via DAVx⁵ with the same URL.",
+  cardDavSyncHint:
+    "External apps write straight into the NovaMail address book (CardDAV PUT/DELETE). Every connected client fetches changes on its next sync — not second-by-second push.",
   cardDavUsername: "Username",
   cardDavPassword: "Password (Basic auth)",
   cardDavAuthHint:
     "The server rejects unauthenticated access. Enter both values on the phone/printer.",
   cardDavTlsHint:
     "Note: the server currently speaks HTTP on the LAN/VPN. Use a VPN for remote access, or put TLS/HTTPS in front later — do not expose it to the public internet unprotected.",
-  stopCardDav: "Stop CardDAV",
-  startCardDav: "Start CardDAV",
+  cardDavUrlLabel: "CardDAV URL (for clients)",
+  stopCardDav: "Main PC off",
+  startCardDav: "Main PC on",
   aiCachedHint: "Prepared in the background",
   addContact: "Add contact",
   editContact: "Edit contact",

@@ -232,20 +232,35 @@ export const de = {
   contactSortDescending: "Absteigend (Z–A)",
   saveBookSettings: "Einstellungen speichern",
   bookSettingsSaved: "Adressbuch-Einstellungen gespeichert.",
-  cardDavServer: "CardDAV-Server (gemeinsames Telefonbuch)",
-  cardDavRunning: "Läuft unter {url} · {count} Kontakte",
+  cardDavServer: "Gemeinsames Telefonbuch (Hauptrechner)",
+  cardDavHubMode: "Dieses Gerät ist der Hauptrechner",
+  cardDavHubModeHint:
+    "NovaMail ist der CardDAV-Server. Andere Apps (Handy, Drucker, Fax) verbinden sich als Client hierher — es gibt keinen separaten NovaMail-Client-Modus.",
+  cardDavRunning: "Aktiv · {count} Kontakte · andere Geräte können sich verbinden",
   cardDavStopped:
-    "Gestoppt — starten, damit Handy, Drucker und Fax dasselbe Telefonbuch nutzen.",
+    "Aus — Kontakte bleiben nur lokal in NovaMail. Einschalten, damit Handy/Drucker dasselbe Buch nutzen.",
+  cardDavConnectTitle: "So verbindest du ein Gerät (Client)",
+  cardDavConnectStep1:
+    "1. Oben den Hauptrechner-Schalter einschalten (dieser PC muss laufen und erreichbar sein).",
+  cardDavConnectStep2:
+    "2. Am Handy/Drucker: neues CardDAV-/Kontakte-Konto anlegen (nicht IMAP/E-Mail).",
+  cardDavConnectStep3:
+    "3. Server-URL, Benutzername und Passwort von hier eintragen (gleiches WLAN oder VPN).",
+  cardDavConnectStep4:
+    "4. Sync starten. Änderungen am Gerät landen in NovaMail und umgekehrt beim nächsten Sync der anderen Clients.",
   cardDavDeviceHint:
-    "Weitere Geräte verbinden sich mit dieser CardDAV-URL am Hauptrechner (gleiches LAN oder VPN). So bleibt ein gemeinsames Telefonbuch — ohne Backup-Datei hin- und herzukopieren.",
+    "Beispiel iOS: Einstellungen → Kontakte → Accounts → Account hinzufügen → Andere → CardDAV-Account. Android: oft über DAVx⁵ mit derselben URL.",
+  cardDavSyncHint:
+    "Externe Apps schreiben direkt ins NovaMail-Adressbuch (CardDAV PUT/DELETE). Alle verbundenen Clients holen die Änderungen bei ihrem nächsten Sync — nicht sekundenaktuell per Push.",
   cardDavUsername: "Benutzername",
   cardDavPassword: "Passwort (Basic-Auth)",
   cardDavAuthHint:
     "Ohne Benutzername/Passwort lehnt der Server Zugriffe ab. Trage beides am Telefon/Drucker ein.",
   cardDavTlsHint:
     "Hinweis: Der Server spricht vorerst HTTP im LAN/VPN. Fürs Internet bitte VPN nutzen oder später TLS/HTTPS vor den Port legen — nicht ungeschützt ins öffentliche Netz öffnen.",
-  stopCardDav: "CardDAV stoppen",
-  startCardDav: "CardDAV starten",
+  cardDavUrlLabel: "CardDAV-URL (für Clients)",
+  stopCardDav: "Hauptrechner aus",
+  startCardDav: "Hauptrechner an",
   aiCachedHint: "Bereits im Hintergrund vorbereitet",
   addContact: "Kontakt hinzufügen",
   editContact: "Kontakt bearbeiten",
