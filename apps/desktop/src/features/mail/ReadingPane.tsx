@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { open as openPath } from "@tauri-apps/plugin-shell";
 import { Reply, Star, Forward, Sparkles, Paperclip } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
@@ -9,12 +9,14 @@ import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
 
+type ReplyVariant = "a" | "b" | "own";
+
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
-  onUseSuggestedReply?: (suggestion: string) => void;
+  onReplySent?: () => void;
 }
 
 export function ReadingPane({
@@ -22,20 +24,26 @@ export function ReadingPane({
   onReply,
   onForward,
   onToggleStar,
-  onUseSuggestedReply,
+  onReplySent,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
   const [variantA, setVariantA] = useState<string | null>(null);
   const [variantB, setVariantB] = useState<string | null>(null);
+  const [activeVariant, setActiveVariant] = useState<ReplyVariant>("a");
+  const [draft, setDraft] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setSummary(null);
     setVariantA(null);
     setVariantB(null);
+    setActiveVariant("a");
+    setDraft("");
     setAiError(null);
     const id = message?.summary.id;
     if (!id) return;
@@ -45,8 +53,14 @@ export function ReadingPane({
       .then((insights) => {
         if (cancelled) return;
         if (insights.summary) setSummary(insights.summary);
-        setVariantA(insights.replyA ?? insights.replySuggestion ?? null);
-        setVariantB(insights.replyB ?? null);
+        const a = insights.replyA ?? insights.replySuggestion ?? null;
+        const b = insights.replyB ?? null;
+        setVariantA(a);
+        setVariantB(b);
+        if (a) {
+          setActiveVariant("a");
+          setDraft(a);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -105,23 +119,55 @@ export function ReadingPane({
     }
   }
 
-  async function openVariant(which: "a" | "b") {
+  async function selectVariant(which: "a" | "b") {
     const variants = await ensureVariants();
     if (!variants) return;
-    const text = which === "a" ? variants.a : variants.b;
-    if (onUseSuggestedReply) {
-      onUseSuggestedReply(text);
-      return;
-    }
-    onReply();
+    setActiveVariant(which);
+    setDraft(which === "a" ? variants.a : variants.b);
+    requestAnimationFrame(() => draftRef.current?.focus());
   }
 
-  function openOwnReply() {
-    if (onUseSuggestedReply) {
-      onUseSuggestedReply("");
+  function selectOwn() {
+    setActiveVariant("own");
+    setDraft("");
+    requestAnimationFrame(() => draftRef.current?.focus());
+  }
+
+  async function handleSendReply() {
+    const text = draft.trim();
+    if (!text) {
+      setAiError(t("replyDraftEmpty"));
       return;
     }
-    onReply();
+    setSendBusy(true);
+    setAiError(null);
+    try {
+      const subject = current.summary.subject.startsWith("Re:")
+        ? current.summary.subject
+        : `Re: ${current.summary.subject || t("noSubject")}`;
+      await api.messagesSend({
+        accountId: current.summary.accountId,
+        to: [{ email: current.summary.from.email, name: current.summary.from.name }],
+        cc: [],
+        bcc: [],
+        subject,
+        bodyText: text,
+        bodyHtml: null,
+        inReplyTo: current.messageId ?? null,
+        references: [
+          ...current.references,
+          current.messageId ?? "",
+        ].filter(Boolean),
+        attachments: [],
+      });
+      onReplySent?.();
+      if (activeVariant === "a") setVariantA(text);
+      if (activeVariant === "b") setVariantB(text);
+    } catch (error) {
+      setAiError((error as AppError).message || t("sendFailed"));
+    } finally {
+      setSendBusy(false);
+    }
   }
 
   async function openAttachment(id: string) {
@@ -153,7 +199,7 @@ export function ReadingPane({
                 }
               />
             </IconButton>
-            <IconButton label={t("reply")} onClick={openOwnReply}>
+            <IconButton label={t("reply")} onClick={onReply}>
               <Reply />
             </IconButton>
             <IconButton label={t("forward")} onClick={onForward}>
@@ -206,9 +252,9 @@ export function ReadingPane({
 
         <section
           aria-label={t("messageBody")}
-          className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_1px_0_color-mix(in_srgb,var(--nova-ink)_5%,transparent)]"
+          className="rounded-[var(--nova-radius-md)] border-2 border-[color-mix(in_srgb,var(--nova-accent)_42%,var(--nova-border))] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_0_0_3px_color-mix(in_srgb,var(--nova-accent-soft)_70%,transparent)]"
         >
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
             {t("messageBody")}
           </p>
           {current.bodyHtml ? (
@@ -251,31 +297,53 @@ export function ReadingPane({
           <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
             {t("replyAssistSimpleHint")}
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="mb-3 flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
-              disabled={aiBusy}
-              onClick={() => void openVariant("a")}
+              variant={activeVariant === "a" ? "primary" : "secondary"}
+              disabled={aiBusy || sendBusy}
+              onClick={() => void selectVariant("a")}
             >
               {t("replyVariantAShort")}
             </Button>
             <Button
               type="button"
               size="sm"
-              variant="secondary"
-              disabled={aiBusy}
-              onClick={() => void openVariant("b")}
+              variant={activeVariant === "b" ? "primary" : "secondary"}
+              disabled={aiBusy || sendBusy}
+              onClick={() => void selectVariant("b")}
             >
               {t("replyVariantBShort")}
             </Button>
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              onClick={openOwnReply}
+              variant={activeVariant === "own" ? "primary" : "ghost"}
+              disabled={aiBusy || sendBusy}
+              onClick={selectOwn}
             >
               {t("replyOwn")}
+            </Button>
+          </div>
+          <label className="grid gap-1.5">
+            <span className="sr-only">{t("replyDraftPlaceholder")}</span>
+            <textarea
+              ref={draftRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={t("replyDraftPlaceholder")}
+              rows={6}
+              className="w-full resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2.5 text-[15px] leading-6 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--nova-accent)_25%,transparent)]"
+            />
+          </label>
+          <div className="mt-3 flex justify-end">
+            <Button
+              type="button"
+              disabled={aiBusy || sendBusy || !draft.trim()}
+              onClick={() => void handleSendReply()}
+            >
+              {sendBusy ? t("working") : t("send")}
             </Button>
           </div>
         </section>

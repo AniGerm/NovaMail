@@ -55,7 +55,8 @@ export const de = {
   replyAssistTitle: "Antworten mit KI",
   replyAssistHint: "Variante wählen, bearbeiten, Fakten ergänzen",
   replyAssistSimpleHint:
-    "A oder B öffnet den Antwort-Dialog mit einem Vorschlag. Eigene Antwort startet leer.",
+    "A oder B zeigt den Vorschlag zum Bearbeiten. Eigene Antwort startet leer. Senden übernimmt den Text.",
+  replyDraftEmpty: "Bitte zuerst eine Antwort eingeben.",
   replyVariantA: "Variante A · knapp",
   replyVariantB: "Variante B · freundlich",
   replyVariantAShort: "A · knapp",

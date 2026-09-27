@@ -57,7 +57,8 @@ export const en: Translations = {
   replyAssistTitle: "Reply with AI",
   replyAssistHint: "Pick a variant, edit it, add facts",
   replyAssistSimpleHint:
-    "A or B opens the reply dialog with a suggestion. Own reply starts blank.",
+    "A or B shows the suggestion for editing. Own reply starts blank. Send uses the text as written.",
+  replyDraftEmpty: "Please enter a reply first.",
   replyVariantA: "Variant A · concise",
   replyVariantB: "Variant B · warmer",
   replyVariantAShort: "A · concise",

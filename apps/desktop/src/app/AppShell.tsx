@@ -450,6 +450,7 @@ export function AppShell() {
               <ReadingPane
                 message={messageQuery.data}
                 onReply={() => {
+                  setComposerBody("");
                   if (messageQuery.data) {
                     setReplyTo(messageQuery.data);
                     setComposerSubject(undefined);
@@ -460,13 +461,8 @@ export function AppShell() {
                   void handleForward();
                 }}
                 onToggleStar={handleToggleStar}
-                onUseSuggestedReply={(suggestion) => {
-                  setComposerBody(suggestion);
-                  if (messageQuery.data) {
-                    setReplyTo(messageQuery.data);
-                    setComposerSubject(undefined);
-                    setComposerOpen(true);
-                  }
+                onReplySent={() => {
+                  void refresh();
                 }}
               />
             </div>
