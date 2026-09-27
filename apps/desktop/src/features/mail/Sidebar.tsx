@@ -68,12 +68,21 @@ export function Sidebar({
       className="nova-slide-in flex h-full w-[240px] shrink-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_70%,transparent)] backdrop-blur-[var(--nova-blur)]"
     >
       <div className="px-4 pb-2 pt-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <p className="font-[family-name:var(--nova-font-display)] text-xl tracking-tight">
-              {t("appName")}
-            </p>
-            <p className="text-xs text-[var(--nova-ink-muted)]">{t("tagline")}</p>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <img
+              src="/novamail-mark.png"
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 shrink-0 rounded-[10px] shadow-[0_1px_2px_color-mix(in_srgb,var(--nova-ink)_12%,transparent)]"
+            />
+            <div className="min-w-0">
+              <p className="font-[family-name:var(--nova-font-display)] text-xl tracking-tight">
+                {t("appName")}
+              </p>
+              <p className="text-xs text-[var(--nova-ink-muted)]">{t("tagline")}</p>
+            </div>
           </div>
           <IconButton label={themeLabel} onClick={onToggleTheme}>
             {themeIcon}
