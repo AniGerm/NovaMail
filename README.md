@@ -4,6 +4,8 @@ Modern open-source email for Ubuntu Linux.
 
 NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It aims for Thunderbird-class capability, Spark-class UX, and Outlook-class productivity — without cloud lock-in.
 
+**Status:** early / MVP. Core mail, contacts, calendar, OpenPGP, and local AI are usable day-to-day; test coverage is still thin relative to the codebase, and some areas (WASM plugins, full-text search depth) are scaffolds. Expect rough edges — feedback welcome.
+
 ## Product features
 
 ### Accounts & sync
@@ -79,8 +81,8 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 
 - Full local address book (name, emails, phones, fax, addresses, photo, notes, custom fields)
 - Name display order and sort options
-- Embedded **CardDAV** server for phones / MFPs (Basic auth, LAN)
-- Embedded **LDAP** hub for office sharing
+- Embedded **CardDAV** server for phones / MFPs (**LAN / trusted network only**, HTTP Basic auth — not for the public internet)
+- Embedded **LDAP** hub for office sharing on the same trusted network
 - Share modes: **Local only**, **Server (main PC)**, **Client (workstation)**
 - Client sync from the hub; LDAP search / import
 - Fuzzy contact search

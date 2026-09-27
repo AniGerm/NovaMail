@@ -73,7 +73,7 @@ PY
     return 0
   fi
 
-  cp -f "${ROOT}/apps/desktop/src-tauri/icons/henry.w@example.net" \
+  cp -f "${ROOT}/apps/desktop/src-tauri/icons/256x256.png" \
     "${ICON_DIR}/256x256/apps/${ICON_NAME}.png" 2>/dev/null \
     || cp -f "$SRC" "${ICON_DIR}/256x256/apps/${ICON_NAME}.png"
   cp -f "${ROOT}/apps/desktop/src-tauri/icons/128x128.png" \
