@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use novamail_ipc::{
-    AccountDto, AddressDto, AuthType, ListMessagesRequest, ListThreadsResponse, MailProvider,
-    MailboxDto, MessageDetailDto, MessageSortBy, MessageSummaryDto, SortDirection,
+    AccountDto, AddressDto, AttachmentDto, AuthType, ContactAddress, ContactCustomField, ContactDto,
+    LabelDto, ListMessagesRequest, ListThreadsResponse, MailProvider, MailboxDto, MessageDetailDto,
+    MessageSortBy, MessageSummaryDto, RecipientSuggestion, RuleDto, SignatureDto, SortDirection,
     ThreadListItemDto,
 };
 use parking_lot::Mutex;
@@ -15,10 +16,6 @@ use crate::migrations;
 use crate::models::{
     AccountRecord, AttachmentRecord, ContactRecord, LabelRecord, MailboxRecord, MessageRecord,
     RuleRecord, SignatureRecord, ThreadRecord, FLAG_ARCHIVED, FLAG_SEEN, FLAG_STARRED,
-};
-use novamail_ipc::{
-    AddressDto, AttachmentDto, ContactAddress, ContactCustomField, ContactDto, LabelDto,
-    RecipientSuggestion, RuleDto, SignatureDto,
 };
 use crate::{DbError, DbResult};
 
