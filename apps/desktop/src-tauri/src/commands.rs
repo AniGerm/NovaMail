@@ -1,7 +1,8 @@
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiPullModelRequest,
-    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
-    CardDavServerStatus, ContactDto, ContactsBookSettings,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
+    AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
+    AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
+    ContactDto, ContactsBookSettings,
     ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
     ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
@@ -338,6 +339,28 @@ pub async fn ai_pull_model(
         })
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_install_ollama(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    request: AiInstallOllamaRequest,
+) -> Result<AiInstallOllamaResponse, AppError> {
+    state
+        .app
+        .ai_install_ollama(request, |event: AiInstallProgressEvent| {
+            let _ = app.emit("ai://install-progress", &event);
+        })
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn ai_start_ollama(
+    state: State<'_, DesktopState>,
+) -> Result<AiInstallOllamaResponse, AppError> {
+    state.app.ai_start_ollama().await.map_err(map_err)
 }
 
 #[tauri::command]

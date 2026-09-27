@@ -3,10 +3,15 @@
 //! ADR 0004: providers perform real work. `NullAiProvider` is an explicit
 //! offline fallback (deterministic extractive summary), not fabricated mail.
 
+mod install;
 mod ollama;
 mod provider;
 mod runtime;
 
+pub use install::{
+    ensure_ollama_running, install_ollama_system, install_ollama_user, probe_ollama,
+    InstallProgress, OllamaPresence,
+};
 pub use ollama::OllamaProvider;
 pub use provider::{
     AiError, AiProvider, AiResult, NullAiProvider, PrioritizeRequest, PrioritizeResponse,

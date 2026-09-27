@@ -11,6 +11,8 @@ import type {
   ContactsBookSettings,
   ExportBackupResponse,
   ImportBackupResult,
+  AiInstallOllamaResponse,
+  AiInstallProgressEvent,
   AiPullModelResponse,
   AiPullProgressEvent,
   AiRuntimeStatus,
@@ -126,6 +128,17 @@ export const api = {
   ): Promise<UnlistenFn> => {
     if (!isTauri()) return () => undefined;
     return listen<AiPullProgressEvent>("ai://pull-progress", (event) => {
+      handler(event.payload);
+    });
+  },
+  aiInstallOllama: (mode: "user" | "system") =>
+    call<AiInstallOllamaResponse>("ai_install_ollama", { request: { mode } }),
+  aiStartOllama: () => call<AiInstallOllamaResponse>("ai_start_ollama"),
+  onAiInstallProgress: async (
+    handler: (event: AiInstallProgressEvent) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<AiInstallProgressEvent>("ai://install-progress", (event) => {
       handler(event.payload);
     });
   },

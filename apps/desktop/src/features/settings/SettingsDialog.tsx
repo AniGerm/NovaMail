@@ -387,8 +387,68 @@ export function SettingsDialog({
             {" · "}
             {aiRuntime?.ollamaReachable
               ? t("aiRuntimeOllamaYes")
-              : t("aiRuntimeOllamaNo")}
+              : aiRuntime?.ollamaInstalled
+                ? t("aiInstallFound")
+                : t("aiRuntimeOllamaNo")}
           </p>
+          {aiRuntime && !aiRuntime.ollamaReachable ? (
+            <div className="flex flex-wrap gap-2">
+              {aiRuntime.ollamaInstalled ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={pullBusy || aiBusy}
+                  onClick={() => {
+                    void api
+                      .aiStartOllama()
+                      .then(() => refreshAi())
+                      .then(() => setAiStatus(t("aiInstallReady")))
+                      .catch((err) => setError((err as AppError).message));
+                  }}
+                >
+                  {t("aiInstallStart")}
+                </Button>
+              ) : null}
+              {aiRuntime.canInstallUser ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={pullBusy || aiBusy}
+                  onClick={() => {
+                    setAiBusy(true);
+                    void api
+                      .aiInstallOllama("user")
+                      .then(() => refreshAi())
+                      .then(() => setAiStatus(t("aiInstallReady")))
+                      .catch((err) => setError((err as AppError).message))
+                      .finally(() => setAiBusy(false));
+                  }}
+                >
+                  {t("aiInstallUser")}
+                </Button>
+              ) : null}
+              {aiRuntime.canInstallSystem ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={pullBusy || aiBusy}
+                  onClick={() => {
+                    setAiBusy(true);
+                    void api
+                      .aiInstallOllama("system")
+                      .then(() => refreshAi())
+                      .then(() => setAiStatus(t("aiInstallReady")))
+                      .catch((err) => setError((err as AppError).message))
+                      .finally(() => setAiBusy(false));
+                  }}
+                >
+                  {t("aiInstallSystem")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <label className="grid gap-1 text-sm">
             <span>{t("aiSettingsModel")}</span>
             {aiRuntime && aiRuntime.models.length > 0 ? (

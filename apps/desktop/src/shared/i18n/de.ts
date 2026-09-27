@@ -317,6 +317,17 @@ export const de = {
   aiPullFailed: "Download fehlgeschlagen",
   aiPullQuickDefault: "Standard laden",
   aiPullQuickLowSpec: "Low-Spec laden",
+  aiInstallTitle: "Ollama fehlt",
+  aiInstallDescription:
+    "Für lokale KI braucht NovaMail Ollama. Du kannst es direkt hier installieren — ohne Admin in deinem Benutzerordner, oder systemweit (dann fragt Linux nach dem Passwort).",
+  aiInstallUser: "Ohne Admin installieren",
+  aiInstallSystem: "Systemweit installieren (Passwort)",
+  aiInstallStart: "Ollama starten",
+  aiInstallBusy: "Installation läuft…",
+  aiInstallReady: "Ollama ist bereit",
+  aiInstallOpenSite: "ollama.com öffnen",
+  aiInstallFound: "Ollama gefunden, aber noch nicht gestartet.",
+  aiInstallMissing: "Ollama ist nicht installiert oder nicht erreichbar.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

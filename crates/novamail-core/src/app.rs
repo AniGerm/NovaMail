@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use novamail_ai::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
-    list_ollama_models, normalize_model_ref, pull_ollama_model, recommended_model, AiProvider,
+    ensure_ollama_running, install_ollama_system, install_ollama_user, list_ollama_models,
+    normalize_model_ref, probe_ollama, pull_ollama_model, recommended_model, AiProvider,
     NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest, SummarizeRequest,
     DEFAULT_MODEL,
 };
@@ -15,9 +16,10 @@ use novamail_crypto::{
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiPullModelRequest,
-    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
-    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload,
+    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
+    AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
+    AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto, BackupAccount,
+    BackupAccountCredentials, BackupContact, BackupPayload,
     CardDavServerStatus, ContactDto, ContactsBookSettings, ExportBackupRequest,
     ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto, LdapSearchRequest,
     LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
@@ -127,18 +129,94 @@ impl AppState {
     pub async fn ai_runtime_status(&self) -> CoreResult<AiRuntimeStatus> {
         let settings = self.ai_settings()?;
         let nvidia_gpu = detect_nvidia_gpu();
-        let (ollama_reachable, models) = match list_ollama_models(&settings.base_url).await {
-            Ok(list) => (true, list),
-            Err(_) => (false, Vec::new()),
+        let presence = probe_ollama(&settings.base_url).await;
+        let models = if presence.reachable {
+            list_ollama_models(&settings.base_url)
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         };
         let recommended = recommended_model(nvidia_gpu, &models);
         let allow_pick = allow_model_pick(nvidia_gpu, &models);
         Ok(AiRuntimeStatus {
-            ollama_reachable,
+            ollama_reachable: presence.reachable,
+            ollama_installed: presence.installed,
+            ollama_binary: presence.binary_path,
+            can_install_user: presence.can_install_user,
+            can_install_system: presence.can_install_system,
             nvidia_gpu,
             models,
             recommended_model: recommended,
             allow_model_pick: allow_pick,
+        })
+    }
+
+    pub async fn ai_install_ollama<F>(
+        &self,
+        request: AiInstallOllamaRequest,
+        mut on_progress: F,
+    ) -> CoreResult<AiInstallOllamaResponse>
+    where
+        F: FnMut(AiInstallProgressEvent) + Send,
+    {
+        let settings = self.ai_settings()?;
+        let mode = request.mode.trim().to_ascii_lowercase();
+        let binary_path = match mode.as_str() {
+            "user" => {
+                let path = install_ollama_user(|p| {
+                    on_progress(AiInstallProgressEvent {
+                        status: p.status,
+                        done: p.done,
+                    });
+                })
+                .await
+                .map_err(|e| CoreError::Message(e.to_string()))?;
+                Some(path.display().to_string())
+            }
+            "system" => {
+                install_ollama_system(|p| {
+                    on_progress(AiInstallProgressEvent {
+                        status: p.status,
+                        done: p.done,
+                    });
+                })
+                .map_err(|e| CoreError::Message(e.to_string()))?;
+                None
+            }
+            _ => {
+                return Err(CoreError::Message(
+                    "Install mode must be 'user' or 'system'".into(),
+                ));
+            }
+        };
+
+        on_progress(AiInstallProgressEvent {
+            status: "starting".into(),
+            done: false,
+        });
+        ensure_ollama_running(&settings.base_url)
+            .await
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        on_progress(AiInstallProgressEvent {
+            status: "ready".into(),
+            done: true,
+        });
+        Ok(AiInstallOllamaResponse {
+            binary_path,
+            reachable: true,
+        })
+    }
+
+    pub async fn ai_start_ollama(&self) -> CoreResult<AiInstallOllamaResponse> {
+        let settings = self.ai_settings()?;
+        ensure_ollama_running(&settings.base_url)
+            .await
+            .map_err(|e| CoreError::Message(e.to_string()))?;
+        let presence = probe_ollama(&settings.base_url).await;
+        Ok(AiInstallOllamaResponse {
+            binary_path: presence.binary_path,
+            reachable: presence.reachable,
         })
     }
 

@@ -341,10 +341,24 @@ export interface AiSettings {
 
 export interface AiRuntimeStatus {
   ollamaReachable: boolean;
+  ollamaInstalled: boolean;
+  ollamaBinary?: string | null;
+  canInstallUser: boolean;
+  canInstallSystem: boolean;
   nvidiaGpu: boolean;
   models: string[];
   recommendedModel: string;
   allowModelPick: boolean;
+}
+
+export interface AiInstallOllamaResponse {
+  binaryPath?: string | null;
+  reachable: boolean;
+}
+
+export interface AiInstallProgressEvent {
+  status: string;
+  done: boolean;
 }
 
 export interface AiPullModelResponse {

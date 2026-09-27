@@ -29,11 +29,37 @@ impl Default for AiSettings {
 #[serde(rename_all = "camelCase")]
 pub struct AiRuntimeStatus {
     pub ollama_reachable: bool,
+    /// Binary found on PATH or known locations (may still be stopped).
+    pub ollama_installed: bool,
+    pub ollama_binary: Option<String>,
+    pub can_install_user: bool,
+    pub can_install_system: bool,
     pub nvidia_gpu: bool,
     pub models: Vec<String>,
     pub recommended_model: String,
     /// True when GPU is present or Ollama already has installed models.
     pub allow_model_pick: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInstallOllamaRequest {
+    /// `user` (no sudo, ~/.local) or `system` (pkexec → official install.sh).
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInstallOllamaResponse {
+    pub binary_path: Option<String>,
+    pub reachable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInstallProgressEvent {
+    pub status: String,
+    pub done: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

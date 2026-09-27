@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button } from "@novamail/ui";
 
 import { api, isDesktopShell } from "@/shared/api/client";
@@ -15,12 +16,13 @@ interface AiSetupDialogProps {
 
 export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
   const t = useT();
-  const [step, setStep] = useState<"ask" | "model">("ask");
+  const [step, setStep] = useState<"ask" | "install" | "model">("ask");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<AiRuntimeStatus | null>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434");
+  const [installStatus, setInstallStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -28,12 +30,21 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
     setError(null);
     setBusy(false);
     setRuntime(null);
+    setInstallStatus(null);
     if (!isDesktopShell()) return;
     void api
       .aiGetSettings()
       .then((settings) => {
         setModel(settings.model || DEFAULT_MODEL);
         setBaseUrl(settings.baseUrl || "http://127.0.0.1:11434");
+      })
+      .catch(() => undefined);
+    // Probe early so "Yes" can skip straight to install if needed.
+    void api
+      .aiRuntimeStatus()
+      .then((status) => {
+        setRuntime(status);
+        setModel(status.recommendedModel || DEFAULT_MODEL);
       })
       .catch(() => undefined);
   }, [open]);
@@ -50,6 +61,10 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
       setError((err as AppError).message);
       const fallback: AiRuntimeStatus = {
         ollamaReachable: false,
+        ollamaInstalled: false,
+        ollamaBinary: null,
+        canInstallUser: false,
+        canInstallSystem: false,
         nvidiaGpu: false,
         models: [],
         recommendedModel: CPU_MODEL,
@@ -85,14 +100,62 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
     await save(false, DEFAULT_MODEL);
   }
 
-  async function chooseYes() {
-    const status = runtime ?? (await loadRuntime());
+  async function continueAfterOllama(status: AiRuntimeStatus) {
     if (!status.allowModelPick) {
-      // CPU / low-spec path: lock to the small model.
       await save(true, status.recommendedModel || CPU_MODEL);
       return;
     }
     setStep("model");
+  }
+
+  async function chooseYes() {
+    const status = runtime ?? (await loadRuntime());
+    if (!status.ollamaReachable) {
+      setStep("install");
+      return;
+    }
+    await continueAfterOllama(status);
+  }
+
+  async function handleInstall(mode: "user" | "system") {
+    setBusy(true);
+    setError(null);
+    setInstallStatus(t("aiInstallBusy"));
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await api.onAiInstallProgress((event) => {
+        setInstallStatus(event.status);
+      });
+      await api.aiInstallOllama(mode);
+      const status = await loadRuntime();
+      setInstallStatus(t("aiInstallReady"));
+      if (status.ollamaReachable) {
+        await continueAfterOllama(status);
+      }
+    } catch (err) {
+      setError((err as AppError).message);
+      setInstallStatus(null);
+    } finally {
+      unlisten?.();
+      setBusy(false);
+    }
+  }
+
+  async function handleStart() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.aiStartOllama();
+      const status = await loadRuntime();
+      setInstallStatus(t("aiInstallReady"));
+      if (status.ollamaReachable) {
+        await continueAfterOllama(status);
+      }
+    } catch (err) {
+      setError((err as AppError).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!open) return null;
@@ -118,14 +181,27 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
           id="ai-setup-title"
           className="font-[family-name:var(--nova-font-display)] text-2xl"
         >
-          {t("aiSetupTitle")}
+          {step === "install" ? t("aiInstallTitle") : t("aiSetupTitle")}
         </h2>
         <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">
-          {t("aiSetupDescription")}
+          {step === "install"
+            ? t("aiInstallDescription")
+            : t("aiSetupDescription")}
         </p>
 
         {step === "ask" ? (
           <div className="mt-5 grid gap-3">
+            {runtime ? (
+              <p className="text-xs text-[var(--nova-ink-muted)]">
+                {runtime.ollamaReachable
+                  ? t("aiRuntimeOllamaYes")
+                  : runtime.ollamaInstalled
+                    ? t("aiInstallFound")
+                    : t("aiInstallMissing")}
+                {" · "}
+                {runtime.nvidiaGpu ? t("aiRuntimeGpuYes") : t("aiRuntimeGpuNo")}
+              </p>
+            ) : null}
             {error ? (
               <p className="text-sm text-[var(--nova-danger)]" role="alert">
                 {error}
@@ -149,7 +225,83 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
               </Button>
             </div>
           </div>
-        ) : (
+        ) : null}
+
+        {step === "install" ? (
+          <div className="mt-5 grid gap-3">
+            <p className="text-xs text-[var(--nova-ink-muted)]">
+              {runtime?.ollamaInstalled
+                ? t("aiInstallFound")
+                : t("aiInstallMissing")}
+            </p>
+            {installStatus ? (
+              <p className="text-xs text-[var(--nova-ink-muted)]">{installStatus}</p>
+            ) : null}
+            {error ? (
+              <p className="text-sm text-[var(--nova-danger)]" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {runtime?.ollamaInstalled && !runtime.ollamaReachable ? (
+                <Button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleStart()}
+                >
+                  {busy ? t("working") : t("aiInstallStart")}
+                </Button>
+              ) : null}
+              {runtime?.canInstallUser ? (
+                <Button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleInstall("user")}
+                >
+                  {busy ? t("aiInstallBusy") : t("aiInstallUser")}
+                </Button>
+              ) : null}
+              {runtime?.canInstallSystem ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void handleInstall("system")}
+                >
+                  {t("aiInstallSystem")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void openUrl("https://ollama.com/download")}
+              >
+                {t("aiInstallOpenSite")}
+              </Button>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setStep("ask")}
+              >
+                {t("cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void save(true, runtime?.recommendedModel || CPU_MODEL)}
+              >
+                {t("aiSetupContinue")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {step === "model" ? (
           <div className="mt-5 grid gap-3">
             <p className="text-sm text-[var(--nova-ink-muted)]">
               {t("aiSetupGpuHint")}
@@ -210,7 +362,7 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
               </Button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

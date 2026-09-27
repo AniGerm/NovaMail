@@ -319,4 +319,15 @@ export const en: Translations = {
   aiPullFailed: "Download failed",
   aiPullQuickDefault: "Pull default",
   aiPullQuickLowSpec: "Pull low-spec",
+  aiInstallTitle: "Ollama is missing",
+  aiInstallDescription:
+    "NovaMail needs Ollama for local AI. Install it here — into your user folder (no admin), or system-wide (Linux will ask for your password).",
+  aiInstallUser: "Install without admin",
+  aiInstallSystem: "Install system-wide (password)",
+  aiInstallStart: "Start Ollama",
+  aiInstallBusy: "Installing…",
+  aiInstallReady: "Ollama is ready",
+  aiInstallOpenSite: "Open ollama.com",
+  aiInstallFound: "Ollama is installed but not running yet.",
+  aiInstallMissing: "Ollama is not installed or not reachable.",
 };

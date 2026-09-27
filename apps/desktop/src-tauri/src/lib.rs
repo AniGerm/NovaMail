@@ -65,6 +65,8 @@ pub fn run() {
             commands::ai_set_settings,
             commands::ai_runtime_status,
             commands::ai_pull_model,
+            commands::ai_install_ollama,
+            commands::ai_start_ollama,
             commands::messages_archive,
             commands::messages_delete,
             commands::messages_forward_draft,
