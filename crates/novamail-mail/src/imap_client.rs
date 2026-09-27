@@ -109,6 +109,24 @@ impl LiveImap {
         }
     }
 
+    /// RFC 2087 STORAGE usage/limit in bytes when the server advertises QUOTA.
+    pub async fn storage_quota(
+        &mut self,
+        mailbox: &str,
+    ) -> MailResult<Option<(u64, Option<u64>)>> {
+        match self {
+            LiveImap::Tls(s) => s.storage_quota(mailbox).await,
+            LiveImap::Plain(s) => s.storage_quota(mailbox).await,
+        }
+    }
+
+    pub async fn fetch_uid(&mut self, uid: u32) -> MailResult<Option<FetchedMessage>> {
+        match self {
+            LiveImap::Tls(s) => s.fetch_uid(uid).await,
+            LiveImap::Plain(s) => s.fetch_uid(uid).await,
+        }
+    }
+
     pub async fn logout(self) -> MailResult<()> {
         match self {
             LiveImap::Tls(s) => s.logout().await,
@@ -237,6 +255,43 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
             .await
             .map_err(|e| MailError::Imap(e.to_string()))?;
         Ok(set.into_iter().collect())
+    }
+
+    pub async fn fetch_uid(&mut self, uid: u32) -> MailResult<Option<FetchedMessage>> {
+        let mut msgs = self.fetch_uid_range(uid, Some(uid)).await?;
+        Ok(msgs.pop())
+    }
+
+    /// Returns `(used_bytes, limit_bytes)` from GETQUOTAROOT STORAGE (KB → bytes).
+    pub async fn storage_quota(
+        &mut self,
+        mailbox: &str,
+    ) -> MailResult<Option<(u64, Option<u64>)>> {
+        let (_roots, quotas) = match self.session.get_quota_root(mailbox).await {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::debug!(error = %err, mailbox, "GETQUOTAROOT unavailable");
+                return Ok(None);
+            }
+        };
+        for quota in quotas {
+            for resource in quota.resources {
+                if matches!(
+                    resource.name,
+                    async_imap::types::QuotaResourceName::Storage
+                ) {
+                    // RFC 2087: STORAGE units are 1024-octet blocks.
+                    let used = resource.usage.saturating_mul(1024);
+                    let limit = if resource.limit == 0 {
+                        None
+                    } else {
+                        Some(resource.limit.saturating_mul(1024))
+                    };
+                    return Ok(Some((used, limit)));
+                }
+            }
+        }
+        Ok(None)
     }
 
     pub async fn logout(mut self) -> MailResult<()> {

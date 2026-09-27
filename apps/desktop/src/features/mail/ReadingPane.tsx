@@ -239,6 +239,11 @@ export function ReadingPane({
           <span>&lt;{current.summary.from.email}&gt;</span>
           <span>·</span>
           <span>{formatRelative(current.summary.date, locale)}</span>
+          {current.summary.localOnly ? (
+            <span className="rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
+              {t("localOnlyBadge")}
+            </span>
+          ) : null}
           <span>·</span>
           <span>{current.summary.accountEmail}</span>
         </div>

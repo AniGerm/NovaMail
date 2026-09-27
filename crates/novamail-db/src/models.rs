@@ -69,6 +69,12 @@ pub struct MessageRecord {
     pub body_html: Option<String>,
     pub has_attachments: bool,
     pub raw_path: Option<String>,
+    #[serde(default)]
+    pub local_only: bool,
+    #[serde(default)]
+    pub offline_at: Option<i64>,
+    #[serde(default)]
+    pub size_bytes: Option<i64>,
 }
 
 impl MessageRecord {

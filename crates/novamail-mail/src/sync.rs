@@ -146,8 +146,8 @@ impl SyncEngine {
             record
         };
 
-        // Office-friendly window: recent mail stays local without full mailbox download.
-        let window = 500u32;
+        // Office-friendly window: enough history for offline offload without full mailbox pull.
+        let window = 1500u32;
         let from_uid = uidnext.saturating_sub(window).max(1);
         let fetched_msgs = imap.fetch_uid_range(from_uid, None).await?;
         let mut count = 0u32;
@@ -190,6 +190,9 @@ impl SyncEngine {
                 body_html: parsed.body_html.clone(),
                 has_attachments: parsed.has_attachments,
                 raw_path: None,
+                local_only: false,
+                offline_at: None,
+                size_bytes: Some(fetched.raw.len() as i64),
             };
             self.db.insert_message(&message)?;
             let message_id = self

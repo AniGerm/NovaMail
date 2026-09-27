@@ -1,16 +1,17 @@
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
-    AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
-    AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
-    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto,
+    AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
+    AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
+    AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
+    CardDavServerStatus, ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto,
     ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest,
     ImportBackupResult, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult,
     LdapSyncSettings, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailProvider,
     MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
-    OAuthExchangeRequest, OAuthExchangeResponse, ProviderPreset, RecipientSuggestion, RuleDto,
-    SaveDraftRequest, SearchRequest, SearchResponse, SendMessageRequest,
-    SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest, SignatureDto,
-    SpamScoreDto, SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus,
+    OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy, OfflineMailboxMode,
+    OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent, ProviderPreset,
+    RecipientSuggestion, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
+    SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SpamScoreDto, SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus,
     SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
     SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
     SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
@@ -145,11 +146,18 @@ pub async fn mail_sync(
     request: SyncRequest,
 ) -> Result<Vec<SyncResult>, AppError> {
     let handle = app.clone();
+    let handle_prompt = app.clone();
     state
         .app
-        .sync(request, move |event: SyncProgressEvent| {
-            let _ = handle.emit("sync://progress", event);
-        })
+        .sync(
+            request,
+            move |event: SyncProgressEvent| {
+                let _ = handle.emit("sync://progress", event);
+            },
+            move |prompt: OfflinePromptEvent| {
+                let _ = handle_prompt.emit("offline://prompt", prompt);
+            },
+        )
         .await
         .map_err(map_err)
 }
@@ -618,6 +626,81 @@ pub fn folder_policies_set(
 #[tauri::command]
 pub fn folder_policies_apply(state: State<'_, DesktopState>) -> Result<u32, AppError> {
     state.app.apply_folder_retention().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_get(
+    state: State<'_, DesktopState>,
+) -> Result<OfflineMailboxSettingsDto, AppError> {
+    state.app.offline_mailbox_settings().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_set(
+    state: State<'_, DesktopState>,
+    settings: OfflineMailboxSettingsDto,
+) -> Result<OfflineMailboxSettingsDto, AppError> {
+    state
+        .app
+        .set_offline_mailbox_settings(settings)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_set_policy(
+    state: State<'_, DesktopState>,
+    policy: OfflineMailboxAccountPolicy,
+) -> Result<OfflineMailboxAccountPolicy, AppError> {
+    state.app.set_offline_account_policy(policy).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn offline_mailbox_quota(
+    state: State<'_, DesktopState>,
+    account_id: Uuid,
+) -> Result<AccountQuotaDto, AppError> {
+    state.app.account_quota(account_id).await.map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_local_count(
+    state: State<'_, DesktopState>,
+    account_id: Option<Uuid>,
+) -> Result<u32, AppError> {
+    state.app.local_only_count(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn offline_mailbox_run(
+    state: State<'_, DesktopState>,
+    account_id: Uuid,
+    force: bool,
+) -> Result<OfflineOffloadReport, AppError> {
+    state
+        .app
+        .run_offline_offload(account_id, force)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_dismiss_prompt(
+    state: State<'_, DesktopState>,
+    account_id: Uuid,
+) -> Result<(), AppError> {
+    state.app.dismiss_offline_prompt(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn offline_mailbox_enable_from_prompt(
+    state: State<'_, DesktopState>,
+    account_id: Uuid,
+    mode: OfflineMailboxMode,
+) -> Result<OfflineMailboxAccountPolicy, AppError> {
+    state
+        .app
+        .enable_offline_from_prompt(account_id, mode)
+        .map_err(map_err)
 }
 
 #[tauri::command]

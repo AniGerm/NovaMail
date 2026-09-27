@@ -11,6 +11,7 @@ import type {
   SignatureDto,
   SpellDictionaryDto,
 } from "@/shared/api/types";
+import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
 import { RulesSpamPanel } from "@/features/settings/RulesSpamPanel";
 
 const AI_DEFAULT_MODEL = "qwen3:4b-instruct";
@@ -874,6 +875,7 @@ export function SettingsDialog({
           </ul>
         </section>
 
+        <OfflineMailboxPanel accounts={accounts} />
         <RulesSpamPanel accounts={accounts} />
 
         {error ? (

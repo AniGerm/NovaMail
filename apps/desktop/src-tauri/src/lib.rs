@@ -27,13 +27,36 @@ pub fn run() {
                 Duration::from_secs(300),
             );
             let handle = app.handle().clone();
+            let handle_offline = app.handle().clone();
             let app_for_ai = state.app.clone();
+            let app_for_offline = state.app.clone();
             let _sync_task = scheduler.spawn(
                 move |event| {
                     let _ = handle.emit("sync://progress", &event);
                 },
                 move |new_ids| {
                     app_for_ai.on_new_messages_synced(&new_ids);
+                },
+                move |account_ids| {
+                    let app = app_for_offline.clone();
+                    let emit = handle_offline.clone();
+                    tauri::async_runtime::spawn(async move {
+                        for account_id in account_ids {
+                            match app.process_offline_after_sync(account_id).await {
+                                Ok(Some(prompt)) => {
+                                    let _ = emit.emit("offline://prompt", &prompt);
+                                }
+                                Ok(None) => {}
+                                Err(err) => {
+                                    tracing::warn!(
+                                        %account_id,
+                                        error = %err,
+                                        "scheduled offline mailbox failed"
+                                    );
+                                }
+                            }
+                        }
+                    });
                 },
             );
             app.manage(state);
@@ -108,6 +131,14 @@ pub fn run() {
             commands::folder_policies_get,
             commands::folder_policies_set,
             commands::folder_policies_apply,
+            commands::offline_mailbox_get,
+            commands::offline_mailbox_set,
+            commands::offline_mailbox_set_policy,
+            commands::offline_mailbox_quota,
+            commands::offline_mailbox_local_count,
+            commands::offline_mailbox_run,
+            commands::offline_mailbox_dismiss_prompt,
+            commands::offline_mailbox_enable_from_prompt,
             commands::signatures_list,
             commands::signatures_upsert,
             commands::signatures_delete,

@@ -8,6 +8,7 @@ import {
   Monitor,
   BookUser,
   FilePenLine,
+  HardDrive,
   ShieldAlert,
   Zap,
 } from "lucide-react";
@@ -22,12 +23,14 @@ interface SidebarProps {
   selectedAccountId: string | null;
   draftsSelected?: boolean;
   spamSelected?: boolean;
+  offlineSelected?: boolean;
   syncStatus: string | null;
   themeMode: ThemeMode;
   onSelectUnified: () => void;
   onSelectAccount: (accountId: string) => void;
   onSelectDrafts: () => void;
   onSelectSpam: () => void;
+  onSelectOffline: () => void;
   onCompose: () => void;
   onSync: () => void;
   onAddAccount: () => void;
@@ -42,12 +45,14 @@ export function Sidebar({
   selectedAccountId,
   draftsSelected = false,
   spamSelected = false,
+  offlineSelected = false,
   syncStatus,
   themeMode,
   onSelectUnified,
   onSelectAccount,
   onSelectDrafts,
   onSelectSpam,
+  onSelectOffline,
   onCompose,
   onSync,
   onAddAccount,
@@ -109,7 +114,10 @@ export function Sidebar({
           type="button"
           onClick={onSelectUnified}
           className={
-            selectedAccountId === null && !draftsSelected && !spamSelected
+            selectedAccountId === null &&
+            !draftsSelected &&
+            !spamSelected &&
+            !offlineSelected
               ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
               : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
           }
@@ -140,6 +148,18 @@ export function Sidebar({
         >
           <ShieldAlert size={18} />
           {t("spam")}
+        </button>
+        <button
+          type="button"
+          onClick={onSelectOffline}
+          className={
+            offlineSelected
+              ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+              : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+          }
+        >
+          <HardDrive size={18} />
+          {t("offlineMailbox")}
         </button>
         <button
           type="button"
@@ -185,7 +205,8 @@ export function Sidebar({
                     className={
                       selectedAccountId === account.id &&
                       !draftsSelected &&
-                      !spamSelected
+                      !spamSelected &&
+                      !offlineSelected
                         ? "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-2 py-2 text-left text-sm text-[var(--nova-accent)]"
                         : "flex w-full items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--nova-surface-2)]"
                     }

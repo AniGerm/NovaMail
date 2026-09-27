@@ -35,6 +35,9 @@ pub struct MessageSummaryDto {
     pub starred: bool,
     pub has_attachments: bool,
     pub account_email: String,
+    /// True when the message was offloaded from IMAP and exists only locally.
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +94,9 @@ pub struct ListMessagesRequest {
     /// When set (e.g. `"drafts"`), list messages in mailboxes with that role/name.
     #[serde(default)]
     pub mailbox_role: Option<String>,
+    /// When true, only messages that were offloaded from IMAP (`local_only`).
+    #[serde(default)]
+    pub local_only: bool,
     pub limit: u32,
     pub offset: u32,
     pub query: Option<String>,

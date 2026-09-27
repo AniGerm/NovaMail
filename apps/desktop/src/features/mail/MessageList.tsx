@@ -34,6 +34,8 @@ export interface InboxFilters {
   mailboxId: string | null;
   /** e.g. `"drafts"` — list that mailbox role across accounts */
   mailboxRole: string | null;
+  /** Virtual folder: messages kept only locally after IMAP offload */
+  localOnly: boolean;
   sortBy: MessageSortBy;
   sortDir: SortDirection;
   viewMode: InboxViewMode;
@@ -460,6 +462,11 @@ export function MessageList({
                   {message.hasAttachments ? (
                     <Paperclip className="h-3.5 w-3.5 text-[var(--nova-ink-muted)]" />
                   ) : null}
+                  {message.localOnly ? (
+                    <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
+                      {t("localOnlyBadge")}
+                    </span>
+                  ) : null}
                 </div>
                 {!indented ? (
                   <p className="truncate text-xs text-[var(--nova-ink-muted)]">
@@ -507,11 +514,13 @@ export function buildListRequest(
 ): ListMessagesRequest {
   const mailboxSelected = Boolean(filters.mailboxId);
   const roleSelected = Boolean(filters.mailboxRole);
+  const offlineSelected = filters.localOnly;
   return {
-    mailboxId: filters.mailboxId,
+    mailboxId: offlineSelected ? null : filters.mailboxId,
     accountId: mailboxSelected ? null : filters.accountId,
-    unified: !mailboxSelected && !roleSelected,
-    mailboxRole: filters.mailboxRole,
+    unified: !mailboxSelected && !roleSelected && !offlineSelected,
+    mailboxRole: offlineSelected ? null : filters.mailboxRole,
+    localOnly: offlineSelected,
     limit: 200,
     offset: 0,
     query: searchQuery || null,
@@ -530,6 +539,7 @@ export const defaultInboxFilters: InboxFilters = {
   accountId: null,
   mailboxId: null,
   mailboxRole: null,
+  localOnly: false,
   sortBy: "date",
   sortDir: "desc",
   viewMode: "threads",

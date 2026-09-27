@@ -14,6 +14,7 @@ import {
   type InboxFilters,
 } from "@/features/mail/MessageList";
 import { QuickTriage } from "@/features/mail/QuickTriage";
+import { OfflinePromptDialog } from "@/features/mail/OfflinePromptDialog";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -24,6 +25,7 @@ import type {
   AppError,
   ContactPrefill,
   MessageDetailDto,
+  OfflinePromptEvent,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
@@ -68,6 +70,8 @@ export function AppShell() {
   const clearContactPrefill = useCallback(() => setContactPrefill(null), []);
   const [inboxFilters, setInboxFilters] =
     useState<InboxFilters>(defaultInboxFilters);
+  const [offlinePrompt, setOfflinePrompt] =
+    useState<OfflinePromptEvent | null>(null);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
 
@@ -145,6 +149,21 @@ export function AppShell() {
       unlisten?.();
     };
   }, [desktop, queryClient, setSyncStatus]);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onOfflinePrompt((event) => {
+        setOfflinePrompt(event);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop]);
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -241,6 +260,7 @@ export function AppShell() {
       accountId,
       mailboxId: null,
       mailboxRole: null,
+      localOnly: false,
     }));
   }, []);
 
@@ -250,6 +270,7 @@ export function AppShell() {
       ...prev,
       mailboxId: null,
       mailboxRole: "drafts",
+      localOnly: false,
       viewMode: "flat",
     }));
   }, [selectMessage]);
@@ -260,6 +281,18 @@ export function AppShell() {
       ...prev,
       mailboxId: null,
       mailboxRole: "junk",
+      localOnly: false,
+      viewMode: "flat",
+    }));
+  }, [selectMessage]);
+
+  const handleSelectOffline = useCallback(() => {
+    selectMessage(null);
+    setInboxFilters((prev) => ({
+      ...prev,
+      mailboxId: null,
+      mailboxRole: null,
+      localOnly: true,
       viewMode: "flat",
     }));
   }, [selectMessage]);
@@ -498,12 +531,14 @@ export function AppShell() {
           selectedAccountId={inboxFilters.accountId}
           draftsSelected={inboxFilters.mailboxRole === "drafts"}
           spamSelected={inboxFilters.mailboxRole === "junk"}
+          offlineSelected={inboxFilters.localOnly}
           syncStatus={syncStatus}
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
           onSelectDrafts={handleSelectDrafts}
           onSelectSpam={handleSelectSpam}
+          onSelectOffline={handleSelectOffline}
           onCompose={() => {
             setReplyTo(null);
             setEditingDraft(null);
@@ -655,6 +690,29 @@ export function AppShell() {
         messages={messages}
         onClose={() => setTriageOpen(false)}
         onChanged={refresh}
+      />
+      <OfflinePromptDialog
+        prompt={offlinePrompt}
+        onDismiss={() => {
+          const accountId = offlinePrompt?.accountId;
+          setOfflinePrompt(null);
+          if (accountId) {
+            void api.offlineMailboxDismissPrompt(accountId);
+          }
+        }}
+        onEnable={() => {
+          const accountId = offlinePrompt?.accountId;
+          setOfflinePrompt(null);
+          if (!accountId) return;
+          void api
+            .offlineMailboxEnableFromPrompt(accountId, "threshold")
+            .then(() => api.offlineMailboxRun(accountId, true))
+            .then(() => {
+              setSettingsOpen(true);
+              void queryClient.invalidateQueries({ queryKey: ["messages"] });
+            })
+            .catch((err) => setSyncStatus((err as AppError).message));
+        }}
       />
       <CommandPalette
         open={commandPaletteOpen}

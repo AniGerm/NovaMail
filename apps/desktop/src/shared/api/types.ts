@@ -70,6 +70,8 @@ export interface MessageSummaryDto {
   starred: boolean;
   hasAttachments: boolean;
   accountEmail: string;
+  /** True when the message was offloaded from IMAP and exists only locally. */
+  localOnly?: boolean;
 }
 
 export interface MessageDetailDto {
@@ -99,6 +101,8 @@ export interface ListMessagesRequest {
   accountId?: string | null;
   unified: boolean;
   mailboxRole?: string | null;
+  /** When true, only messages offloaded from IMAP (`localOnly`). */
+  localOnly?: boolean;
   limit: number;
   offset: number;
   query?: string | null;
@@ -107,6 +111,51 @@ export interface ListMessagesRequest {
   hasAttachments?: boolean;
   sortBy?: MessageSortBy;
   sortDir?: SortDirection;
+}
+
+export type OfflineMailboxMode = "off" | "threshold" | "overflow" | "alwaysPurge";
+
+export type QuotaSource = "server" | "estimate" | "unknown";
+
+export interface OfflineMailboxAccountPolicy {
+  accountId: string;
+  mode: OfflineMailboxMode;
+  promptThresholdPercent: number;
+  activeThresholdPercent: number;
+  keepStarredOnImap: boolean;
+  minAgeDays: number;
+  batchLimit: number;
+  promptDismissed?: boolean;
+}
+
+export interface OfflineMailboxSettingsDto {
+  accounts: OfflineMailboxAccountPolicy[];
+}
+
+export interface AccountQuotaDto {
+  accountId: string;
+  usedBytes: number;
+  limitBytes?: number | null;
+  percent?: number | null;
+  source: QuotaSource;
+}
+
+export interface OfflineOffloadReport {
+  accountId: string;
+  candidates: number;
+  offloaded: number;
+  skippedIncomplete: number;
+  skippedStarred: number;
+  freedBytes: number;
+  errors: number;
+}
+
+export interface OfflinePromptEvent {
+  accountId: string;
+  accountEmail: string;
+  percent: number;
+  usedBytes: number;
+  limitBytes?: number | null;
 }
 
 export interface ListMessagesResponse {

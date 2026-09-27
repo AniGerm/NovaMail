@@ -45,14 +45,17 @@ impl SyncScheduler {
     ///
     /// `on_new_messages` receives local message IDs newly inserted in a cycle
     /// (for AI insights + mail rules).
-    pub fn spawn<F, N>(
+    /// `on_accounts_synced` receives account IDs that completed sync (offline quota).
+    pub fn spawn<F, N, A>(
         self,
         mut on_progress: F,
         mut on_new_messages: N,
+        mut on_accounts_synced: A,
     ) -> std::thread::JoinHandle<()>
     where
         F: FnMut(SyncProgressEvent) + Send + 'static,
         N: FnMut(Vec<Uuid>) + Send + 'static,
+        A: FnMut(Vec<Uuid>) + Send + 'static,
     {
         std::thread::Builder::new()
             .name("novamail-sync-scheduler".into())
@@ -91,6 +94,7 @@ impl SyncScheduler {
                                     }
                                 };
                                 let mut new_ids = Vec::new();
+                                let mut synced_accounts = Vec::new();
                                 for account in accounts {
                                     info!(account = %account.email, "scheduled sync starting");
                                     match engine
@@ -99,6 +103,7 @@ impl SyncScheduler {
                                     {
                                         Ok(report) => {
                                             new_ids.extend(report.new_message_ids);
+                                            synced_accounts.push(account.id);
                                         }
                                         Err(err) => {
                                             warn!(
@@ -111,6 +116,9 @@ impl SyncScheduler {
                                 }
                                 if !new_ids.is_empty() {
                                     on_new_messages(new_ids);
+                                }
+                                if !synced_accounts.is_empty() {
+                                    on_accounts_synced(synced_accounts);
                                 }
                                 *self.running.lock().await = false;
                             }

@@ -207,6 +207,17 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_known_recipients_last_seen
       ON known_recipients(last_seen DESC);
     "#,
+    // v5 — intelligent offline mailbox (quota offload)
+    r#"
+    ALTER TABLE messages ADD COLUMN local_only INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE messages ADD COLUMN offline_at INTEGER;
+    ALTER TABLE messages ADD COLUMN size_bytes INTEGER;
+
+    CREATE INDEX IF NOT EXISTS idx_messages_local_only
+      ON messages(account_id, local_only, date ASC);
+    CREATE INDEX IF NOT EXISTS idx_messages_offline_at
+      ON messages(offline_at);
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -259,7 +270,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

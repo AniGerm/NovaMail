@@ -38,6 +38,12 @@ import type {
   OutgoingAttachment,
   ProviderPreset,
   FolderPoliciesDto,
+  OfflineMailboxAccountPolicy,
+  OfflineMailboxMode,
+  OfflineMailboxSettingsDto,
+  OfflineOffloadReport,
+  OfflinePromptEvent,
+  AccountQuotaDto,
   RuleDto,
   SaveDraftRequest,
   SendMessageRequest,
@@ -256,6 +262,40 @@ export const api = {
   folderPoliciesSet: (policies: FolderPoliciesDto) =>
     call<FolderPoliciesDto>("folder_policies_set", { policies }),
   folderPoliciesApply: () => call<number>("folder_policies_apply"),
+  offlineMailboxGet: () =>
+    call<OfflineMailboxSettingsDto>("offline_mailbox_get"),
+  offlineMailboxSet: (settings: OfflineMailboxSettingsDto) =>
+    call<OfflineMailboxSettingsDto>("offline_mailbox_set", { settings }),
+  offlineMailboxSetPolicy: (policy: OfflineMailboxAccountPolicy) =>
+    call<OfflineMailboxAccountPolicy>("offline_mailbox_set_policy", {
+      policy,
+    }),
+  offlineMailboxQuota: (accountId: string) =>
+    call<AccountQuotaDto>("offline_mailbox_quota", { accountId }),
+  offlineMailboxLocalCount: (accountId?: string | null) =>
+    call<number>("offline_mailbox_local_count", {
+      accountId: accountId ?? null,
+    }),
+  offlineMailboxRun: (accountId: string, force = false) =>
+    call<OfflineOffloadReport>("offline_mailbox_run", { accountId, force }),
+  offlineMailboxDismissPrompt: (accountId: string) =>
+    call<void>("offline_mailbox_dismiss_prompt", { accountId }),
+  offlineMailboxEnableFromPrompt: (
+    accountId: string,
+    mode: OfflineMailboxMode = "threshold",
+  ) =>
+    call<OfflineMailboxAccountPolicy>("offline_mailbox_enable_from_prompt", {
+      accountId,
+      mode,
+    }),
+  onOfflinePrompt: async (
+    handler: (event: OfflinePromptEvent) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<OfflinePromptEvent>("offline://prompt", (event) => {
+      handler(event.payload);
+    });
+  },
   signaturesList: (accountId?: string | null) =>
     call<SignatureDto[]>("signatures_list", { accountId: accountId ?? null }),
   signaturesUpsert: (request: {

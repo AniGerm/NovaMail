@@ -4,6 +4,7 @@ mod app;
 mod contacts_store;
 mod error;
 mod folder_policies;
+mod offline_mailbox;
 mod paths;
 mod sanitize;
 mod spam;

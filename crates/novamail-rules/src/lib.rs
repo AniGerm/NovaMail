@@ -132,6 +132,7 @@ mod tests {
             starred: false,
             has_attachments: false,
             account_email: "me@example.com".into(),
+            local_only: false,
         }
     }
 

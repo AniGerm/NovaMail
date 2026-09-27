@@ -18,7 +18,7 @@ use novamail_crypto::{
 };
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
-    AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
+    AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CardDavServerStatus,
@@ -28,17 +28,18 @@ use novamail_ipc::{
     LdapSyncResult, LdapSyncSettings, ListMessagesRequest, ListMessagesResponse,
     ListThreadsResponse, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
     MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OAuthTokensDto,
-    ProviderPreset, RecipientSuggestion, RetentionModeDto, RuleDto, SaveDraftRequest,
-    SearchRequest, SearchResponse, SendMessageRequest, SetContactsShareModeRequest,
-    SetFlagsRequest, SetMessageLabelsRequest, SignatureDto, SpamScoreDto, SpamSettingsDto,
-    SuggestRepliesMessageRequest, SuggestRepliesMessageResponse, SuggestReplyMessageRequest,
-    SuggestReplyMessageResponse, SummarizeMessageRequest, SummarizeMessageResponse,
-    SyncProgressEvent, SyncRequest, SyncResult, UpsertContactRequest, UpsertLabelRequest,
-    UpsertRuleRequest, UpsertSignatureRequest,
+    OfflineMailboxAccountPolicy, OfflineMailboxMode, OfflineMailboxSettingsDto,
+    OfflineOffloadReport, OfflinePromptEvent, ProviderPreset, RecipientSuggestion,
+    RetentionModeDto, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
+    SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest, SetMessageLabelsRequest,
+    SignatureDto, SpamScoreDto, SpamSettingsDto, SuggestRepliesMessageRequest,
+    SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
+    SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
+    UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    archive_remote, delete_remote, move_remote, save_draft_remote, set_flags_remote, OAuthConfig,
-    Pop3Client, SmtpClient, SyncEngine,
+    archive_remote, delete_remote, move_remote, offload_message_remote, probe_account_quota,
+    save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -48,6 +49,9 @@ use crate::contacts_store::DbContactStore;
 use crate::folder_policies::{
     FolderPolicies, FolderPolicy, RetentionMode, SETTINGS_KEY as FOLDER_POLICIES_KEY,
     SPAM_SETTINGS_KEY,
+};
+use crate::offline_mailbox::{
+    self, OfflineMailboxSettings, SETTINGS_KEY as OFFLINE_MAILBOX_KEY,
 };
 use crate::paths::AppPaths;
 use crate::sanitize::sanitize_html;
@@ -418,13 +422,15 @@ impl AppState {
         Ok(service.search(request)?)
     }
 
-    pub async fn sync<F>(
+    pub async fn sync<F, P>(
         &self,
         request: SyncRequest,
         mut on_progress: F,
+        mut on_offline_prompt: P,
     ) -> CoreResult<Vec<SyncResult>>
     where
         F: FnMut(SyncProgressEvent) + Send,
+        P: FnMut(OfflinePromptEvent) + Send,
     {
         let engine = SyncEngine::new(
             self.db.clone(),
@@ -457,6 +463,19 @@ impl AppState {
         self.on_new_messages_synced(&new_ids);
         if let Err(err) = self.apply_folder_retention() {
             tracing::warn!(error = %err, "folder retention cleanup failed");
+        }
+        for result in &results {
+            match self.apply_offline_mailbox_after_sync(result.account_id).await {
+                Ok(Some(prompt)) => on_offline_prompt(prompt),
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        account_id = %result.account_id,
+                        error = %err,
+                        "offline mailbox policy failed"
+                    );
+                }
+            }
         }
         Ok(results)
     }
@@ -580,6 +599,13 @@ impl AppState {
                 body_html: request.body_html.clone(),
                 has_attachments: false,
                 raw_path: None,
+                local_only: false,
+                offline_at: None,
+                size_bytes: Some(
+                    (request.body_text.len()
+                        + request.body_html.as_deref().map(|s| s.len()).unwrap_or(0))
+                        as i64,
+                ),
             })?;
             (message_id, rfc_message_id)
         };
@@ -2080,6 +2106,204 @@ impl AppState {
             }
         }
         Ok(deleted)
+    }
+
+    pub fn offline_mailbox_settings(&self) -> CoreResult<OfflineMailboxSettingsDto> {
+        Ok(self.load_offline_mailbox_settings().to_dto())
+    }
+
+    pub fn set_offline_mailbox_settings(
+        &self,
+        dto: OfflineMailboxSettingsDto,
+    ) -> CoreResult<OfflineMailboxSettingsDto> {
+        let settings = OfflineMailboxSettings::from_dto(dto);
+        self.db.set_setting(
+            OFFLINE_MAILBOX_KEY,
+            &serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?,
+        )?;
+        Ok(settings.to_dto())
+    }
+
+    pub fn set_offline_account_policy(
+        &self,
+        policy: OfflineMailboxAccountPolicy,
+    ) -> CoreResult<OfflineMailboxAccountPolicy> {
+        let policy = offline_mailbox::sanitize_policy(policy);
+        let mut settings = self.load_offline_mailbox_settings();
+        settings.upsert(policy.clone());
+        self.db.set_setting(
+            OFFLINE_MAILBOX_KEY,
+            &serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?,
+        )?;
+        Ok(policy)
+    }
+
+    fn load_offline_mailbox_settings(&self) -> OfflineMailboxSettings {
+        self.db
+            .get_setting(OFFLINE_MAILBOX_KEY)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    pub async fn account_quota(&self, account_id: Uuid) -> CoreResult<AccountQuotaDto> {
+        Ok(probe_account_quota(&self.db, &self.secrets, account_id).await?)
+    }
+
+    pub fn local_only_count(&self, account_id: Option<Uuid>) -> CoreResult<u32> {
+        Ok(self.db.count_local_only_messages(account_id)?)
+    }
+
+    pub async fn run_offline_offload(
+        &self,
+        account_id: Uuid,
+        force: bool,
+    ) -> CoreResult<OfflineOffloadReport> {
+        let policy = self.load_offline_mailbox_settings().policy_for(account_id);
+        let quota = probe_account_quota(&self.db, &self.secrets, account_id).await?;
+        if !force && !offline_mailbox::should_offload(&policy, quota.percent) {
+            return Ok(OfflineOffloadReport {
+                account_id,
+                candidates: 0,
+                offloaded: 0,
+                skipped_incomplete: 0,
+                skipped_starred: 0,
+                freed_bytes: 0,
+                errors: 0,
+            });
+        }
+        self.offload_with_policy(account_id, &policy).await
+    }
+
+    pub async fn process_offline_after_sync(
+        &self,
+        account_id: Uuid,
+    ) -> CoreResult<Option<OfflinePromptEvent>> {
+        self.apply_offline_mailbox_after_sync(account_id).await
+    }
+
+    async fn apply_offline_mailbox_after_sync(
+        &self,
+        account_id: Uuid,
+    ) -> CoreResult<Option<OfflinePromptEvent>> {
+        let policy = self.load_offline_mailbox_settings().policy_for(account_id);
+        let quota = match probe_account_quota(&self.db, &self.secrets, account_id).await {
+            Ok(q) => q,
+            Err(err) => {
+                tracing::debug!(%account_id, error = %err, "quota probe skipped");
+                return Ok(None);
+            }
+        };
+
+        if offline_mailbox::should_offload(&policy, quota.percent) {
+            match self.offload_with_policy(account_id, &policy).await {
+                Ok(report) if report.offloaded > 0 => {
+                    tracing::info!(
+                        %account_id,
+                        offloaded = report.offloaded,
+                        freed = report.freed_bytes,
+                        "offline mailbox offload completed"
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => tracing::warn!(%account_id, error = %err, "offload batch failed"),
+            }
+        }
+
+        if offline_mailbox::should_prompt(&policy, quota.percent) {
+            let account = self.db.get_account(account_id)?;
+            return Ok(Some(OfflinePromptEvent {
+                account_id,
+                account_email: account.email,
+                percent: quota.percent.unwrap_or(0.0),
+                used_bytes: quota.used_bytes,
+                limit_bytes: quota.limit_bytes,
+            }));
+        }
+        Ok(None)
+    }
+
+    async fn offload_with_policy(
+        &self,
+        account_id: Uuid,
+        policy: &OfflineMailboxAccountPolicy,
+    ) -> CoreResult<OfflineOffloadReport> {
+        let now = chrono::Utc::now().timestamp();
+        let older_than = now - (i64::from(policy.min_age_days) * 86_400);
+        let candidates = self.db.list_offload_candidates(
+            account_id,
+            older_than,
+            policy.keep_starred_on_imap,
+            policy.batch_limit,
+        )?;
+        let mut report = OfflineOffloadReport {
+            account_id,
+            candidates: candidates.len() as u32,
+            offloaded: 0,
+            skipped_incomplete: 0,
+            skipped_starred: 0,
+            freed_bytes: 0,
+            errors: 0,
+        };
+
+        for message_id in candidates {
+            if let Ok(detail) = self.db.get_message(message_id) {
+                if detail.summary.starred && policy.keep_starred_on_imap {
+                    report.skipped_starred += 1;
+                    continue;
+                }
+            }
+            match offload_message_remote(
+                &self.db,
+                &self.secrets,
+                &self.paths.blobs_dir,
+                message_id,
+            )
+            .await
+            {
+                Ok(freed) => {
+                    report.offloaded += 1;
+                    report.freed_bytes += freed;
+                }
+                Err(err) => {
+                    let msg = err.to_string();
+                    if msg.contains("incomplete") {
+                        report.skipped_incomplete += 1;
+                    } else {
+                        report.errors += 1;
+                        tracing::debug!(%message_id, error = %err, "offload skipped");
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    pub fn dismiss_offline_prompt(&self, account_id: Uuid) -> CoreResult<()> {
+        let mut settings = self.load_offline_mailbox_settings();
+        let mut policy = settings.policy_for(account_id);
+        policy.prompt_dismissed = true;
+        settings.upsert(policy);
+        self.db.set_setting(
+            OFFLINE_MAILBOX_KEY,
+            &serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?,
+        )?;
+        Ok(())
+    }
+
+    pub fn enable_offline_from_prompt(
+        &self,
+        account_id: Uuid,
+        mode: OfflineMailboxMode,
+    ) -> CoreResult<OfflineMailboxAccountPolicy> {
+        let mut policy = self.load_offline_mailbox_settings().policy_for(account_id);
+        policy.mode = mode;
+        policy.prompt_dismissed = true;
+        if matches!(mode, OfflineMailboxMode::Off) {
+            policy.mode = OfflineMailboxMode::Threshold;
+        }
+        self.set_offline_account_policy(policy)
     }
 
 

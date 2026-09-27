@@ -176,6 +176,209 @@ pub async fn delete_remote(
     Ok(())
 }
 
+/// Hard-purge a message from IMAP while keeping the local SQLite/blob copy.
+///
+/// Safety: refuses when the local body (and attachment files) are incomplete.
+/// Does **not** move to Trash — that would still consume server quota.
+pub async fn offload_message_remote(
+    db: &Database,
+    secrets: &SecretStore,
+    blobs_dir: &std::path::Path,
+    message_id: Uuid,
+) -> MailResult<u64> {
+    let detail = db.get_message(message_id)?;
+    if detail.summary.local_only {
+        return Ok(0);
+    }
+
+    let Some(locator) = load_locator(db, message_id)? else {
+        return Err(MailError::Other(
+            "cannot offload: message has no IMAP UID".into(),
+        ));
+    };
+
+    // Ensure a complete local copy before touching the server.
+    if !db.message_has_complete_local_copy(message_id)? {
+        ensure_full_local_copy(db, secrets, blobs_dir, message_id, &locator).await?;
+        if !db.message_has_complete_local_copy(message_id)? {
+            return Err(MailError::Other(
+                "refusing IMAP purge: local copy incomplete".into(),
+            ));
+        }
+    }
+
+    let size = db
+        .message_size_bytes(message_id)?
+        .unwrap_or_else(|| {
+            let body = detail.body_text.as_deref().unwrap_or("").len()
+                + detail.body_html.as_deref().unwrap_or("").len();
+            body as i64
+        })
+        .max(0) as u64;
+
+    let account = db.get_account(locator.account_id)?;
+    let credentials = ensure_fresh_credentials(&account, secrets).await?;
+    let mut imap = LiveImap::connect(&account, &credentials).await?;
+    imap.select(&locator.mailbox_name).await?;
+    let uid = locator.uid.to_string();
+    imap.uid_store(&uid, "+FLAGS (\\Deleted)").await?;
+    imap.uid_expunge(&uid).await?;
+    let _ = imap.logout().await;
+
+    let now = chrono::Utc::now().timestamp();
+    db.mark_message_local_only(message_id, Some(size as i64), now)?;
+    Ok(size)
+}
+
+async fn ensure_full_local_copy(
+    db: &Database,
+    secrets: &SecretStore,
+    blobs_dir: &std::path::Path,
+    message_id: Uuid,
+    locator: &ImapLocator,
+) -> MailResult<()> {
+    let account = db.get_account(locator.account_id)?;
+    let credentials = ensure_fresh_credentials(&account, secrets).await?;
+    let mut imap = LiveImap::connect(&account, &credentials).await?;
+    imap.select(&locator.mailbox_name).await?;
+    let Some(fetched) = imap.fetch_uid(locator.uid).await? else {
+        let _ = imap.logout().await;
+        return Err(MailError::Other(format!(
+            "UID {} missing on server; cannot complete local copy",
+            locator.uid
+        )));
+    };
+    let parsed = crate::parse::parse_rfc822(&fetched.raw, fetched.flags_seen, fetched.flags_flagged)?;
+    // Re-insert preserves local_only when set; here we refresh body/size.
+    let existing = db.get_message(message_id)?;
+    let record = novamail_db::models::MessageRecord {
+        id: message_id,
+        account_id: existing.summary.account_id,
+        mailbox_id: existing.summary.mailbox_id,
+        thread_id: existing.summary.thread_id,
+        uid: Some(fetched.uid),
+        message_id: parsed.message_id.or(existing.message_id),
+        in_reply_to: parsed.in_reply_to.or(existing.in_reply_to),
+        references: if parsed.references.is_empty() {
+            existing.references
+        } else {
+            parsed.references
+        },
+        subject: parsed.subject,
+        from: parsed.from,
+        to: parsed.to,
+        cc: parsed.cc,
+        date: existing.summary.date,
+        flags: {
+            let mut flags = 0i64;
+            if !existing.summary.unread {
+                flags |= novamail_db::models::FLAG_SEEN;
+            }
+            if existing.summary.starred {
+                flags |= novamail_db::models::FLAG_STARRED;
+            }
+            flags
+        },
+        snippet: parsed.snippet,
+        body_text: parsed.body_text,
+        body_html: parsed.body_html,
+        has_attachments: parsed.has_attachments,
+        raw_path: None,
+        local_only: false,
+        offline_at: None,
+        size_bytes: Some(fetched.raw.len() as i64),
+    };
+    db.insert_message(&record)?;
+    if !parsed.attachments.is_empty() {
+        std::fs::create_dir_all(blobs_dir)?;
+        let mut records = Vec::new();
+        for attachment in parsed.attachments {
+            let id = Uuid::new_v4();
+            let safe_name: String = attachment
+                .filename
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .take(120)
+                .collect();
+            let safe_name = if safe_name.is_empty() {
+                "file".into()
+            } else {
+                safe_name
+            };
+            let path = blobs_dir.join(format!("{id}_{safe_name}"));
+            std::fs::write(&path, &attachment.data)?;
+            records.push(novamail_db::models::AttachmentRecord {
+                id,
+                message_id,
+                filename: attachment.filename,
+                mime: attachment.mime,
+                size: attachment.data.len() as u64,
+                path: path.to_string_lossy().to_string(),
+            });
+        }
+        db.replace_attachments(message_id, &records)?;
+    }
+    let _ = imap.logout().await;
+    Ok(())
+}
+
+/// Probe IMAP QUOTA for an account; falls back to a local size estimate.
+pub async fn probe_account_quota(
+    db: &Database,
+    secrets: &SecretStore,
+    account_id: Uuid,
+) -> MailResult<novamail_ipc::AccountQuotaDto> {
+    use novamail_ipc::{AccountQuotaDto, QuotaSource};
+
+    let estimated = db.estimate_account_storage_bytes(account_id)?;
+    let account = db.get_account(account_id)?;
+    if account.imap_host.trim().is_empty() {
+        return Ok(AccountQuotaDto {
+            account_id,
+            used_bytes: estimated,
+            limit_bytes: None,
+            percent: None,
+            source: QuotaSource::Estimate,
+        });
+    }
+
+    let credentials = ensure_fresh_credentials(&account, secrets).await?;
+    let mut imap = LiveImap::connect(&account, &credentials).await?;
+    let server = imap.storage_quota("INBOX").await?;
+    let _ = imap.logout().await;
+
+    if let Some((used, limit)) = server {
+        let percent = limit.map(|lim| {
+            if lim == 0 {
+                0.0
+            } else {
+                (used as f64 / lim as f64 * 100.0) as f32
+            }
+        });
+        return Ok(AccountQuotaDto {
+            account_id,
+            used_bytes: used,
+            limit_bytes: limit,
+            percent,
+            source: QuotaSource::Server,
+        });
+    }
+
+    Ok(AccountQuotaDto {
+        account_id,
+        used_bytes: estimated,
+        limit_bytes: None,
+        percent: None,
+        source: QuotaSource::Estimate,
+    })
+}
+
 fn load_locator(db: &Database, message_id: Uuid) -> MailResult<Option<ImapLocator>> {
     let detail = db.get_message(message_id)?;
     let Some(uid) = db.get_message_uid(message_id)? else {

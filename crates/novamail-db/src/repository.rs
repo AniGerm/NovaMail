@@ -534,16 +534,22 @@ impl Database {
             INSERT INTO messages (
               id, account_id, mailbox_id, thread_id, uid, message_id, in_reply_to,
               references_json, subject, from_json, to_json, cc_json, date, flags,
-              snippet, body_text, body_html, has_attachments, raw_path
+              snippet, body_text, body_html, has_attachments, raw_path,
+              local_only, offline_at, size_bytes
             ) VALUES (
-              ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19
+              ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22
             )
             ON CONFLICT(mailbox_id, uid) DO UPDATE SET
               flags = excluded.flags,
               subject = excluded.subject,
               snippet = excluded.snippet,
               body_text = COALESCE(excluded.body_text, messages.body_text),
-              body_html = COALESCE(excluded.body_html, messages.body_html)
+              body_html = COALESCE(excluded.body_html, messages.body_html),
+              size_bytes = COALESCE(excluded.size_bytes, messages.size_bytes),
+              local_only = CASE
+                WHEN messages.local_only != 0 THEN messages.local_only
+                ELSE excluded.local_only
+              END
             "#,
             params![
                 message.id.to_string(),
@@ -565,6 +571,9 @@ impl Database {
                 message.body_html,
                 message.has_attachments as i64,
                 message.raw_path,
+                message.local_only as i64,
+                message.offline_at,
+                message.size_bytes,
             ],
         )?;
         drop(conn);
@@ -763,7 +772,8 @@ impl Database {
                 SELECT
                   m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
                   m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
-                  a.email, m.body_text, m.body_html, m.message_id, m.in_reply_to, m.references_json
+                  a.email, m.body_text, m.body_html, m.message_id, m.in_reply_to, m.references_json,
+                  coalesce(m.local_only, 0)
                 FROM messages m
                 JOIN accounts a ON a.id = m.account_id
                 WHERE m.id = ?1
@@ -792,6 +802,7 @@ impl Database {
                             starred: flags & FLAG_STARRED != 0,
                             has_attachments: row.get::<_, i64>(10)? != 0,
                             account_email: row.get(11)?,
+                            local_only: row.get::<_, i64>(17)? != 0,
                         },
                         body_text: row.get(12)?,
                         body_html: row.get(13)?,
@@ -842,7 +853,7 @@ impl Database {
                 SELECT
                   m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
                   m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
-                  a.email
+                  a.email, coalesce(m.local_only, 0)
                 FROM messages m
                 JOIN mailboxes mb ON mb.id = m.mailbox_id
                 JOIN accounts a ON a.id = m.account_id
@@ -857,7 +868,7 @@ impl Database {
                 SELECT
                   m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
                   m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
-                  a.email
+                  a.email, coalesce(m.local_only, 0)
                 FROM messages m
                 JOIN mailboxes mb ON mb.id = m.mailbox_id
                 JOIN accounts a ON a.id = m.account_id
@@ -1022,7 +1033,7 @@ impl Database {
             SELECT
               m.id, m.account_id, m.mailbox_id, m.thread_id, m.subject,
               m.from_json, m.to_json, m.date, m.snippet, m.flags, m.has_attachments,
-              a.email
+              a.email, coalesce(m.local_only, 0)
             FROM messages m
             JOIN accounts a ON a.id = m.account_id
             WHERE m.thread_id = ?1
@@ -1222,6 +1233,180 @@ impl Database {
             return Err(DbError::NotFound(format!("message {message_id}")));
         }
         Ok(())
+    }
+
+    /// Mark a message as local-only after a successful IMAP purge (keeps body/blobs).
+    pub fn mark_message_local_only(
+        &self,
+        message_id: Uuid,
+        size_bytes: Option<i64>,
+        offline_at: i64,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            r#"
+            UPDATE messages
+            SET local_only = 1,
+                offline_at = ?2,
+                uid = NULL,
+                size_bytes = COALESCE(?3, size_bytes)
+            WHERE id = ?1
+            "#,
+            params![message_id.to_string(), offline_at, size_bytes],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn set_message_size_bytes(&self, message_id: Uuid, size_bytes: i64) -> DbResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE messages SET size_bytes = ?2 WHERE id = ?1",
+            params![message_id.to_string(), size_bytes],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("message {message_id}")));
+        }
+        Ok(())
+    }
+
+    /// Whether the message has a readable body and (if flagged) attachment files on disk.
+    pub fn message_has_complete_local_copy(&self, message_id: Uuid) -> DbResult<bool> {
+        let detail = self.get_message(message_id)?;
+        let has_body = detail
+            .body_text
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+            || detail
+                .body_html
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        if !has_body {
+            return Ok(false);
+        }
+        if detail.summary.has_attachments {
+            let attachments = self.list_attachments(message_id)?;
+            if attachments.is_empty() {
+                return Ok(false);
+            }
+            for att in &attachments {
+                if !std::path::Path::new(&att.path).is_file() {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Oldest non-local-only messages eligible for IMAP offload.
+    pub fn list_offload_candidates(
+        &self,
+        account_id: Uuid,
+        older_than: i64,
+        skip_starred: bool,
+        limit: u32,
+    ) -> DbResult<Vec<Uuid>> {
+        let conn = self.conn.lock();
+        let limit = limit.max(1).min(500) as i64;
+        let starred_sql = if skip_starred {
+            format!("AND (m.flags & {FLAG_STARRED}) = 0")
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            r#"
+            SELECT m.id
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            WHERE m.account_id = ?1
+              AND coalesce(m.local_only, 0) = 0
+              AND m.uid IS NOT NULL
+              AND m.date < ?2
+              AND lower(coalesce(mb.role, '')) NOT IN ('drafts', 'trash')
+              AND lower(mb.name) NOT IN ('drafts', 'entwürfe', 'entwuerfe', 'trash', 'deleted', 'deleted items')
+              {starred_sql}
+            ORDER BY
+              CASE WHEN (m.flags & {FLAG_STARRED}) != 0 THEN 1 ELSE 0 END ASC,
+              m.date ASC
+            LIMIT ?3
+            "#
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![account_id.to_string(), older_than, limit],
+            |row| {
+                let id: String = row.get(0)?;
+                Ok(Uuid::parse_str(&id).map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                })?)
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn estimate_account_storage_bytes(&self, account_id: Uuid) -> DbResult<u64> {
+        let conn = self.conn.lock();
+        let msg_bytes: i64 = conn.query_row(
+            r#"
+            SELECT COALESCE(SUM(
+              COALESCE(
+                size_bytes,
+                length(COALESCE(body_text, '')) + length(COALESCE(body_html, '')) + 512
+              )
+            ), 0)
+            FROM messages
+            WHERE account_id = ?1 AND coalesce(local_only, 0) = 0
+            "#,
+            params![account_id.to_string()],
+            |row| row.get(0),
+        )?;
+        let att_bytes: i64 = conn.query_row(
+            r#"
+            SELECT COALESCE(SUM(a.size), 0)
+            FROM attachments a
+            JOIN messages m ON m.id = a.message_id
+            WHERE m.account_id = ?1 AND coalesce(m.local_only, 0) = 0
+            "#,
+            params![account_id.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok((msg_bytes.max(0) + att_bytes.max(0)) as u64)
+    }
+
+    pub fn count_local_only_messages(&self, account_id: Option<Uuid>) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let total: i64 = if let Some(id) = account_id {
+            conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE coalesce(local_only, 0) != 0 AND account_id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )?
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE coalesce(local_only, 0) != 0",
+                [],
+                |row| row.get(0),
+            )?
+        };
+        Ok(total as u32)
+    }
+
+    pub fn message_size_bytes(&self, message_id: Uuid) -> DbResult<Option<i64>> {
+        let conn = self.conn.lock();
+        let size: Option<i64> = conn.query_row(
+            "SELECT size_bytes FROM messages WHERE id = ?1",
+            params![message_id.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok(size)
     }
 
     /// Message IDs in mailboxes with the given role whose `date` is older than `cutoff` (unix secs).
@@ -1870,6 +2055,7 @@ fn map_message_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSumma
         starred: flags & FLAG_STARRED != 0,
         has_attachments: row.get::<_, i64>(10)? != 0,
         account_email: row.get(11)?,
+        local_only: row.get::<_, i64>(12).unwrap_or(0) != 0,
     })
 }
 
@@ -1897,6 +2083,34 @@ fn map_thread_list_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreadListI
 fn message_filters_sql(req: &ListMessagesRequest) -> (String, Vec<String>) {
     let mut where_parts = Vec::new();
     let mut bind_ids: Vec<String> = Vec::new();
+
+    // Offline mailbox virtual folder: all local-only messages (optionally per account).
+    if req.local_only {
+        where_parts.push("coalesce(m.local_only, 0) != 0".into());
+        if let Some(account_id) = req.account_id {
+            where_parts.push("m.account_id = ?1".into());
+            bind_ids.push(account_id.to_string());
+        }
+        if req.unread_only {
+            where_parts.push(format!("(m.flags & {FLAG_SEEN}) = 0"));
+        }
+        if req.starred_only {
+            where_parts.push(format!("(m.flags & {FLAG_STARRED}) != 0"));
+        }
+        if req.has_attachments {
+            where_parts.push("m.has_attachments != 0".into());
+        }
+        if let Some(query) = &req.query {
+            if !query.trim().is_empty() {
+                where_parts.push(format!(
+                    "m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH '{}')",
+                    escape_fts(query)
+                ));
+            }
+        }
+        let where_sql = format!("WHERE {}", where_parts.join(" AND "));
+        return (where_sql, bind_ids);
+    }
 
     let drafts_role = req
         .mailbox_role
@@ -2150,6 +2364,9 @@ mod tests {
                 body_html: None,
                 has_attachments: false,
                 raw_path: None,
+                local_only: false,
+                offline_at: None,
+                size_bytes: Some(subject.len() as i64),
             })
             .unwrap();
         }
@@ -2160,6 +2377,7 @@ mod tests {
                 account_id: None,
                 unified: true,
                 mailbox_role: None,
+                local_only: false,
                 limit: 50,
                 offset: 0,
                 query: None,
@@ -2182,6 +2400,7 @@ mod tests {
                 account_id: None,
                 unified: true,
                 mailbox_role: None,
+                local_only: false,
                 limit: 50,
                 offset: 0,
                 query: None,
