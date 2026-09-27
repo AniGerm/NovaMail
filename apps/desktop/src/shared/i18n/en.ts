@@ -236,44 +236,38 @@ export const en: Translations = {
   bookSettingsSaved: "Address book settings saved.",
   cardDavServer: "Shared address book",
   shareModeLabel: "Operating mode",
-  shareModeHint:
-    "One PC is the server (hub). Other NovaMail PCs connect as LDAP clients. Phones/printers also use CardDAV on the server.",
   shareModeLocal: "Local only",
   shareModeServer: "Server (main PC)",
   shareModeClient: "Client (workstation)",
-  shareModeLocalHint: "Contacts stay on this PC only.",
+  shareModeLocalHint:
+    "Contacts stay on this PC only. Choose “Server” if other PCs or phones should share this book — or “Client” to connect to an existing main PC.",
   shareModeServerHint:
-    "This PC offers LDAP (for other NovaMail PCs) and CardDAV (phones/printers/fax).",
+    "This PC is the main hub. Other NovaMail PCs connect via LDAP; phones/printers via CardDAV. Keep NovaMail running and reachable on the LAN.",
   shareModeClientHint:
-    "This PC pulls contacts from the main PC over LDAP and stores them locally.",
+    "This PC is a workstation. Enter the LDAP details from the server PC and sync. Local server services are off.",
+  shareModeServerSteps:
+    "Other NovaMail PCs: choose “Client” there and enter the LDAP URL, bind DN, and password from here. Phones/printers: add a CardDAV account with the CardDAV URL (iOS: Contacts → Accounts → Other → CardDAV).",
+  shareModeClientSteps:
+    "URL, bind DN, and password are shown in the address-book settings on the server PC (mode “Server”). After saving, tap “Sync now”.",
+  shareModeTlsHint:
+    "Cleartext on the LAN for now (ldap:// / http://). Use a VPN for remote access.",
   ldapServerUrlLabel: "LDAP URL (for NovaMail clients)",
   ldapServerBaseDn: "Base DN",
   ldapServerBindDn: "Bind DN",
-  cardDavRunning: "Server on · {count} contacts",
-  cardDavStopped: "Server stopped",
-  cardDavConnectTitle: "Other NovaMail PCs (client mode)",
-  cardDavConnectStep1:
-    "1. On the main PC choose mode “Server” and keep NovaMail running.",
-  cardDavConnectStep2: "2. On each workstation PC choose mode “Client”.",
-  cardDavConnectStep3:
-    "3. Enter the server LDAP URL, bind DN, and password, then sync.",
-  cardDavConnectStep4:
-    "4. Changes on the server or connected devices show up on clients at the next sync.",
-  cardDavDeviceHint:
-    "Phones/printers: CardDAV account with the CardDAV URL below (iOS: Contacts → Accounts → Other → CardDAV; Android often DAVx⁵).",
-  cardDavSyncHint:
-    "LDAP and CardDAV clients write into the shared address book. Other PCs fetch changes on their next sync — not live push.",
+  cardDavRunning: "LDAP/CardDAV on · {count} contacts",
+  serviceOn: "on",
+  serviceOff: "off",
+  cardDavPartial:
+    "Server mode — LDAP: {ldap}, CardDAV: {carddav} · {count} contacts",
+  cardDavStopped: "Server services stopped",
   cardDavUsername: "Username",
   cardDavPassword: "Password",
-  cardDavAuthHint:
-    "The same credentials are used for LDAP (NovaMail clients) and CardDAV (phones/printers).",
-  cardDavTlsHint:
-    "Note: LDAP/CardDAV currently speak cleartext on the LAN (ldap:// / http://). Use a VPN for remote access — do not expose them unprotected.",
   cardDavUrlLabel: "CardDAV URL (phones/printers)",
   clientHubUrl: "Main PC LDAP URL",
   clientHubUrlPlaceholder: "ldap://192.168.1.10:1389",
   clientSyncNow: "Sync from server now",
   clientSyncResult: "{imported} new, {updated} updated ({total} total)",
+  shareModeSaveFailed: "Could not set operating mode.",
   stopCardDav: "Server off",
   startCardDav: "Server on",
   aiCachedHint: "Prepared in the background",

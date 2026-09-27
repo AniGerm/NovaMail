@@ -352,8 +352,36 @@ export function ContactsDialog({
   }
 
   async function setShareMode(mode: ContactsShareMode) {
+    const previous = share;
+    // Optimistic update so the select does not snap back to "local" while saving.
+    setShare((prev) =>
+      prev
+        ? { ...prev, mode }
+        : {
+            mode,
+            carddav: {
+              running: false,
+              listenUrl: "",
+              addressbookUrl: "",
+              contactCount: 0,
+              username: "",
+              password: "",
+            },
+            ldapServer: {
+              running: false,
+              listenUrl: "",
+              baseDn: clientBase,
+              bindDn: clientBind,
+              username: "",
+              password: "",
+              contactCount: 0,
+            },
+            client: null,
+          },
+    );
     setBusy(true);
     setError(null);
+    setStatusInfo(null);
     try {
       const status = await api.contactsSetShareMode({
         mode,
@@ -363,21 +391,16 @@ export function ContactsDialog({
         clientBaseDn: mode === "client" ? clientBase : null,
       });
       setShare(status);
-      if (mode === "client") {
-        const result = await api.contactsClientSync();
-        await refresh();
-        setStatusInfo(
-          t("clientSyncResult", {
-            imported: result.imported,
-            updated: result.updated,
-            total: result.total,
-          }),
-        );
-      } else {
-        setStatusInfo(null);
+      if (
+        mode === "server" &&
+        !status.carddav.running &&
+        !status.ldapServer.running
+      ) {
+        setError(t("shareModeSaveFailed"));
       }
     } catch (err) {
-      setError((err as AppError).message);
+      setShare(previous);
+      setError((err as AppError).message || t("shareModeSaveFailed"));
     } finally {
       setBusy(false);
     }
@@ -576,12 +599,7 @@ export function ContactsDialog({
           </section>
 
           <section className="grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-            <div className="grid gap-1">
-              <h3 className="font-medium">{t("cardDavServer")}</h3>
-              <p className="text-xs text-[var(--nova-ink-muted)]">
-                {t("shareModeHint")}
-              </p>
-            </div>
+            <h3 className="font-medium">{t("cardDavServer")}</h3>
 
             <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
               {t("shareModeLabel")}
@@ -598,20 +616,42 @@ export function ContactsDialog({
                 <option value="client">{t("shareModeClient")}</option>
               </Select>
             </label>
-            <p className="text-xs text-[var(--nova-ink-muted)]">
-              {(share?.mode ?? "local") === "server"
-                ? t("shareModeServerHint")
-                : (share?.mode ?? "local") === "client"
-                  ? t("shareModeClientHint")
-                  : t("shareModeLocalHint")}
-            </p>
+            {error ? (
+              <p className="text-xs text-[var(--nova-danger)]" role="alert">
+                {error}
+              </p>
+            ) : null}
+            {statusInfo ? (
+              <p className="text-xs text-[var(--nova-accent)]" role="status">
+                {statusInfo}
+              </p>
+            ) : null}
+
+            {(share?.mode ?? "local") === "local" ? (
+              <p className="text-xs text-[var(--nova-ink-muted)]">
+                {t("shareModeLocalHint")}
+              </p>
+            ) : null}
 
             {share?.mode === "server" ? (
               <>
                 <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("cardDavRunning", {
-                    count: share.ldapServer.contactCount,
-                  })}
+                  {t("shareModeServerHint")}
+                </p>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {share.ldapServer.running && share.carddav.running
+                    ? t("cardDavRunning", {
+                        count: share.ldapServer.contactCount,
+                      })
+                    : t("cardDavPartial", {
+                        ldap: share.ldapServer.running
+                          ? t("serviceOn")
+                          : t("serviceOff"),
+                        carddav: share.carddav.running
+                          ? t("serviceOn")
+                          : t("serviceOff"),
+                        count: share.ldapServer.contactCount,
+                      })}
                 </p>
                 <label className="grid gap-1 text-xs">
                   <span>{t("ldapServerUrlLabel")}</span>
@@ -665,11 +705,20 @@ export function ContactsDialog({
                     />
                   </label>
                 </div>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("shareModeServerSteps")}
+                </p>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("shareModeTlsHint")}
+                </p>
               </>
             ) : null}
 
-            {share?.mode !== "server" ? (
-              <div className="grid gap-2">
+            {share?.mode === "client" ? (
+              <>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("shareModeClientHint")}
+                </p>
                 <label className="grid gap-1 text-xs">
                   <span>{t("clientHubUrl")}</span>
                   <Input
@@ -706,34 +755,24 @@ export function ContactsDialog({
                     disabled={busy}
                   />
                 </label>
-                {share?.mode === "client" ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => {
-                      void runClientSync();
-                    }}
-                  >
-                    {t("clientSyncNow")}
-                  </Button>
-                ) : null}
-              </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    void runClientSync();
+                  }}
+                >
+                  {t("clientSyncNow")}
+                </Button>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("shareModeClientSteps")}
+                </p>
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("shareModeTlsHint")}
+                </p>
+              </>
             ) : null}
-
-            <div className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
-              <p className="font-medium text-[var(--nova-ink)]">
-                {t("cardDavConnectTitle")}
-              </p>
-              <p>{t("cardDavConnectStep1")}</p>
-              <p>{t("cardDavConnectStep2")}</p>
-              <p>{t("cardDavConnectStep3")}</p>
-              <p>{t("cardDavConnectStep4")}</p>
-              <p>{t("cardDavDeviceHint")}</p>
-              <p>{t("cardDavSyncHint")}</p>
-              <p>{t("cardDavAuthHint")}</p>
-              <p>{t("cardDavTlsHint")}</p>
-            </div>
           </section>
 
           {share?.mode === "server" ? (

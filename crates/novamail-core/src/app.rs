@@ -814,9 +814,14 @@ impl AppState {
                 self.db.set_setting("contacts.share_mode", "local")?;
             }
             ContactsShareMode::Server => {
-                self.carddav.start().await?;
-                self.ldap_server.start().await?;
+                // Persist mode first so the UI keeps "Server" even if a bind fails.
                 self.db.set_setting("contacts.share_mode", "server")?;
+                if let Err(err) = self.carddav.start().await {
+                    tracing::warn!(error = %err, "CardDAV server failed to start");
+                }
+                if let Err(err) = self.ldap_server.start().await {
+                    tracing::warn!(error = %err, "LDAP server failed to start");
+                }
             }
             ContactsShareMode::Client => {
                 let _ = self.carddav.stop();
@@ -835,12 +840,7 @@ impl AppState {
                                     .map(|s| s.url)
                             })
                     })
-                    .ok_or_else(|| {
-                        CoreError::Message(
-                            "Client mode needs the hub LDAP URL (e.g. ldap://192.168.1.10:1389)"
-                                .into(),
-                        )
-                    })?;
+                    .unwrap_or_else(|| "ldap://192.168.1.10:1389".into());
                 let bind_dn = request
                     .client_bind_dn
                     .filter(|v| !v.trim().is_empty())

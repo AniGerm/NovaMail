@@ -248,3 +248,29 @@ pub struct SetContactsShareModeRequest {
     #[serde(default)]
     pub client_base_dn: Option<String>,
 }
+
+#[cfg(test)]
+mod share_mode_tests {
+    use super::*;
+    #[test]
+    fn share_mode_json_roundtrip() {
+        for mode in [
+            ContactsShareMode::Local,
+            ContactsShareMode::Server,
+            ContactsShareMode::Client,
+        ] {
+            let s = serde_json::to_string(&mode).unwrap();
+            let back: ContactsShareMode = serde_json::from_str(&s).unwrap();
+            assert_eq!(mode, back, "roundtrip {s}");
+        }
+        assert_eq!(
+            serde_json::from_str::<ContactsShareMode>(r#""server""#).unwrap(),
+            ContactsShareMode::Server
+        );
+        let req = serde_json::from_str::<SetContactsShareModeRequest>(
+            r#"{"mode":"server","clientUrl":null}"#,
+        )
+        .unwrap();
+        assert_eq!(req.mode, ContactsShareMode::Server);
+    }
+}
