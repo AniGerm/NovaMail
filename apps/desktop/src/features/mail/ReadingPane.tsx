@@ -252,7 +252,7 @@ export function ReadingPane({
 
         <section
           aria-label={t("messageBody")}
-          className="rounded-[var(--nova-radius-md)] border-2 border-[color-mix(in_srgb,var(--nova-accent)_42%,var(--nova-border))] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_0_0_3px_color-mix(in_srgb,var(--nova-accent-soft)_70%,transparent)]"
+          className="rounded-[var(--nova-radius-md)] border-2 border-[#7aa7d4] bg-[color-mix(in_srgb,var(--nova-accent-soft)_35%,var(--nova-surface))] px-5 py-5 shadow-[0_0_0_3px_color-mix(in_srgb,#7aa7d4_22%,transparent)]"
         >
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
             {t("messageBody")}
