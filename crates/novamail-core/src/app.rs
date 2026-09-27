@@ -1773,3 +1773,69 @@ fn find_matching_contact<'a>(
     }
     existing.iter().find(|c| c.id == contact.id)
 }
+
+#[cfg(test)]
+mod share_mode_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn test_app() -> AppState {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::from_data_dir(dir.path().join("data"));
+        // leak tempdir so path stays valid for test duration
+        std::mem::forget(dir);
+        AppState::initialize(paths).unwrap()
+    }
+
+    #[tokio::test]
+    async fn can_set_server_and_client_mode() {
+        let app = test_app();
+        let server = app
+            .set_contacts_share_mode(SetContactsShareModeRequest {
+                mode: ContactsShareMode::Server,
+                client_url: None,
+                client_bind_dn: None,
+                client_password: None,
+                client_base_dn: None,
+            })
+            .await
+            .expect("server mode");
+        assert_eq!(server.mode, ContactsShareMode::Server);
+        println!(
+            "server carddav={} ldap={} url={}",
+            server.carddav.running,
+            server.ldap_server.running,
+            server.ldap_server.listen_url
+        );
+        assert!(
+            server.carddav.running || server.ldap_server.running,
+            "at least one service should run"
+        );
+
+        let client = app
+            .set_contacts_share_mode(SetContactsShareModeRequest {
+                mode: ContactsShareMode::Client,
+                client_url: Some("ldap://127.0.0.1:1389".into()),
+                client_bind_dn: Some("cn=novamail,dc=novamail".into()),
+                client_password: Some("x".into()),
+                client_base_dn: Some("ou=people,dc=novamail".into()),
+            })
+            .await
+            .expect("client mode");
+        assert_eq!(client.mode, ContactsShareMode::Client);
+        assert!(!client.carddav.running);
+        assert!(!client.ldap_server.running);
+
+        let local = app
+            .set_contacts_share_mode(SetContactsShareModeRequest {
+                mode: ContactsShareMode::Local,
+                client_url: None,
+                client_bind_dn: None,
+                client_password: None,
+                client_base_dn: None,
+            })
+            .await
+            .expect("local mode");
+        assert_eq!(local.mode, ContactsShareMode::Local);
+    }
+}

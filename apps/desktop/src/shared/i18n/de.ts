@@ -266,6 +266,8 @@ export const de = {
   clientSyncNow: "Jetzt vom Server synchronisieren",
   clientSyncResult: "{imported} neu, {updated} aktualisiert ({total} gesamt)",
   shareModeSaveFailed: "Betriebsmodus konnte nicht gesetzt werden.",
+  shareModeServicesDown:
+    "Modus ist Server, aber LDAP und CardDAV konnten nicht starten (Port belegt?). App neu starten und erneut versuchen.",
   stopCardDav: "Server aus",
   startCardDav: "Server an",
   aiCachedHint: "Bereits im Hintergrund vorbereitet",

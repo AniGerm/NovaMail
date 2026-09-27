@@ -16,7 +16,7 @@ import {
   Select,
 } from "@novamail/ui";
 
-import { api } from "@/shared/api/client";
+import { api, formatApiError } from "@/shared/api/client";
 import type {
   AppError,
   ContactAddress,
@@ -352,7 +352,6 @@ export function ContactsDialog({
   }
 
   async function setShareMode(mode: ContactsShareMode) {
-    const previous = share;
     // Optimistic update so the select does not snap back to "local" while saving.
     setShare((prev) =>
       prev
@@ -391,16 +390,20 @@ export function ContactsDialog({
         clientBaseDn: mode === "client" ? clientBase : null,
       });
       setShare(status);
-      if (
-        mode === "server" &&
-        !status.carddav.running &&
-        !status.ldapServer.running
-      ) {
-        setError(t("shareModeSaveFailed"));
+      const ldapUp = Boolean(status.ldapServer?.running);
+      const carddavUp = Boolean(status.carddav?.running);
+      if (mode === "server" && !ldapUp && !carddavUp) {
+        setError(t("shareModeServicesDown"));
       }
     } catch (err) {
-      setShare(previous);
-      setError((err as AppError).message || t("shareModeSaveFailed"));
+      setError(formatApiError(err, t("shareModeSaveFailed")));
+      // Re-read backend truth instead of blindly reverting the UI.
+      try {
+        const latest = await api.contactsShareStatus();
+        setShare(latest);
+      } catch {
+        setShare((prev) => (prev ? { ...prev, mode: "local" } : prev));
+      }
     } finally {
       setBusy(false);
     }
@@ -411,13 +414,14 @@ export function ContactsDialog({
     setError(null);
     setStatusInfo(null);
     try {
-      await api.contactsSetShareMode({
+      const status = await api.contactsSetShareMode({
         mode: "client",
         clientUrl,
         clientBindDn: clientBind,
         clientPassword: clientPassword || null,
         clientBaseDn: clientBase,
       });
+      setShare(status);
       const result = await api.contactsClientSync();
       await refresh();
       setStatusInfo(
@@ -428,7 +432,7 @@ export function ContactsDialog({
         }),
       );
     } catch (err) {
-      setError((err as AppError).message);
+      setError(formatApiError(err, t("shareModeSaveFailed")));
     } finally {
       setBusy(false);
     }

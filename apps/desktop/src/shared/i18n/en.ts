@@ -268,6 +268,8 @@ export const en: Translations = {
   clientSyncNow: "Sync from server now",
   clientSyncResult: "{imported} new, {updated} updated ({total} total)",
   shareModeSaveFailed: "Could not set operating mode.",
+  shareModeServicesDown:
+    "Mode is Server, but LDAP and CardDAV failed to start (port busy?). Restart the app and try again.",
   stopCardDav: "Server off",
   startCardDav: "Server on",
   aiCachedHint: "Prepared in the background",

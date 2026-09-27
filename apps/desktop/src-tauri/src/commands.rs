@@ -2,8 +2,8 @@ use novamail_ipc::{
     AccountDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AiInstallOllamaRequest,
     AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest, AiPullModelResponse,
     AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto, CardDavServerStatus,
-    ContactsShareStatus, SetContactsShareModeRequest,
-    ContactDto, ContactsBookSettings, RecipientSuggestion,
+    ContactsShareMode, ContactsShareStatus, SetContactsShareModeRequest, ContactDto,
+    ContactsBookSettings, RecipientSuggestion,
     ExportBackupRequest, ExportBackupResponse, ImportBackupRequest, ImportBackupResult, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListMessagesRequest,
     ListMessagesResponse, ListThreadsResponse, MailProvider, MailboxDto, MessageAiInsights,
@@ -351,16 +351,36 @@ pub fn contacts_share_status(
     state.app.contacts_share_status().map_err(map_err)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn contacts_set_share_mode(
     state: State<'_, DesktopState>,
-    request: SetContactsShareModeRequest,
+    mode: String,
+    client_url: Option<String>,
+    client_bind_dn: Option<String>,
+    client_password: Option<String>,
+    client_base_dn: Option<String>,
 ) -> Result<ContactsShareStatus, AppError> {
-    state
-        .app
-        .set_contacts_share_mode(request)
-        .await
-        .map_err(map_err)
+    let mode = match mode.trim().to_ascii_lowercase().as_str() {
+        "server" => ContactsShareMode::Server,
+        "client" => ContactsShareMode::Client,
+        "local" => ContactsShareMode::Local,
+        other => {
+            return Err(AppError::new(
+                "bad_request",
+                format!("unknown share mode: {other}"),
+            ))
+        }
+    };
+    let app = state.app.clone();
+    app.set_contacts_share_mode(SetContactsShareModeRequest {
+        mode,
+        client_url,
+        client_bind_dn,
+        client_password,
+        client_base_dn,
+    })
+    .await
+    .map_err(map_err)
 }
 
 #[tauri::command]

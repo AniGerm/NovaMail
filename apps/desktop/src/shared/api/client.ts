@@ -55,6 +55,30 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+export function formatApiError(error: unknown, fallback = "Request failed"): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message;
+    }
+    if (typeof record.error === "string" && record.error.trim()) {
+      return record.error;
+    }
+    // Tauri sometimes nests the payload.
+    if (record.message && typeof record.message === "object") {
+      return formatApiError(record.message, fallback);
+    }
+  }
+  try {
+    const raw = JSON.stringify(error);
+    if (raw && raw !== "{}") return raw;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
     throw {
@@ -65,8 +89,10 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    const appError = error as AppError;
-    throw appError;
+    throw {
+      code: "invoke",
+      message: formatApiError(error, `Command ${command} failed`),
+    } satisfies AppError;
   }
 }
 
@@ -176,7 +202,13 @@ export const api = {
   carddavStatus: () => call<CardDavServerStatus>("carddav_status"),
   contactsShareStatus: () => call<ContactsShareStatus>("contacts_share_status"),
   contactsSetShareMode: (request: SetContactsShareModeRequest) =>
-    call<ContactsShareStatus>("contacts_set_share_mode", { request }),
+    call<ContactsShareStatus>("contacts_set_share_mode", {
+      mode: request.mode,
+      clientUrl: request.clientUrl ?? null,
+      clientBindDn: request.clientBindDn ?? null,
+      clientPassword: request.clientPassword ?? null,
+      clientBaseDn: request.clientBaseDn ?? null,
+    }),
   contactsClientSync: () => call<LdapSyncResult>("contacts_client_sync"),
   ldapSearch: (request: LdapSearchRequest) =>
     call<ContactDto[]>("ldap_search", { request }),
