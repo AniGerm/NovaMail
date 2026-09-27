@@ -214,15 +214,6 @@ export function ReadingPane({
       </header>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6">
-        {summary ? (
-          <div className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-4 py-3 text-sm text-[var(--nova-ink)]">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
-              {t("summary")}
-            </p>
-            <p className="leading-6">{summary}</p>
-          </div>
-        ) : null}
-
         <section
           aria-label={t("messageBody")}
           className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-5 py-5 shadow-[0_1px_0_color-mix(in_srgb,var(--nova-ink)_5%,transparent)]"
@@ -247,6 +238,12 @@ export function ReadingPane({
           className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-bg)_55%,var(--nova-surface))] px-4 py-4"
         >
           <p className="mb-1 text-sm font-medium">{t("replyAssistTitle")}</p>
+          {summary ? (
+            <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
+              <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
+              {summary}
+            </p>
+          ) : null}
           <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
             {t("replyAssistSimpleHint")}
           </p>
