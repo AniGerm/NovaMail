@@ -172,12 +172,16 @@ export function Composer({
           <label className="grid gap-1 text-sm">
             <span>{t("from")}</span>
             <select
-              className="h-11 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3"
+              className="nova-select h-11 w-full appearance-none rounded-[var(--nova-radius-md)] border border-[color-mix(in_srgb,var(--nova-accent)_35%,var(--nova-border))] bg-[var(--nova-surface)] px-3 pr-9 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[var(--nova-accent-soft)]"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
             >
               {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
+                <option
+                  key={account.id}
+                  value={account.id}
+                  className="bg-[var(--nova-surface)] text-[var(--nova-ink)]"
+                >
                   {account.name} &lt;{account.email}&gt;
                 </option>
               ))}

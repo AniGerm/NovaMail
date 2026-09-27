@@ -142,9 +142,9 @@ export function RecipientField({
     Boolean(onAddToContacts);
 
   return (
-    <div className="relative grid gap-1 text-sm">
+    <label className="relative grid gap-1 text-sm">
+      <span>{t("to")}</span>
       <div className="flex items-center gap-2">
-        <span className="shrink-0">{t("to")}</span>
         <div className="relative min-w-0 flex-1">
           <Input
             required
@@ -244,6 +244,6 @@ export function RecipientField({
           </button>
         ) : null}
       </div>
-    </div>
+    </label>
   );
 }
