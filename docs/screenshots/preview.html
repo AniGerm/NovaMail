@@ -368,13 +368,42 @@
             <span class="chip">Antworten</span>
             <span class="chip">Weiterleiten</span>
             <span class="chip">Zusammenfassen</span>
+            <span class="chip">Antwortvorschläge</span>
           </div>
           <div style="margin-top:16px">
             <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">Anhänge</div>
             <span class="chip">Q3-Bericht.pdf (420 KB)</span>
             <span class="chip">zahlen.xlsx (88 KB)</span>
           </div>
-          <p style="margin-top:28px; max-width:720px; line-height:1.7; font-size:15px">
+          <div class="snippet-box" style="margin-top:16px; background:var(--nova-accent-soft); border-color:color-mix(in srgb, var(--nova-accent) 25%, var(--nova-border))">
+            <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; color:var(--nova-accent)">Zusammenfassung · ollama:qwen2.5:1.5b</div>
+            <p style="margin:8px 0 0; line-height:1.55; font-size:14px">
+              Alex schickt Q3-Zahlen und bittet, die Mail bis zur Freigabe im Posteingang zu behalten.
+            </p>
+          </div>
+          <div style="margin-top:14px; border:1px solid var(--nova-border); border-radius:var(--nova-radius-md); padding:14px; background:var(--nova-surface)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px">
+              <strong style="font-size:14px">Antwort-Assistent</strong>
+              <span class="muted" style="font-size:12px">Variante wählen, bearbeiten, Fakten ergänzen</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+              <span class="chip" style="background:var(--nova-accent);color:#fff;border-color:var(--nova-accent)">Variante A · knapp</span>
+              <span class="chip">Variante B · freundlich</span>
+              <span class="chip">Zwei Varianten erzeugen</span>
+            </div>
+            <div class="field" style="min-height:72px;font-size:13px;line-height:1.55;white-space:pre-wrap">Hallo Alex,
+
+danke für die Q3-Unterlagen. Ich behalte die Mail bis zur Freigabe.
+
+Freundliche Grüße</div>
+            <div class="muted" style="font-size:12px;margin:10px 0 6px">Fakten / Vorgaben für die Antwort</div>
+            <div class="field muted" style="font-size:13px">Freigabe bis Freitag, bitte Zoom-Link für Review</div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <span class="chip">Mit diesen Fakten neu schreiben</span>
+              <span class="chip" style="background:var(--nova-accent);color:#fff;border-color:var(--nova-accent)">In Antwort übernehmen</span>
+            </div>
+          </div>
+          <p style="margin-top:22px; max-width:720px; line-height:1.7; font-size:15px">
             Hallo — anbei die Q3-Zahlen und die PDF-Zusammenfassung. Bitte im Posteingang
             behalten, bis die Freigabe da ist. Verläufe, Filter und Sortierung findest du links in der Liste.
           </p>
@@ -407,7 +436,13 @@
                 <strong style="color:var(--nova-ink)">MFP Empfang</strong>
                 &lt;mfp@buero.local&gt; · vor 1 Stunde
               </p>
-              <div class="snippet-box">
+              <div class="snippet-box" style="background:var(--nova-accent-soft); border-color:color-mix(in srgb, var(--nova-accent) 25%, var(--nova-border))">
+                <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; color:var(--nova-accent)">KI-Kurzfassung</div>
+                <p style="margin:8px 0 0; line-height:1.55; font-size:15px">
+                  Zustellbestätigung für ein gescanntes Fax — behalten, wenn der Beleg noch gebraucht wird.
+                </p>
+              </div>
+              <div class="snippet-box" style="margin-top:12px">
                 Zustellbestätigung für ein gescanntes Dokument. Behalten, wenn du den Beleg noch brauchst —
                 sonst einfach löschen.
               </div>
@@ -516,11 +551,18 @@
             <button class="btn sm" style="margin-top:8px">Einstellungen speichern</button>
           </div>
           <div class="panel">
-            <strong>CardDAV-Server</strong>
+            <strong>CardDAV-Server (gemeinsames Telefonbuch)</strong>
             <p class="muted" style="margin:6px 0">
-              Läuft unter http://127.0.0.1:8765/addressbooks/novamail/ · 3 Kontakte
+              Läuft unter http://192.168.1.20:8765/addressbooks/novamail/ · 3 Kontakte
             </p>
-            <button class="btn secondary sm">CardDAV stoppen</button>
+            <div class="form-grid" style="margin-top:8px">
+              <div class="field">novamail</div>
+              <div class="field">a1b2c3d4e5f6…</div>
+            </div>
+            <p class="muted" style="margin:8px 0 0;font-size:12px">
+              Basic-Auth erforderlich. HTTP im LAN/VPN — nicht ungeschützt ins Internet öffnen.
+            </p>
+            <button class="btn secondary sm" style="margin-top:8px">CardDAV stoppen</button>
           </div>
           <div class="panel">
             <strong>LDAP-Synchronisation</strong>
