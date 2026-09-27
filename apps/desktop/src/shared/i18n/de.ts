@@ -71,6 +71,7 @@ export const de = {
   rewriteWithFacts: "Mit diesen Fakten neu schreiben",
   useReplyDraft: "In Antwort übernehmen",
   attachments: "Anhänge",
+  chooseAttachments: "Dateien auswählen",
   starMessage: "Als Favorit markieren",
   readingPane: "Lesebereich",
   messageList: "Nachrichtenliste",

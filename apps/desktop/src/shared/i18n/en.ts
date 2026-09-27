@@ -73,6 +73,7 @@ export const en: Translations = {
   rewriteWithFacts: "Rewrite with these facts",
   useReplyDraft: "Use in reply",
   attachments: "Attachments",
+  chooseAttachments: "Choose files",
   starMessage: "Star message",
   readingPane: "Reading pane",
   messageList: "Message list",

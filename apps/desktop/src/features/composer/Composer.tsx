@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Paperclip } from "lucide-react";
 import { Button, Input } from "@novamail/ui";
 
 import { RecipientField } from "@/features/composer/RecipientField";
@@ -60,6 +61,7 @@ export function Composer({
   const [attachments, setAttachments] = useState<OutgoingAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -209,15 +211,28 @@ export function Composer({
               className="min-h-[220px] resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2"
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <div className="grid gap-1 text-sm">
             <span>{t("attachments")}</span>
             <input
+              ref={fileInputRef}
               type="file"
               multiple
+              className="sr-only"
               onChange={(e) => {
                 void handleFiles(e.target.files);
+                e.target.value = "";
               }}
             />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="w-fit border-[color-mix(in_srgb,var(--nova-accent)_35%,var(--nova-border))] text-[var(--nova-accent)] hover:bg-[var(--nova-accent-soft)]"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip size={16} />
+              {t("chooseAttachments")}
+            </Button>
             {attachments.length > 0 ? (
               <ul className="mt-1 space-y-1 text-[var(--nova-ink-muted)]">
                 {attachments.map((file) => (
@@ -238,7 +253,7 @@ export function Composer({
                 ))}
               </ul>
             ) : null}
-          </label>
+          </div>
           {error ? (
             <p className="text-sm text-[var(--nova-danger)]" role="alert">
               {error}
