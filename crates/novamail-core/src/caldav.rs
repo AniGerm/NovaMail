@@ -1,10 +1,16 @@
-//! Minimal CalDAV client: REPORT calendar-query + basic iCalendar parse.
+//! CalDAV client: REPORT sync, PROPFIND discovery, PUT/DELETE write-back.
 
 use std::collections::HashMap;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 
 use crate::{CoreError, CoreResult};
+
+#[derive(Debug, Clone)]
+pub struct CalDavCollection {
+    pub href: String,
+    pub display_name: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct ParsedEvent {
@@ -81,6 +87,352 @@ pub async fn sync_calendar(
     }
 
     Ok(CalDavSyncResult { events, tasks })
+}
+
+/// Discover calendar collections from a CalDAV base / well-known URL (Basic auth).
+pub async fn discover_calendars(
+    url: &str,
+    username: &str,
+    password: &str,
+) -> CoreResult<Vec<CalDavCollection>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| CoreError::Message(e.to_string()))?;
+
+    let base = url.trim_end_matches('/');
+    let principal_xml = caldav_propfind(
+        &client,
+        base,
+        username,
+        password,
+        0,
+        r#"<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:">
+  <D:prop><D:current-user-principal/></D:prop>
+</D:propfind>"#,
+    )
+    .await
+    .unwrap_or_default();
+
+    let principal = extract_href_after(&principal_xml, "current-user-principal")
+        .map(|h| resolve_href(base, &h))
+        .unwrap_or_else(|| base.to_string());
+
+    let home_xml = caldav_propfind(
+        &client,
+        &principal,
+        username,
+        password,
+        0,
+        r#"<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><C:calendar-home-set/></D:prop>
+</D:propfind>"#,
+    )
+    .await
+    .unwrap_or_default();
+
+    let home = extract_href_after(&home_xml, "calendar-home-set")
+        .map(|h| resolve_href(&principal, &h))
+        .unwrap_or_else(|| principal.clone());
+
+    let list_xml = caldav_propfind(
+        &client,
+        &home,
+        username,
+        password,
+        1,
+        r#"<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <D:displayname/>
+    <D:resourcetype/>
+  </D:prop>
+</D:propfind>"#,
+    )
+    .await?;
+
+    let mut collections = parse_calendar_collections(&list_xml, &home);
+    if collections.is_empty() {
+        // Treat the provided URL itself as a calendar collection.
+        collections.push(CalDavCollection {
+            href: home,
+            display_name: "Calendar".into(),
+        });
+    }
+    Ok(collections)
+}
+
+pub async fn put_vevent(
+    collection_url: &str,
+    username: &str,
+    password: &str,
+    ical_uid: &str,
+    ics: &str,
+) -> CoreResult<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| CoreError::Message(e.to_string()))?;
+    let href = object_href(collection_url, ical_uid);
+    let response = client
+        .put(&href)
+        .header(AUTHORIZATION, basic_auth(username, password))
+        .header(CONTENT_TYPE, "text/calendar; charset=utf-8")
+        .body(ics.to_string())
+        .send()
+        .await
+        .map_err(|e| CoreError::Message(format!("CalDAV PUT failed: {e}")))?;
+    if !(response.status().is_success() || response.status().as_u16() == 201) {
+        return Err(CoreError::Message(format!(
+            "CalDAV PUT HTTP {}",
+            response.status()
+        )));
+    }
+    Ok(())
+}
+
+pub async fn delete_object(
+    collection_url: &str,
+    username: &str,
+    password: &str,
+    ical_uid: &str,
+) -> CoreResult<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| CoreError::Message(e.to_string()))?;
+    let href = object_href(collection_url, ical_uid);
+    let response = client
+        .delete(&href)
+        .header(AUTHORIZATION, basic_auth(username, password))
+        .send()
+        .await
+        .map_err(|e| CoreError::Message(format!("CalDAV DELETE failed: {e}")))?;
+    if !(response.status().is_success() || response.status().as_u16() == 404) {
+        return Err(CoreError::Message(format!(
+            "CalDAV DELETE HTTP {}",
+            response.status()
+        )));
+    }
+    Ok(())
+}
+
+pub fn build_vevent_ics(
+    uid: &str,
+    title: &str,
+    starts_at: i64,
+    ends_at: Option<i64>,
+    location: Option<&str>,
+    description: Option<&str>,
+    all_day: bool,
+) -> String {
+    let end = ends_at.unwrap_or(starts_at + 3600);
+    let (dtstart, dtend) = if all_day {
+        (
+            format_ical_date(starts_at),
+            format_ical_date(end),
+        )
+    } else {
+        (format_ical_utc(starts_at), format_ical_utc(end))
+    };
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".into(),
+        "VERSION:2.0".into(),
+        "PRODID:-//NovaMail//EN".into(),
+        "BEGIN:VEVENT".into(),
+        format!("UID:{uid}"),
+        format!("DTSTAMP:{}", format_ical_utc(chrono::Utc::now().timestamp())),
+        if all_day {
+            format!("DTSTART;VALUE=DATE:{dtstart}")
+        } else {
+            format!("DTSTART:{dtstart}")
+        },
+        if all_day {
+            format!("DTEND;VALUE=DATE:{dtend}")
+        } else {
+            format!("DTEND:{dtend}")
+        },
+        format!("SUMMARY:{}", escape_ical_text(title)),
+    ];
+    if let Some(loc) = location.filter(|s| !s.is_empty()) {
+        lines.push(format!("LOCATION:{}", escape_ical_text(loc)));
+    }
+    if let Some(desc) = description.filter(|s| !s.is_empty()) {
+        lines.push(format!("DESCRIPTION:{}", escape_ical_text(desc)));
+    }
+    lines.push("END:VEVENT".into());
+    lines.push("END:VCALENDAR".into());
+    lines.join("\r\n") + "\r\n"
+}
+
+fn object_href(collection_url: &str, ical_uid: &str) -> String {
+    let base = collection_url.trim_end_matches('/');
+    let safe: String = ical_uid
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{base}/{safe}.ics")
+}
+
+fn format_ical_utc(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%Y%m%dT%H%M%SZ").to_string())
+        .unwrap_or_else(|| "19700101T000000Z".into())
+}
+
+fn format_ical_date(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%Y%m%d").to_string())
+        .unwrap_or_else(|| "19700101".into())
+}
+
+fn escape_ical_text(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+}
+
+fn resolve_href(base: &str, href: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+    if let Ok(base_url) = url::Url::parse(base) {
+        if let Ok(joined) = base_url.join(href) {
+            return joined.to_string();
+        }
+    }
+    if href.starts_with('/') {
+        if let Ok(base_url) = url::Url::parse(base) {
+            let mut origin = base_url.origin().ascii_serialization();
+            if !origin.ends_with('/') && !href.starts_with('/') {
+                origin.push('/');
+            }
+            return format!("{origin}{href}");
+        }
+    }
+    format!("{}/{}", base.trim_end_matches('/'), href.trim_start_matches('/'))
+}
+
+fn extract_href_after(xml: &str, marker: &str) -> Option<String> {
+    let lower = xml.to_ascii_lowercase();
+    let marker = marker.to_ascii_lowercase();
+    let start = lower.find(&marker)?;
+    let after = &xml[start..];
+    let after_lower = &lower[start..];
+    let href_rel = after_lower.find("<d:href>")
+        .or_else(|| after_lower.find("<href>"))?;
+    let href_start = after_lower[href_rel..]
+        .find('>')
+        .map(|i| href_rel + i + 1)?;
+    let href_end_rel = after_lower[href_start..]
+        .find("</")
+        .map(|i| href_start + i)?;
+    Some(after[href_start..href_end_rel].trim().to_string())
+}
+
+fn parse_calendar_collections(xml: &str, home: &str) -> Vec<CalDavCollection> {
+    let mut out = Vec::new();
+    let lower = xml.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(resp_rel) = lower[search..].find("<d:response")
+        .or_else(|| lower[search..].find("<response"))
+    {
+        let resp_start = search + resp_rel;
+        let resp_end = lower[resp_start..]
+            .find("</d:response>")
+            .or_else(|| lower[resp_start..].find("</response>"))
+            .map(|i| resp_start + i)
+            .unwrap_or(lower.len());
+        let chunk = &xml[resp_start..resp_end];
+        let chunk_lower = chunk.to_ascii_lowercase();
+        if !chunk_lower.contains("calendar") || chunk_lower.contains("calendar-home-set") {
+            search = resp_end + 1;
+            continue;
+        }
+        // skip if not a calendar resourcetype
+        if !(chunk_lower.contains("<c:calendar")
+            || chunk_lower.contains("<calendar/>")
+            || chunk_lower.contains(":calendar/>")
+            || chunk_lower.contains("<calendar "))
+        {
+            search = resp_end + 1;
+            continue;
+        }
+        let href = extract_href_after(chunk, "href")
+            .map(|h| resolve_href(home, &h))
+            .unwrap_or_default();
+        if href.is_empty() {
+            search = resp_end + 1;
+            continue;
+        }
+        let display_name = extract_tag_text(chunk, "displayname").unwrap_or_else(|| {
+            href.trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("Calendar")
+                .to_string()
+        });
+        out.push(CalDavCollection { href, display_name });
+        search = resp_end + 1;
+    }
+    out
+}
+
+fn extract_tag_text(xml: &str, tag: &str) -> Option<String> {
+    let lower = xml.to_ascii_lowercase();
+    let open = format!("<{tag}");
+    let open_alt = format!(":d:{tag}");
+    let start = lower
+        .find(&open)
+        .or_else(|| lower.find(&format!("<d:{tag}")))
+        .or_else(|| lower.find(&open_alt))?;
+    let after = lower[start..].find('>')? + start + 1;
+    let end = lower[after..].find("</")? + after;
+    let text = xml[after..end].trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+async fn caldav_propfind(
+    client: &reqwest::Client,
+    url: &str,
+    username: &str,
+    password: &str,
+    depth: u8,
+    body: &str,
+) -> CoreResult<String> {
+    let response = client
+        .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
+        .header(CONTENT_TYPE, "application/xml; charset=utf-8")
+        .header(AUTHORIZATION, basic_auth(username, password))
+        .header("Depth", depth.to_string())
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| CoreError::Message(format!("CalDAV PROPFIND failed: {e}")))?;
+    if !(response.status().is_success() || response.status().as_u16() == 207) {
+        return Err(CoreError::Message(format!(
+            "CalDAV PROPFIND HTTP {}",
+            response.status()
+        )));
+    }
+    response
+        .text()
+        .await
+        .map_err(|e| CoreError::Message(e.to_string()))
 }
 
 async fn caldav_report(
@@ -250,6 +602,28 @@ fn parse_props(block: &str) -> HashMap<String, String> {
         map.insert(key, value.to_string());
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_vevent_ics_with_uid() {
+        let ics = build_vevent_ics(
+            "abc-123",
+            "Standup",
+            1_700_000_000,
+            Some(1_700_003_600),
+            Some("Zoom"),
+            None,
+            false,
+        );
+        assert!(ics.contains("UID:abc-123"));
+        assert!(ics.contains("SUMMARY:Standup"));
+        assert!(ics.contains("LOCATION:Zoom"));
+        assert!(ics.contains("BEGIN:VEVENT"));
+    }
 }
 
 fn parse_ical_time(raw: Option<&str>) -> (i64, bool) {

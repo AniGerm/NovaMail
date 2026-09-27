@@ -88,3 +88,18 @@ pub struct ListCalendarRangeRequest {
     pub from: i64,
     pub to: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CalDavCollectionDto {
+    pub href: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverCalDavRequest {
+    pub caldav_url: String,
+    pub username: String,
+    pub password: String,
+}

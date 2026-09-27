@@ -186,6 +186,7 @@ pub fn run() {
             commands::calendar_accounts_upsert,
             commands::calendar_accounts_delete,
             commands::calendar_accounts_sync,
+            commands::calendar_discover,
             commands::calendar_events_list,
             commands::calendar_events_upsert,
             commands::calendar_events_delete,

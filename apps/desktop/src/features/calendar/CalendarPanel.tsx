@@ -200,6 +200,7 @@ export function CalendarPanel() {
                     title: newEventTitle.trim(),
                     startsAt,
                     endsAt: startsAt + 3600,
+                    calendarAccountId: accounts[0]?.id ?? null,
                   })
                   .then(() => {
                     setNewEventTitle("");
@@ -321,31 +322,65 @@ export function CalendarPanel() {
           placeholder={t("password")}
         />
       </div>
-      <Button
-        type="button"
-        className="mb-4 w-fit"
-        disabled={!name.trim() || !url.trim()}
-        onClick={() => {
-          void api
-            .calendarAccountsUpsert({
-              name: name.trim(),
-              caldavUrl: url.trim(),
-              username: username.trim(),
-              password: password || null,
-            })
-            .then(() => {
-              setName("");
-              setUrl("");
-              setUsername("");
-              setPassword("");
-              setStatus(t("caldavSaved"));
-              return refresh();
-            })
-            .catch((err) => setError((err as AppError).message));
-        }}
-      >
-        {t("caldavAdd")}
-      </Button>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!url.trim() || !username.trim()}
+          onClick={() => {
+            void api
+              .calendarDiscover({
+                caldavUrl: url.trim(),
+                username: username.trim(),
+                password: password || "",
+              })
+              .then((cols) => {
+                if (cols.length === 0) {
+                  setStatus(t("caldavCollections") + ": 0");
+                  return;
+                }
+                const first = cols[0]!;
+                setUrl(first.href);
+                if (!name.trim()) setName(first.displayName);
+                setStatus(
+                  `${t("caldavCollections")}: ${cols
+                    .map((c) => c.displayName)
+                    .join(", ")}`,
+                );
+              })
+              .catch((err) => setError((err as AppError).message));
+          }}
+        >
+          {t("caldavDiscover")}
+        </Button>
+        <Button
+          type="button"
+          disabled={!name.trim() || !url.trim()}
+          onClick={() => {
+            void api
+              .calendarAccountsUpsert({
+                name: name.trim(),
+                caldavUrl: url.trim(),
+                username: username.trim(),
+                password: password || null,
+              })
+              .then(() => {
+                setName("");
+                setUrl("");
+                setUsername("");
+                setPassword("");
+                setStatus(t("caldavSaved"));
+                return refresh();
+              })
+              .catch((err) => setError((err as AppError).message));
+          }}
+        >
+          {t("caldavAdd")}
+        </Button>
+      </div>
+      <p className="mb-4 text-xs text-[var(--nova-ink-muted)]">
+        {t("caldavWriteback")}
+      </p>
       <ul className="space-y-2">
         {accounts.map((account) => (
           <li

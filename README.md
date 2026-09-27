@@ -89,7 +89,8 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 
 - Runs entirely on your machine via **Ollama** (no mail cloud)
 - Summarize message; suggest reply (two variants: concise / friendly)
-- Background insights after sync (cached summary + reply drafts)
+- **Detect meeting times** in mail (JSON via Ollama, heuristic offline fallback) and show them as clickable links under the summary — one click creates a calendar event
+- Background insights after sync (cached summary + reply drafts + event suggestions)
 - Facts/constraints field to rewrite suggestions
 - Built-in install / start / pull helpers for Ollama
 - Default model `qwen3:4b-instruct`; low-spec/CPU `qwen2.5:1.5b`
@@ -120,9 +121,11 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 ### Calendar & tasks (CalDAV)
 
 - Sidebar **Calendar** with day / week view
-- Local events and tasks; create from any mail (“As event” / “As task”)
+- Local events and tasks; create from any mail (“As event” / “As task”) or from AI-detected time links
 - CalDAV accounts: URL + username/password (password in OS keyring)
+- **Discover calendars** (PROPFIND principal → calendar-home → collections)
 - Sync pulls VEVENT and VTODO into the local store
+- **Write-back**: new/updated events PUT as `.ics`; deletes remove the remote object (Nextcloud / generic CalDAV + Basic auth)
 
 ### Backup & security
 

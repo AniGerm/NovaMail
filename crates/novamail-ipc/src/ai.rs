@@ -133,6 +133,16 @@ pub struct SuggestRepliesMessageResponse {
     pub provider: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSuggestionDto {
+    pub label: String,
+    pub starts_at: i64,
+    pub ends_at: Option<i64>,
+    pub location: Option<String>,
+    pub confidence: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageAiInsights {
@@ -144,5 +154,8 @@ pub struct MessageAiInsights {
     pub reply_b: Option<String>,
     /// Legacy single suggestion (same as reply_a when present).
     pub reply_suggestion: Option<String>,
+    /// Meeting/appointment times detected in the mail.
+    #[serde(default)]
+    pub event_suggestions: Vec<EventSuggestionDto>,
     pub provider: Option<String>,
 }

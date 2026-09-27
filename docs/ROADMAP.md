@@ -25,6 +25,8 @@
 - [x] Command Palette Expansion (Phase 2)
 - [x] OpenPGP Sequoia + Key-UI (Phase 3)
 - [x] CalDAV Kalender + Tasks (Phase 4)
+- [x] AI-Terminvorschläge (klickbare Links in der Lesepane)
+- [x] CalDAV Discovery + Write-back (Nextcloud / generic)
 
 ## Linux Killer Features
 
@@ -36,6 +38,7 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 | KF2 | Command Palette Expansion | erledigt |
 | KF3 | OpenPGP (Sequoia) + Key-UI | erledigt |
 | KF4 | CalDAV Kalender + Tasks | erledigt |
+| KF5 | AI-Terminvorschläge + CalDAV Write-back | erledigt |
 
 ## Production phases
 

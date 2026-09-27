@@ -2,8 +2,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::provider::{
-    AiError, AiProvider, AiResult, PrioritizeRequest, PrioritizeResponse, SuggestReplyRequest,
-    SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest, SummarizeResponse,
+    heuristic_event_suggestions, AiError, AiProvider, AiResult, EventSuggestion,
+    ExtractEventsRequest, ExtractEventsResponse, PrioritizeRequest, PrioritizeResponse,
+    SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest,
+    SummarizeResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -189,6 +191,75 @@ impl AiProvider for OllamaProvider {
             provider: self.name().into(),
         })
     }
+
+    async fn extract_event_suggestions(
+        &self,
+        request: ExtractEventsRequest,
+    ) -> AiResult<ExtractEventsResponse> {
+        let ref_iso = chrono::DateTime::from_timestamp(request.reference_at, 0)
+            .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+            .unwrap_or_else(|| "unknown".into());
+        let prompt = format!(
+            "Extract meeting/appointment suggestions from this email. \
+             Reference datetime (UTC): {ref_iso}. \
+             Reply with JSON ONLY: {{\"suggestions\":[{{\"label\":\"Thu 14:00\",\"startsAt\":1710000000,\"endsAt\":1710003600,\"location\":\"Zoom\",\"confidence\":0.8}}]}}. \
+             Use unix seconds. Max 5 suggestions. Empty array if none.\n\nSubject: {}\n\n{}",
+            request.subject,
+            truncate(&request.body_text, 3_500)
+        );
+        let raw = self.generate_with_limit(&prompt, 400).await?;
+        let mut suggestions = parse_event_suggestions_json(&raw);
+        if suggestions.is_empty() {
+            suggestions = heuristic_event_suggestions(
+                &request.subject,
+                &request.body_text,
+                request.reference_at,
+            );
+        }
+        Ok(ExtractEventsResponse {
+            suggestions,
+            provider: format!("{}:{}", self.name(), self.model),
+        })
+    }
+}
+
+fn parse_event_suggestions_json(raw: &str) -> Vec<EventSuggestion> {
+    let trimmed = raw.trim();
+    let json_slice = match (trimmed.find('{'), trimmed.rfind('}')) {
+        (Some(start), Some(end)) if end > start => &trimmed[start..=end],
+        _ => return Vec::new(),
+    };
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Wrap {
+        suggestions: Vec<LooseSuggestion>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LooseSuggestion {
+        label: Option<String>,
+        starts_at: Option<i64>,
+        ends_at: Option<i64>,
+        location: Option<String>,
+        confidence: Option<f32>,
+    }
+    let Ok(wrap) = serde_json::from_str::<Wrap>(json_slice) else {
+        return Vec::new();
+    };
+    wrap.suggestions
+        .into_iter()
+        .filter_map(|s| {
+            let starts_at = s.starts_at?;
+            Some(EventSuggestion {
+                label: s.label.unwrap_or_else(|| "Meeting".into()),
+                starts_at,
+                ends_at: s.ends_at.or(Some(starts_at + 3600)),
+                location: s.location,
+                confidence: s.confidence.unwrap_or(0.7).clamp(0.0, 1.0),
+            })
+        })
+        .take(5)
+        .collect()
 }
 
 fn truncate(input: &str, max_chars: usize) -> String {

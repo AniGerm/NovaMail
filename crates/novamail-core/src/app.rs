@@ -4,8 +4,8 @@ use novamail_ai::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,
     ensure_ollama_running, install_ollama_system, install_ollama_user, list_ollama_models,
     normalize_model_ref, probe_ollama, pull_ollama_model, recommended_model, AiProvider,
-    NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest, SummarizeRequest,
-    DEFAULT_MODEL,
+    ExtractEventsRequest, NullAiProvider, OllamaProvider, PrioritizeRequest, SuggestReplyRequest,
+    SummarizeRequest, DEFAULT_MODEL,
 };
 use parking_lot::RwLock;
 use novamail_contacts::{
@@ -22,10 +22,11 @@ use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
-    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalendarAccountDto,
-    CalendarEventDto, CalendarTaskDto, CardDavServerStatus, ContactDto, ContactsBookSettings,
-    ContactsShareMode, ContactsShareStatus, ExportBackupRequest, ExportBackupResponse,
-    FolderPoliciesDto, FolderPolicyDto, ImportBackupRequest, ImportBackupResult, JobsTickReport,
+    BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalDavCollectionDto,
+    CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus, ContactDto,
+    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, DiscoverCalDavRequest,
+    EventSuggestionDto, ExportBackupRequest, ExportBackupResponse, FolderPoliciesDto,
+    FolderPolicyDto, ImportBackupRequest, ImportBackupResult, JobsTickReport,
     LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
     ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
     MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto, MoveMessageRequest,
@@ -1597,7 +1598,9 @@ impl AppState {
         let reply_a = insight_text(&self.db, message_id, "reply_a")?
             .or(insight_text(&self.db, message_id, "reply")?);
         let reply_b = insight_text(&self.db, message_id, "reply_b")?;
+        let event_suggestions = insight_event_suggestions(&self.db, message_id)?;
         let provider = insight_provider(&self.db, message_id, "summary")?
+            .or(insight_provider(&self.db, message_id, "event_suggestions")?)
             .or(insight_provider(&self.db, message_id, "reply_a")?)
             .or(insight_provider(&self.db, message_id, "reply")?);
         Ok(MessageAiInsights {
@@ -1606,6 +1609,7 @@ impl AppState {
             reply_suggestion: reply_a.clone(),
             reply_a,
             reply_b,
+            event_suggestions,
             provider,
         })
     }
@@ -1641,7 +1645,8 @@ impl AppState {
     ) -> CoreResult<()> {
         let has_replies = db.has_ai_insight(message_id, "reply_a")?
             && db.has_ai_insight(message_id, "reply_b")?;
-        if db.has_ai_insight(message_id, "summary")? && has_replies {
+        let has_events = db.has_ai_insight(message_id, "event_suggestions")?;
+        if db.has_ai_insight(message_id, "summary")? && has_replies && has_events {
             return Ok(());
         }
         let detail = db.get_message(message_id)?;
@@ -1673,6 +1678,36 @@ impl AppState {
                 "provider": result.provider,
             });
             db.upsert_ai_insight(message_id, "summary", &payload.to_string())?;
+        }
+
+        if !has_events {
+            let ev_req = ExtractEventsRequest {
+                subject: detail.summary.subject.clone(),
+                body_text: body.clone(),
+                reference_at: detail.summary.date,
+            };
+            let result = match ai.extract_event_suggestions(ev_req.clone()).await {
+                Ok(r) => r,
+                Err(_) => Self::offline_ai().extract_event_suggestions(ev_req).await?,
+            };
+            let suggestions: Vec<serde_json::Value> = result
+                .suggestions
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "label": s.label,
+                        "startsAt": s.starts_at,
+                        "endsAt": s.ends_at,
+                        "location": s.location,
+                        "confidence": s.confidence,
+                    })
+                })
+                .collect();
+            let payload = serde_json::json!({
+                "suggestions": suggestions,
+                "provider": result.provider,
+            });
+            db.upsert_ai_insight(message_id, "event_suggestions", &payload.to_string())?;
         }
 
         if !has_replies {
@@ -2704,15 +2739,35 @@ impl AppState {
         Ok(self.db.list_calendar_events(request.from, request.to)?)
     }
 
-    pub fn upsert_calendar_event(
+    pub async fn discover_caldav(
+        &self,
+        request: DiscoverCalDavRequest,
+    ) -> CoreResult<Vec<CalDavCollectionDto>> {
+        let found = crate::caldav::discover_calendars(
+            &request.caldav_url,
+            &request.username,
+            &request.password,
+        )
+        .await?;
+        Ok(found
+            .into_iter()
+            .map(|c| CalDavCollectionDto {
+                href: c.href,
+                display_name: c.display_name,
+            })
+            .collect())
+    }
+
+    pub async fn upsert_calendar_event(
         &self,
         request: UpsertCalendarEventRequest,
     ) -> CoreResult<CalendarEventDto> {
         let id = request.id.unwrap_or_else(Uuid::new_v4);
+        let ical_uid = id.to_string();
         self.db.upsert_calendar_event(
             id,
             request.calendar_account_id,
-            None,
+            Some(&ical_uid),
             &request.title,
             request.starts_at,
             request.ends_at,
@@ -2721,10 +2776,27 @@ impl AppState {
             request.all_day,
             request.source_message_id,
         )?;
+        if let Some(account_id) = request.calendar_account_id {
+            if let Err(err) = self
+                .push_event_to_caldav(
+                    account_id,
+                    &ical_uid,
+                    &request.title,
+                    request.starts_at,
+                    request.ends_at,
+                    request.location.as_deref(),
+                    request.description.as_deref(),
+                    request.all_day,
+                )
+                .await
+            {
+                tracing::warn!(error = %err, "CalDAV event upload failed; kept locally");
+            }
+        }
         Ok(CalendarEventDto {
             id,
             calendar_account_id: request.calendar_account_id,
-            ical_uid: None,
+            ical_uid: Some(ical_uid),
             title: request.title,
             starts_at: request.starts_at,
             ends_at: request.ends_at,
@@ -2735,8 +2807,76 @@ impl AppState {
         })
     }
 
-    pub fn delete_calendar_event(&self, id: Uuid) -> CoreResult<()> {
+    async fn push_event_to_caldav(
+        &self,
+        account_id: Uuid,
+        ical_uid: &str,
+        title: &str,
+        starts_at: i64,
+        ends_at: Option<i64>,
+        location: Option<&str>,
+        description: Option<&str>,
+        all_day: bool,
+    ) -> CoreResult<()> {
+        let account = self
+            .db
+            .list_calendar_accounts()?
+            .into_iter()
+            .find(|a| a.id == account_id)
+            .ok_or_else(|| CoreError::Message("calendar account not found".into()))?;
+        let password = self
+            .secrets
+            .load_calendar_password(account_id)?
+            .unwrap_or_default();
+        let ics = crate::caldav::build_vevent_ics(
+            ical_uid,
+            title,
+            starts_at,
+            ends_at,
+            location,
+            description,
+            all_day,
+        );
+        crate::caldav::put_vevent(
+            &account.caldav_url,
+            &account.username,
+            &password,
+            ical_uid,
+            &ics,
+        )
+        .await
+    }
+
+    pub async fn delete_calendar_event(&self, id: Uuid) -> CoreResult<()> {
+        // Load before delete for remote cleanup.
+        let events = self.db.list_calendar_events(0, i64::MAX)?;
+        let existing = events.into_iter().find(|e| e.id == id);
         self.db.delete_calendar_event(id)?;
+        if let Some(event) = existing {
+            if let (Some(account_id), Some(uid)) = (event.calendar_account_id, event.ical_uid) {
+                let account = self
+                    .db
+                    .list_calendar_accounts()?
+                    .into_iter()
+                    .find(|a| a.id == account_id);
+                if let Some(account) = account {
+                    let password = self
+                        .secrets
+                        .load_calendar_password(account_id)?
+                        .unwrap_or_default();
+                    if let Err(err) = crate::caldav::delete_object(
+                        &account.caldav_url,
+                        &account.username,
+                        &password,
+                        &uid,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %err, "CalDAV event delete failed");
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2779,16 +2919,22 @@ impl AppState {
         Ok(())
     }
 
-    pub fn create_event_from_message(
+    pub async fn create_event_from_message(
         &self,
         message_id: Uuid,
         starts_at: i64,
         ends_at: Option<i64>,
+        calendar_account_id: Option<Uuid>,
     ) -> CoreResult<CalendarEventDto> {
         let detail = self.get_message(message_id)?;
+        // Prefer an explicit account; otherwise first CalDAV account for online write-back.
+        let account_id = match calendar_account_id {
+            Some(id) => Some(id),
+            None => self.db.list_calendar_accounts()?.into_iter().next().map(|a| a.id),
+        };
         self.upsert_calendar_event(UpsertCalendarEventRequest {
             id: None,
-            calendar_account_id: None,
+            calendar_account_id: account_id,
             title: detail.summary.subject.clone(),
             starts_at,
             ends_at,
@@ -2801,6 +2947,7 @@ impl AppState {
             all_day: false,
             source_message_id: Some(message_id),
         })
+        .await
     }
 
     pub fn create_task_from_message(
@@ -2885,6 +3032,39 @@ fn insight_provider(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<O
             .ok()
             .and_then(|v| v.get("provider")?.as_str().map(|s| s.to_string()))
     }))
+}
+
+fn insight_event_suggestions(
+    db: &Database,
+    message_id: Uuid,
+) -> CoreResult<Vec<EventSuggestionDto>> {
+    let Some(raw) = db.get_ai_insight(message_id, "event_suggestions")? else {
+        return Ok(Vec::new());
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(Vec::new());
+    };
+    let Some(arr) = value.get("suggestions").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+    Ok(arr
+        .iter()
+        .filter_map(|item| {
+            Some(EventSuggestionDto {
+                label: item.get("label")?.as_str()?.to_string(),
+                starts_at: item.get("startsAt")?.as_i64()?,
+                ends_at: item.get("endsAt").and_then(|v| v.as_i64()),
+                location: item
+                    .get("location")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                confidence: item
+                    .get("confidence")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5) as f32,
+            })
+        })
+        .collect())
 }
 
 /// Match backup contacts to local ones: LDAP DN, then shared email, then id.

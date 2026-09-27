@@ -384,6 +384,14 @@ export const api = {
     call<void>("calendar_accounts_delete", { id }),
   calendarAccountsSync: (id: string) =>
     call<[number, number]>("calendar_accounts_sync", { id }),
+  calendarDiscover: (request: {
+    caldavUrl: string;
+    username: string;
+    password: string;
+  }) =>
+    call<{ href: string; displayName: string }[]>("calendar_discover", {
+      request,
+    }),
   calendarEventsList: (from: number, to: number) =>
     call<CalendarEventDto[]>("calendar_events_list", { request: { from, to } }),
   calendarEventsUpsert: (request: {
@@ -416,11 +424,13 @@ export const api = {
     messageId: string,
     startsAt: number,
     endsAt?: number | null,
+    calendarAccountId?: string | null,
   ) =>
     call<CalendarEventDto>("calendar_event_from_message", {
       messageId,
       startsAt,
       endsAt: endsAt ?? null,
+      calendarAccountId: calendarAccountId ?? null,
     }),
   calendarTaskFromMessage: (messageId: string, dueAt?: number | null) =>
     call<CalendarTaskDto>("calendar_task_from_message", {

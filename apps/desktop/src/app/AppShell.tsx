@@ -958,14 +958,18 @@ export function AppShell() {
                 onSnooze={(preset) => {
                   void handleSnooze(preset);
                 }}
-                onCreateEvent={() => {
+                onCreateEvent={(suggestion) => {
                   if (!selectedMessageId) return;
-                  const startsAt = Math.floor(Date.now() / 1000) + 3600;
+                  const startsAt =
+                    suggestion?.startsAt ??
+                    Math.floor(Date.now() / 1000) + 3600;
+                  const endsAt =
+                    suggestion?.endsAt ?? startsAt + 3600;
                   void api
                     .calendarEventFromMessage(
                       selectedMessageId,
                       startsAt,
-                      startsAt + 3600,
+                      endsAt,
                     )
                     .then(() => {
                       setCalendarOpen(true);

@@ -585,12 +585,21 @@ export interface SignatureDto {
   isDefault: boolean;
 }
 
+export interface EventSuggestionDto {
+  label: string;
+  startsAt: number;
+  endsAt?: number | null;
+  location?: string | null;
+  confidence: number;
+}
+
 export interface MessageAiInsights {
   messageId: string;
   summary?: string | null;
   replyA?: string | null;
   replyB?: string | null;
   replySuggestion?: string | null;
+  eventSuggestions?: EventSuggestionDto[];
   provider?: string | null;
 }
 

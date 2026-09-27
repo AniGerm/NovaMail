@@ -14,9 +14,10 @@ pub use install::{
 };
 pub use ollama::OllamaProvider;
 pub use provider::{
-    AiError, AiProvider, AiResult, NullAiProvider, PrioritizeRequest, PrioritizeResponse,
-    SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest,
-    SummarizeResponse,
+    heuristic_event_suggestions, AiError, AiProvider, AiResult, EventSuggestion,
+    ExtractEventsRequest, ExtractEventsResponse, NullAiProvider, PrioritizeRequest,
+    PrioritizeResponse, SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse,
+    SummarizeRequest, SummarizeResponse,
 };
 pub use runtime::{
     allow_model_pick, default_ollama_model, default_ollama_url, detect_nvidia_gpu,

@@ -2,8 +2,9 @@ use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
-    CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus,
-    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto, ExportBackupRequest,
+    CalDavCollectionDto, CalendarAccountDto, CalendarEventDto, CalendarTaskDto, CardDavServerStatus,
+    ContactsBookSettings, ContactsShareMode, ContactsShareStatus, ContactDto, DiscoverCalDavRequest,
+    ExportBackupRequest,
     ExportBackupResponse, FolderPoliciesDto, ImportBackupRequest, ImportBackupResult,
     JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
     ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
@@ -927,19 +928,31 @@ pub fn calendar_events_list(
 }
 
 #[tauri::command]
-pub fn calendar_events_upsert(
+pub async fn calendar_discover(
     state: State<'_, DesktopState>,
-    request: UpsertCalendarEventRequest,
-) -> Result<CalendarEventDto, AppError> {
-    state.app.upsert_calendar_event(request).map_err(map_err)
+    request: DiscoverCalDavRequest,
+) -> Result<Vec<CalDavCollectionDto>, AppError> {
+    state.app.discover_caldav(request).await.map_err(map_err)
 }
 
 #[tauri::command]
-pub fn calendar_events_delete(
+pub async fn calendar_events_upsert(
+    state: State<'_, DesktopState>,
+    request: UpsertCalendarEventRequest,
+) -> Result<CalendarEventDto, AppError> {
+    state
+        .app
+        .upsert_calendar_event(request)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn calendar_events_delete(
     state: State<'_, DesktopState>,
     id: Uuid,
 ) -> Result<(), AppError> {
-    state.app.delete_calendar_event(id).map_err(map_err)
+    state.app.delete_calendar_event(id).await.map_err(map_err)
 }
 
 #[tauri::command]
@@ -970,15 +983,17 @@ pub fn calendar_tasks_delete(
 }
 
 #[tauri::command]
-pub fn calendar_event_from_message(
+pub async fn calendar_event_from_message(
     state: State<'_, DesktopState>,
     message_id: Uuid,
     starts_at: i64,
     ends_at: Option<i64>,
+    calendar_account_id: Option<Uuid>,
 ) -> Result<CalendarEventDto, AppError> {
     state
         .app
-        .create_event_from_message(message_id, starts_at, ends_at)
+        .create_event_from_message(message_id, starts_at, ends_at, calendar_account_id)
+        .await
         .map_err(map_err)
 }
 

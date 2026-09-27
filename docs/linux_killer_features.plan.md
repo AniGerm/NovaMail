@@ -43,3 +43,8 @@ Ziel: Funktionen, die NovaMail auf Linux klar von Thunderbird/Evolution/Geary ab
 
 - [x] README mit allen Killer-Features
 - [x] ROADMAP aktualisiert
+
+## Follow-ups (erledigt)
+
+- [x] AI-Terminvorschläge aus Ollama als klickbare Links
+- [x] CalDAV Discovery + PUT/DELETE Write-back (Nextcloud/generic; Google OAuth später)

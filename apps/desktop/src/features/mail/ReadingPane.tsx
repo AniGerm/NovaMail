@@ -15,6 +15,7 @@ import { Button, EmptyState, IconButton } from "@novamail/ui";
 import { api } from "@/shared/api/client";
 import type {
   AppError,
+  EventSuggestionDto,
   MessageDetailDto,
   PgpDecryptResult,
   SnoozePreset,
@@ -35,7 +36,7 @@ interface ReadingPaneProps {
   onMarkSpam?: () => void;
   onMarkNotSpam?: () => void;
   onSnooze?: (preset: SnoozePreset) => void;
-  onCreateEvent?: () => void;
+  onCreateEvent?: (suggestion?: EventSuggestionDto) => void;
   onCreateTask?: () => void;
   onReplySent?: () => void;
 }
@@ -57,6 +58,9 @@ export function ReadingPane({
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [summary, setSummary] = useState<string | null>(null);
+  const [eventSuggestions, setEventSuggestions] = useState<
+    EventSuggestionDto[]
+  >([]);
   const [pgpResult, setPgpResult] = useState<PgpDecryptResult | null>(null);
   const [variantA, setVariantA] = useState<string | null>(null);
   const [variantB, setVariantB] = useState<string | null>(null);
@@ -77,6 +81,7 @@ export function ReadingPane({
     setAiError(null);
     setSnoozeOpen(false);
     setPgpResult(null);
+    setEventSuggestions([]);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
@@ -91,6 +96,7 @@ export function ReadingPane({
       .then((insights) => {
         if (cancelled) return;
         if (insights.summary) setSummary(insights.summary);
+        setEventSuggestions(insights.eventSuggestions ?? []);
         const a = insights.replyA ?? insights.replySuggestion ?? null;
         const b = insights.replyB ?? null;
         setVariantA(a);
@@ -290,7 +296,12 @@ export function ReadingPane({
               </IconButton>
             )}
             {onCreateEvent ? (
-              <Button type="button" size="sm" variant="ghost" onClick={onCreateEvent}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onCreateEvent()}
+              >
                 {t("asEvent")}
               </Button>
             ) : null}
@@ -412,6 +423,29 @@ export function ReadingPane({
                 <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
                 {summary}
               </p>
+            ) : null}
+            {eventSuggestions.length > 0 ? (
+              <div className="mb-3">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                  {t("eventSuggestions")}
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {eventSuggestions.map((suggestion, index) => (
+                    <li key={`${suggestion.startsAt}-${index}`}>
+                      <button
+                        type="button"
+                        className="text-left text-sm text-[var(--nova-accent)] underline underline-offset-2 hover:opacity-80"
+                        onClick={() => onCreateEvent?.(suggestion)}
+                      >
+                        {suggestion.label}
+                        {suggestion.location
+                          ? ` · ${suggestion.location}`
+                          : ""}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
             <p className="mb-3 text-xs text-[var(--nova-ink-muted)]">
               {t("replyAssistSimpleHint")}
