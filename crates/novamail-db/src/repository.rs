@@ -2480,7 +2480,8 @@ impl Database {
             r#"
             SELECT e.id, e.calendar_account_id, e.collection_id, e.ical_uid, e.title, e.starts_at,
                    e.ends_at, e.location, e.description, e.all_day, e.source_message_id,
-                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color
+                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color,
+                   e.etag, e.href
             FROM calendar_events e
             LEFT JOIN calendar_collections c ON c.id = e.collection_id
             WHERE e.starts_at <= ?2 AND (e.ends_at IS NULL OR e.ends_at >= ?1)
@@ -2517,6 +2518,8 @@ impl Database {
                 organizer: row.get(13)?,
                 attendees: parse_attendees_json(&attendees_raw),
                 color: row.get(15)?,
+                etag: row.get(16)?,
+                href: row.get(17)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -2535,7 +2538,8 @@ impl Database {
             r#"
             SELECT e.id, e.calendar_account_id, e.collection_id, e.ical_uid, e.title, e.starts_at,
                    e.ends_at, e.location, e.description, e.all_day, e.source_message_id,
-                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color
+                   e.reminders_json, e.status, e.organizer, e.attendees_json, c.color,
+                   e.etag, e.href
             FROM calendar_events e
             LEFT JOIN calendar_collections c ON c.id = e.collection_id
             WHERE e.reminder_fired_at IS NULL
@@ -2572,6 +2576,8 @@ impl Database {
                 organizer: row.get(13)?,
                 attendees: parse_attendees_json(&attendees_raw),
                 color: row.get(15)?,
+                etag: row.get(16)?,
+                href: row.get(17)?,
             })
         })?;
         let events = rows.collect::<Result<Vec<_>, _>>()?;
@@ -2593,6 +2599,15 @@ impl Database {
             params![id.to_string(), at],
         )?;
         Ok(())
+    }
+
+    pub fn delete_calendar_events_by_ical_uid(&self, ical_uid: &str) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "DELETE FROM calendar_events WHERE ical_uid = ?1",
+            params![ical_uid],
+        )?;
+        Ok(changed as u32)
     }
 
     pub fn delete_calendar_event(&self, id: Uuid) -> DbResult<()> {
@@ -2815,15 +2830,79 @@ impl Database {
         Ok(())
     }
 
-    /// Scan message bodies for VCALENDAR METHOD:REQUEST (lightweight iMIP).
+    /// Force invitation partstat to cancelled (iMIP METHOD:CANCEL).
+    pub fn cancel_calendar_invitation_by_uid(
+        &self,
+        ical_uid: &str,
+        message_id: Option<Uuid>,
+        title: &str,
+        starts_at: i64,
+        ends_at: Option<i64>,
+        location: Option<&str>,
+        description: Option<&str>,
+        organizer: Option<&str>,
+        payload_ics: &str,
+        received_at: i64,
+    ) -> DbResult<()> {
+        let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, ical_uid.as_bytes());
+        let conn = self.conn.lock();
+        conn.execute(
+            r#"
+            INSERT INTO calendar_invitations (
+              id, message_id, ical_uid, title, starts_at, ends_at, location, description,
+              organizer, partstat, payload_ics, received_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'cancelled', ?10, ?11)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              starts_at = excluded.starts_at,
+              ends_at = excluded.ends_at,
+              location = excluded.location,
+              description = excluded.description,
+              organizer = excluded.organizer,
+              partstat = 'cancelled',
+              payload_ics = excluded.payload_ics,
+              message_id = COALESCE(excluded.message_id, calendar_invitations.message_id)
+            "#,
+            params![
+                id.to_string(),
+                message_id.map(|u| u.to_string()),
+                ical_uid,
+                title,
+                starts_at,
+                ends_at,
+                location,
+                description,
+                organizer,
+                payload_ics,
+                received_at,
+            ],
+        )?;
+        drop(conn);
+        let _ = self.delete_calendar_events_by_ical_uid(ical_uid)?;
+        Ok(())
+    }
+
+    /// Scan message bodies and `.ics` / text/calendar attachments for iMIP REQUEST/CANCEL.
     pub fn scan_messages_for_invites(&self, limit: i64) -> DbResult<u32> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, body_text, date FROM messages
-            WHERE body_text LIKE '%BEGIN:VCALENDAR%'
-              AND (body_text LIKE '%METHOD:REQUEST%' OR body_text LIKE '%METHOD:REQUEST%')
-            ORDER BY date DESC
+            SELECT DISTINCT m.id, m.body_text, m.date
+            FROM messages m
+            LEFT JOIN attachments a ON a.message_id = m.id
+            WHERE (
+              (
+                m.body_text LIKE '%BEGIN:VCALENDAR%'
+                AND (
+                  m.body_text LIKE '%METHOD:REQUEST%'
+                  OR m.body_text LIKE '%METHOD:CANCEL%'
+                )
+              )
+              OR lower(a.filename) LIKE '%.ics'
+              OR lower(a.mime) LIKE '%text/calendar%'
+              OR lower(a.mime) LIKE '%application/ics%'
+            )
+            ORDER BY m.date DESC
             LIMIT ?1
             "#,
         )?;
@@ -2839,30 +2918,77 @@ impl Database {
         drop(conn);
         let mut count = 0u32;
         for (message_id, body, date) in candidates {
-            if let Some(invite) = crate_parse_imip_invite(&body) {
-                let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, invite.uid.as_bytes());
-                self.upsert_calendar_invitation(
-                    id,
-                    Some(message_id),
-                    &invite.uid,
-                    &invite.title,
-                    invite.starts_at,
-                    invite.ends_at,
-                    invite.location.as_deref(),
-                    invite.description.as_deref(),
-                    invite.organizer.as_deref(),
-                    "needs-action",
-                    &invite.payload,
-                    date,
-                )?;
-                count += 1;
+            let mut payloads = Vec::new();
+            if body.to_ascii_uppercase().contains("BEGIN:VCALENDAR") {
+                payloads.push(body);
+            }
+            for att in self.list_attachments(message_id)? {
+                let name = att.filename.to_ascii_lowercase();
+                let mime = att.mime.to_ascii_lowercase();
+                let is_ics = name.ends_with(".ics")
+                    || mime.contains("text/calendar")
+                    || mime.contains("application/ics");
+                if !is_ics {
+                    continue;
+                }
+                if let Ok(text) = std::fs::read_to_string(&att.path) {
+                    if text.to_ascii_uppercase().contains("BEGIN:VCALENDAR") {
+                        payloads.push(text);
+                    }
+                }
+            }
+            for payload_src in payloads {
+                for invite in crate_parse_imip_messages(&payload_src) {
+                    match invite.method {
+                        ImipMethod::Request => {
+                            let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, invite.uid.as_bytes());
+                            self.upsert_calendar_invitation(
+                                id,
+                                Some(message_id),
+                                &invite.uid,
+                                &invite.title,
+                                invite.starts_at,
+                                invite.ends_at,
+                                invite.location.as_deref(),
+                                invite.description.as_deref(),
+                                invite.organizer.as_deref(),
+                                "needs-action",
+                                &invite.payload,
+                                date,
+                            )?;
+                            count += 1;
+                        }
+                        ImipMethod::Cancel => {
+                            self.cancel_calendar_invitation_by_uid(
+                                &invite.uid,
+                                Some(message_id),
+                                &invite.title,
+                                invite.starts_at,
+                                invite.ends_at,
+                                invite.location.as_deref(),
+                                invite.description.as_deref(),
+                                invite.organizer.as_deref(),
+                                &invite.payload,
+                                date,
+                            )?;
+                            count += 1;
+                        }
+                    }
+                }
             }
         }
         Ok(count)
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImipMethod {
+    Request,
+    Cancel,
+}
+
 struct ParsedImip {
+    method: ImipMethod,
     uid: String,
     title: String,
     starts_at: i64,
@@ -2873,19 +2999,42 @@ struct ParsedImip {
     payload: String,
 }
 
-fn crate_parse_imip_invite(body: &str) -> Option<ParsedImip> {
-    let start = body.find("BEGIN:VCALENDAR")?;
-    let end = body.find("END:VCALENDAR")?;
-    let payload = body[start..end + "END:VCALENDAR".len()].to_string();
-    if !payload.to_ascii_uppercase().contains("METHOD:REQUEST") {
-        return None;
+fn crate_parse_imip_messages(body: &str) -> Vec<ParsedImip> {
+    let mut out = Vec::new();
+    let upper_all = body.to_ascii_uppercase();
+    let mut search = 0;
+    while let Some(rel) = upper_all[search..].find("BEGIN:VCALENDAR") {
+        let start = search + rel;
+        let Some(end_rel) = upper_all[start..].find("END:VCALENDAR") else {
+            break;
+        };
+        let end = start + end_rel + "END:VCALENDAR".len();
+        let payload = body[start..end].to_string();
+        if let Some(parsed) = crate_parse_imip_invite(&payload) {
+            out.push(parsed);
+        }
+        search = end;
     }
+    out
+}
+
+fn crate_parse_imip_invite(payload: &str) -> Option<ParsedImip> {
     let upper = payload.to_ascii_uppercase();
+    let method = if upper.contains("METHOD:CANCEL") {
+        ImipMethod::Cancel
+    } else if upper.contains("METHOD:REQUEST") {
+        ImipMethod::Request
+    } else {
+        return None;
+    };
     let vevent_start = upper.find("BEGIN:VEVENT")?;
     let vevent_end = upper.find("END:VEVENT")?;
     let block = &payload[vevent_start..vevent_end];
     let mut uid = String::new();
-    let mut title = "(invitation)".to_string();
+    let mut title = match method {
+        ImipMethod::Cancel => "(cancelled)".to_string(),
+        ImipMethod::Request => "(invitation)".to_string(),
+    };
     let mut starts_at = 0i64;
     let mut ends_at = None;
     let mut location = None;
@@ -2926,10 +3075,15 @@ fn crate_parse_imip_invite(body: &str) -> Option<ParsedImip> {
             _ => {}
         }
     }
-    if uid.is_empty() || starts_at == 0 {
+    if uid.is_empty() {
+        return None;
+    }
+    // CANCEL may omit DTSTART; keep a placeholder so we can still store the invite row.
+    if starts_at == 0 && method == ImipMethod::Request {
         return None;
     }
     Some(ParsedImip {
+        method,
         uid,
         title,
         starts_at,
@@ -2937,7 +3091,7 @@ fn crate_parse_imip_invite(body: &str) -> Option<ParsedImip> {
         location,
         description,
         organizer,
-        payload,
+        payload: payload.to_string(),
     })
 }
 

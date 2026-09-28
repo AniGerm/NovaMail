@@ -25,6 +25,14 @@ pub struct ParsedEvent {
     /// Reminder offsets in minutes before start.
     pub reminder_minutes: Vec<i64>,
     pub organizer: Option<String>,
+    pub etag: Option<String>,
+    pub href: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PutVeventResult {
+    pub href: String,
+    pub etag: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,8 +75,12 @@ pub async fn sync_calendar(
 
     let event_xml = caldav_report(&client, url, username, password, body).await?;
     let mut events = Vec::new();
-    for ical in extract_calendar_data(&event_xml) {
-        events.extend(parse_vevents(&ical));
+    for resource in extract_caldav_resources(&event_xml, url) {
+        for mut event in parse_vevents(&resource.ics) {
+            event.etag = resource.etag.clone();
+            event.href = Some(resource.href.clone());
+            events.push(event);
+        }
     }
 
     let task_body = r#"<?xml version="1.0" encoding="utf-8" ?>
@@ -86,8 +98,8 @@ pub async fn sync_calendar(
 
     let task_xml = caldav_report(&client, url, username, password, task_body).await?;
     let mut tasks = Vec::new();
-    for ical in extract_calendar_data(&task_xml) {
-        tasks.extend(parse_vtodos(&ical));
+    for resource in extract_caldav_resources(&task_xml, url) {
+        tasks.extend(parse_vtodos(&resource.ics));
     }
 
     Ok(CalDavSyncResult { events, tasks })
@@ -174,27 +186,45 @@ pub async fn put_vevent(
     password: &str,
     ical_uid: &str,
     ics: &str,
-) -> CoreResult<()> {
+    if_match: Option<&str>,
+    object_url: Option<&str>,
+) -> CoreResult<PutVeventResult> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| CoreError::Message(e.to_string()))?;
-    let href = object_href(collection_url, ical_uid);
-    let response = client
+    let href = object_url
+        .filter(|u| !u.is_empty())
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| object_href(collection_url, ical_uid));
+    let mut request = client
         .put(&href)
         .header(AUTHORIZATION, basic_auth(username, password))
-        .header(CONTENT_TYPE, "text/calendar; charset=utf-8")
+        .header(CONTENT_TYPE, "text/calendar; charset=utf-8");
+    if let Some(etag) = if_match.filter(|e| !e.is_empty()) {
+        request = request.header(reqwest::header::IF_MATCH, etag);
+    }
+    let response = request
         .body(ics.to_string())
         .send()
         .await
         .map_err(|e| CoreError::Message(format!("CalDAV PUT failed: {e}")))?;
-    if !(response.status().is_success() || response.status().as_u16() == 201) {
-        return Err(CoreError::Message(format!(
-            "CalDAV PUT HTTP {}",
-            response.status()
-        )));
+    let status = response.status();
+    if status.as_u16() == 412 {
+        return Err(CoreError::Message(
+            "CalDAV PUT conflict (If-Match / ETag mismatch); sync and retry".into(),
+        ));
     }
-    Ok(())
+    if !(status.is_success() || status.as_u16() == 201) {
+        return Err(CoreError::Message(format!("CalDAV PUT HTTP {status}")));
+    }
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Ok(PutVeventResult { href, etag })
 }
 
 pub async fn delete_object(
@@ -530,7 +560,108 @@ fn basic_auth(user: &str, pass: &str) -> String {
     )
 }
 
-fn extract_calendar_data(xml: &str) -> Vec<String> {
+#[derive(Debug, Clone)]
+struct CalDavResource {
+    href: String,
+    etag: Option<String>,
+    ics: String,
+}
+
+/// Parse CalDAV multistatus responses into href + etag + calendar-data triples.
+fn extract_caldav_resources(xml: &str, base_url: &str) -> Vec<CalDavResource> {
+    let mut out = Vec::new();
+    let lower = xml.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(resp_rel) = lower[search..]
+        .find("<d:response")
+        .or_else(|| lower[search..].find("<response"))
+    {
+        let resp_start = search + resp_rel;
+        let resp_end = lower[resp_start..]
+            .find("</d:response>")
+            .or_else(|| lower[resp_start..].find("</response>"))
+            .map(|i| resp_start + i)
+            .unwrap_or(lower.len());
+        let chunk = &xml[resp_start..resp_end];
+        let chunk_lower = chunk.to_ascii_lowercase();
+        let Some(ics) = extract_calendar_data_from_chunk(chunk) else {
+            search = resp_end + 1;
+            continue;
+        };
+        let href = extract_first_href(chunk)
+            .map(|h| resolve_href(base_url, &h))
+            .unwrap_or_default();
+        if href.is_empty() {
+            search = resp_end + 1;
+            continue;
+        }
+        let etag = extract_tag_text(chunk, "getetag")
+            .or_else(|| {
+                // Some servers nest getetag without a simple text helper match.
+                let marker = "getetag";
+                let idx = chunk_lower.find(marker)?;
+                let after = &chunk[idx..];
+                let gt = after.find('>')? + 1;
+                let end = after[gt..].find("</")? + gt;
+                let text = after[gt..end].trim();
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(text.to_string())
+                }
+            })
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty())
+            .map(|e| {
+                if e.starts_with('"') || e.starts_with("W/") {
+                    e
+                } else {
+                    format!("\"{e}\"")
+                }
+            });
+        out.push(CalDavResource { href, etag, ics });
+        search = resp_end + 1;
+    }
+    // Fallback: bare calendar-data without response wrappers.
+    if out.is_empty() {
+        for ics in extract_calendar_data_loose(xml) {
+            out.push(CalDavResource {
+                href: object_href(base_url, "unknown"),
+                etag: None,
+                ics,
+            });
+        }
+    }
+    out
+}
+
+fn extract_first_href(xml: &str) -> Option<String> {
+    let lower = xml.to_ascii_lowercase();
+    let href_rel = lower.find("<d:href>").or_else(|| lower.find("<href>"))?;
+    let href_start = lower[href_rel..].find('>').map(|i| href_rel + i + 1)?;
+    let href_end = lower[href_start..].find("</").map(|i| href_start + i)?;
+    Some(xml[href_start..href_end].trim().to_string())
+}
+
+fn extract_calendar_data_from_chunk(xml: &str) -> Option<String> {
+    let lower = xml.to_ascii_lowercase();
+    let start_rel = lower.find("calendar-data")?;
+    let after_tag = lower[start_rel..].find('>')? + start_rel + 1;
+    let end = lower[after_tag..].find("</")? + after_tag;
+    let chunk = xml[after_tag..end]
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&#13;", "\n");
+    if chunk.contains("BEGIN:VCALENDAR") || chunk.contains("BEGIN:VEVENT") || chunk.contains("BEGIN:VTODO")
+    {
+        Some(chunk)
+    } else {
+        None
+    }
+}
+
+fn extract_calendar_data_loose(xml: &str) -> Vec<String> {
     let mut out = Vec::new();
     let lower = xml.to_ascii_lowercase();
     let mut search_from = 0;
@@ -540,8 +671,7 @@ fn extract_calendar_data(xml: &str) -> Vec<String> {
             Some(i) => start + i + 1,
             None => break,
         };
-        let end_marker = "</";
-        let Some(end_rel) = lower[after_tag..].find(end_marker) else {
+        let Some(end_rel) = lower[after_tag..].find("</") else {
             break;
         };
         let end = after_tag + end_rel;
@@ -600,6 +730,8 @@ fn parse_vevents(ical: &str) -> Vec<ParsedEvent> {
             status,
             reminder_minutes,
             organizer,
+            etag: None,
+            href: None,
         });
     }
     events
@@ -753,6 +885,34 @@ mod tests {
         assert!(ics.contains("METHOD:REPLY"));
         assert!(ics.contains("PARTSTAT=ACCEPTED"));
         assert!(ics.contains("mailto:me@example.com"));
+    }
+
+    #[test]
+    fn extracts_etag_and_href_from_multistatus() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/user/default/abc.ics</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>"etag-42"</d:getetag>
+        <c:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:abc
+SUMMARY:Meet
+DTSTART:20240101T100000Z
+DTEND:20240101T110000Z
+END:VEVENT
+END:VCALENDAR</c:calendar-data>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let resources = extract_caldav_resources(xml, "https://cal.example/calendars/user/default/");
+        assert_eq!(resources.len(), 1);
+        assert!(resources[0].href.contains("abc.ics"));
+        assert_eq!(resources[0].etag.as_deref(), Some("\"etag-42\""));
+        assert!(resources[0].ics.contains("UID:abc"));
     }
 }
 

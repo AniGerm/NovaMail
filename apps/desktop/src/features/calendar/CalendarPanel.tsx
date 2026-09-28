@@ -454,65 +454,157 @@ export function CalendarPanel() {
 
               {view === "week" ? (
                 <div className="overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]">
-                  <div className="grid grid-cols-7">
+                  <div className="grid grid-cols-[48px_repeat(7,minmax(0,1fr))] border-b border-[var(--nova-border)]">
+                    <div aria-hidden className="border-r border-[var(--nova-border)]" />
                     {days.map((day) => (
-                      <div
-                        key={day.start}
-                        className="min-h-[280px] border-r border-[var(--nova-border)] last:border-r-0"
+                      <button
+                        key={`head-${day.start}`}
+                        type="button"
+                        onClick={() => {
+                          setView("day");
+                          setAnchor(startOfDay(day.start));
+                        }}
+                        className="flex flex-col items-center gap-0.5 border-r border-[var(--nova-border)] px-1 py-2.5 last:border-r-0 transition-colors hover:bg-[var(--nova-accent-soft)]"
                       >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setView("day");
-                            setAnchor(startOfDay(day.start));
-                          }}
-                          className="flex w-full flex-col items-center gap-0.5 border-b border-[var(--nova-border)] px-2 py-3 transition-colors hover:bg-[var(--nova-accent-soft)]"
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--nova-ink-muted)]">
+                          {new Date(day.start).toLocaleDateString(loc, {
+                            weekday: "short",
+                          })}
+                        </span>
+                        <span
+                          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm ${
+                            day.isToday
+                              ? "bg-[var(--nova-accent)] font-semibold text-white"
+                              : "font-medium"
+                          }`}
                         >
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--nova-ink-muted)]">
-                            {new Date(day.start).toLocaleDateString(loc, {
-                              weekday: "short",
-                            })}
-                          </span>
-                          <span
-                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm ${
-                              day.isToday
-                                ? "bg-[var(--nova-accent)] font-semibold text-white"
-                                : "font-medium"
-                            }`}
-                          >
-                            {new Date(day.start).getDate()}
-                          </span>
-                        </button>
-                        <ul className="space-y-1 p-1.5">
-                          {day.events.map((ev) => (
-                            <li key={ev.id}>
-                              <button
-                                type="button"
-                                onClick={() => openEditEvent(ev)}
-                                className="w-full rounded-md px-1.5 py-1 text-left text-xs text-white transition-transform hover:scale-[1.02]"
-                                style={{
-                                  background: ev.color ?? "var(--nova-accent)",
-                                }}
-                              >
-                                {!ev.allDay ? (
-                                  <span className="opacity-90">
-                                    {formatTime(ev.startsAt, locale)}{" "}
-                                  </span>
-                                ) : null}
-                                {ev.title}
-                              </button>
-                            </li>
-                          ))}
-                          <li>
+                          {new Date(day.start).getDate()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-[48px_repeat(7,minmax(0,1fr))] border-b border-[var(--nova-border)]">
+                    <div
+                      className="border-r border-[var(--nova-border)] px-1 py-1 text-[10px] uppercase tracking-wide text-[var(--nova-ink-muted)]"
+                      aria-hidden
+                    />
+                    {days.map((day) => {
+                      const allDay = day.events.filter((ev) => ev.allDay);
+                      return (
+                        <div
+                          key={`allday-${day.start}`}
+                          className="min-h-[36px] space-y-0.5 border-r border-[var(--nova-border)] p-1 last:border-r-0"
+                        >
+                          {allDay.map((ev) => (
                             <button
+                              key={ev.id}
                               type="button"
-                              onClick={() => openNewEvent(day.start)}
-                              className="w-full rounded-md px-1.5 py-1 text-left text-xs text-[var(--nova-ink-muted)] hover:bg-[var(--nova-accent-soft)] hover:text-[var(--nova-accent)]"
+                              onClick={() => openEditEvent(ev)}
+                              className="block w-full truncate rounded px-1 py-0.5 text-left text-[10px] font-medium text-white"
+                              style={{
+                                background: ev.color ?? "var(--nova-accent)",
+                              }}
                             >
-                              +
+                              {ev.title}
                             </button>
-                          </li>
-                        </ul>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="relative max-h-[min(70vh,720px)] overflow-y-auto">
+                    {(() => {
+                      const nowSec = Math.floor(Date.now() / 1000);
+                      const today = days.find((d) => d.isToday);
+                      if (!today) return null;
+                      const gridStart = today.dayStart + hourSlots[0]! * 3600;
+                      const gridEnd =
+                        today.dayStart +
+                        (hourSlots[hourSlots.length - 1]! + 1) * 3600;
+                      if (nowSec < gridStart || nowSec >= gridEnd) return null;
+                      const top = ((nowSec - gridStart) / 3600) * 44;
+                      const col = days.findIndex((d) => d.isToday);
+                      return (
+                        <div
+                          className="pointer-events-none absolute left-12 right-0 z-10"
+                          style={{ top }}
+                          aria-hidden
+                        >
+                          <div
+                            className="absolute flex items-center"
+                            style={{
+                              left: `calc(${col} * (100% / 7))`,
+                              width: `calc(100% / 7)`,
+                            }}
+                          >
+                            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-danger)]" />
+                            <span className="h-px flex-1 bg-[var(--nova-danger)]" />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {hourSlots.map((hour) => (
+                      <div
+                        key={hour}
+                        className="grid grid-cols-[48px_repeat(7,minmax(0,1fr))] border-b border-[var(--nova-border)] last:border-0"
+                      >
+                        <div className="border-r border-[var(--nova-border)] px-1 py-1 text-right text-[10px] tabular-nums text-[var(--nova-ink-muted)]">
+                          {String(hour).padStart(2, "0")}:00
+                        </div>
+                        {days.map((day) => {
+                          const slotStart = day.dayStart + hour * 3600;
+                          const slotEnd = slotStart + 3600;
+                          const slotEvents = day.events.filter(
+                            (ev) =>
+                              !ev.allDay &&
+                              ev.startsAt < slotEnd &&
+                              (ev.endsAt ?? ev.startsAt + 3600) > slotStart &&
+                              // Only render in the hour where the event starts (or first visible hour).
+                              (ev.startsAt >= slotStart ||
+                                (hour === hourSlots[0] &&
+                                  ev.startsAt < slotStart)),
+                          );
+                          return (
+                            <button
+                              key={`${day.start}-${hour}`}
+                              type="button"
+                              onClick={() => openNewEvent(slotStart * 1000)}
+                              className="min-h-[44px] space-y-0.5 border-r border-[var(--nova-border)] p-0.5 text-left last:border-r-0 hover:bg-[var(--nova-accent-soft)]"
+                            >
+                              {slotEvents.map((ev) => {
+                                const end = ev.endsAt ?? ev.startsAt + 3600;
+                                const spanHours = Math.max(
+                                  1,
+                                  Math.ceil((end - Math.max(ev.startsAt, slotStart)) / 3600),
+                                );
+                                return (
+                                  <span
+                                    key={ev.id}
+                                    role="link"
+                                    tabIndex={0}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditEvent(ev);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.stopPropagation();
+                                        openEditEvent(ev);
+                                      }
+                                    }}
+                                    className="block truncate rounded px-1 py-0.5 text-[10px] font-medium text-white"
+                                    style={{
+                                      background: ev.color ?? "var(--nova-accent)",
+                                      minHeight: Math.min(spanHours, 3) * 18,
+                                    }}
+                                  >
+                                    {formatTime(ev.startsAt, locale)} {ev.title}
+                                  </span>
+                                );
+                              })}
+                            </button>
+                          );
+                        })}
                       </div>
                     ))}
                   </div>

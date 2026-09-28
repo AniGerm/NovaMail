@@ -52,7 +52,7 @@ Siehe detaillierte Checkliste: [`docs/linux_killer_features.plan.md`](./linux_ki
 | P1 | Threading polish, attachment DnD polish, Smart Search |
 | P2 | POP3 full mailbox sync, signature HTML templates |
 | P3 | ~~OpenPGP (Sequoia), Key Management UI~~ (done) |
-| P4 | ~~Calendar (CalDAV)~~ (done — day/week + tasks + sync) |
+| P4 | ~~Calendar (CalDAV)~~ (done — month/week/day grids, ETag If-Match, iMIP REQUEST/CANCEL + .ics) |
 | P5 | Plugin Runtime WASM + erste Official Plugins |
 | P6 | ~~AI job queue + persisted insights~~ (done: qwen3:4b-instruct / qwen2.5:1.5b, ai_insights, 2 reply variants) |
 | P7 | Microsoft Graph / Exchange Vertiefung |

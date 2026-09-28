@@ -97,6 +97,12 @@ pub struct CalendarEventDto {
     /// Collection color for UI chips (joined when listing).
     #[serde(default)]
     pub color: Option<String>,
+    /// CalDAV object ETag for If-Match on write-back.
+    #[serde(default)]
+    pub etag: Option<String>,
+    /// CalDAV object href (resource URL).
+    #[serde(default)]
+    pub href: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -2838,8 +2838,8 @@ impl AppState {
                     &event.status,
                     event.organizer.as_deref(),
                     "[]",
-                    None,
-                    None,
+                    event.etag.as_deref(),
+                    event.href.as_deref(),
                 )?;
                 events += 1;
             }
@@ -2907,6 +2907,8 @@ impl AppState {
             .as_ref()
             .and_then(|e| e.ical_uid.clone())
             .unwrap_or_else(|| id.to_string());
+        let mut etag = existing.as_ref().and_then(|e| e.etag.clone());
+        let mut object_href = existing.as_ref().and_then(|e| e.href.clone());
         let status = request
             .status
             .clone()
@@ -2928,18 +2930,18 @@ impl AppState {
             request.source_message_id,
             &reminders_json,
             &status,
-            None,
+            existing.as_ref().and_then(|e| e.organizer.as_deref()),
             "[]",
-            None,
-            collection.as_ref().and_then(|c| c.href.as_deref()),
+            etag.as_deref(),
+            object_href.as_deref(),
         )?;
         if let (Some(account_id), Some(col)) = (calendar_account_id, collection.as_ref()) {
-            if let Some(href) = col.href.as_deref() {
+            if let Some(collection_url) = col.href.as_deref() {
                 let minutes: Vec<i64> = request.reminders.iter().map(|r| r.minutes).collect();
-                if let Err(err) = self
+                match self
                     .push_event_to_caldav(
                         account_id,
-                        href,
+                        collection_url,
                         &ical_uid,
                         &request.title,
                         request.starts_at,
@@ -2949,10 +2951,37 @@ impl AppState {
                         request.all_day,
                         &status,
                         &minutes,
+                        etag.as_deref(),
+                        object_href.as_deref(),
                     )
                     .await
                 {
-                    tracing::warn!(error = %err, "CalDAV event upload failed; kept locally");
+                    Ok(put) => {
+                        etag = put.etag.or(etag);
+                        object_href = Some(put.href);
+                        let _ = self.db.upsert_calendar_event(
+                            id,
+                            calendar_account_id,
+                            collection_id,
+                            Some(&ical_uid),
+                            &request.title,
+                            request.starts_at,
+                            request.ends_at,
+                            request.location.as_deref(),
+                            request.description.as_deref(),
+                            request.all_day,
+                            request.source_message_id,
+                            &reminders_json,
+                            &status,
+                            existing.as_ref().and_then(|e| e.organizer.as_deref()),
+                            "[]",
+                            etag.as_deref(),
+                            object_href.as_deref(),
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "CalDAV event upload failed; kept locally");
+                    }
                 }
             }
         }
@@ -2970,9 +2999,11 @@ impl AppState {
             source_message_id: request.source_message_id,
             reminders: request.reminders,
             status,
-            organizer: None,
+            organizer: existing.and_then(|e| e.organizer),
             attendees: vec![],
             color,
+            etag,
+            href: object_href,
         })
     }
 
@@ -2989,7 +3020,9 @@ impl AppState {
         all_day: bool,
         status: &str,
         reminder_minutes: &[i64],
-    ) -> CoreResult<()> {
+        if_match: Option<&str>,
+        object_url: Option<&str>,
+    ) -> CoreResult<crate::caldav::PutVeventResult> {
         let account = self
             .db
             .list_calendar_accounts()?
@@ -3017,6 +3050,8 @@ impl AppState {
             &password,
             ical_uid,
             &ics,
+            if_match,
+            object_url,
         )
         .await
     }

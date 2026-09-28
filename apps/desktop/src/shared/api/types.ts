@@ -306,6 +306,8 @@ export interface CalendarEventDto {
   organizer?: string | null;
   attendees?: CalendarAttendeeDto[];
   color?: string | null;
+  etag?: string | null;
+  href?: string | null;
 }
 
 export interface CalendarTaskDto {
