@@ -153,6 +153,8 @@ export const en: Translations = {
   passwordAppPassword: "Password / app password",
   icloudHint:
     "iCloud requires an app-specific password from appleid.apple.com (Sign-In and Security → App-Specific Passwords). Use your full iCloud email as the username.",
+  yahooHint:
+    "Yahoo needs an app password: login.yahoo.com → Account Security → Generate app password. Your regular Yahoo password usually will not work for IMAP.",
   imapHost: "IMAP host",
   imapPort: "IMAP port",
   smtpHost: "SMTP host",

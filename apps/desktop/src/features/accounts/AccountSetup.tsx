@@ -77,6 +77,12 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    // Enter in the email field must not start a password IMAP login for OAuth presets.
+    if (selected?.authType === "oauth2") {
+      if (!email.trim() || busy) return;
+      await handleOAuth();
+      return;
+    }
     setBusy(true);
     setError(null);
     const request: AddAccountPasswordRequest = {
@@ -214,6 +220,12 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           {provider === "icloud" ? (
             <p className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 py-2 text-sm text-[var(--nova-ink)]">
               {t("icloudHint")}
+            </p>
+          ) : null}
+
+          {provider === "yahoo" && selected?.authType !== "oauth2" ? (
+            <p className="rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 py-2 text-sm text-[var(--nova-ink)]">
+              {t("yahooHint")}
             </p>
           ) : null}
 

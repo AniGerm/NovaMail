@@ -30,3 +30,4 @@ pub use remote_actions::{
 pub use scheduler::SyncScheduler;
 pub use smtp_client::SmtpClient;
 pub use sync::{SyncEngine, SyncReport};
+pub use tls::ensure_crypto_provider;

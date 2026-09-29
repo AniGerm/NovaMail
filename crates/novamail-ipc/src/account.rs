@@ -121,8 +121,10 @@ impl ProviderPreset {
                 smtp_host: "smtp.mail.yahoo.com".into(),
                 smtp_port: 465,
                 smtp_tls: true,
-                auth_type: AuthType::OAuth2,
-                oauth_authorize_url: Some("https://api.login.yahoo.com/oauth2/request_auth".into()),
+                // Default: app password (works without Yahoo developer OAuth apps).
+                // Switched to OAuth2 at runtime when NOVAMAIL_YAHOO_CLIENT_ID is set.
+                auth_type: AuthType::Password,
+                oauth_authorize_url: None,
             },
             Self {
                 provider: MailProvider::ProtonBridge,

@@ -151,6 +151,8 @@ export const de = {
   passwordAppPassword: "Passwort / App-Passwort",
   icloudHint:
     "Für iCloud brauchst du ein App-spezifisches Passwort von appleid.apple.com (Anmeldung und Sicherheit → App-spezifische Passwörter). Als Benutzername die vollständige iCloud-E-Mail verwenden.",
+  yahooHint:
+    "Yahoo braucht ein App-Passwort: login.yahoo.com → Kontosicherheit → App-Passwörter erzeugen. Das normale Yahoo-Passwort funktioniert bei IMAP meist nicht.",
   imapHost: "IMAP-Host",
   imapPort: "IMAP-Port",
   smtpHost: "SMTP-Host",

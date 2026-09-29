@@ -16,6 +16,9 @@ pub fn run() {
         )
         .init();
 
+    // Prevent rustls IMAP/SMTP panics when the feature graph is ambiguous.
+    novamail_mail::ensure_crypto_provider();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         // Notification plugin: init is best-effort — some hosts lack a notification bus.

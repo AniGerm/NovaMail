@@ -272,7 +272,33 @@ impl AppState {
     }
 
     pub fn provider_presets(&self) -> Vec<ProviderPreset> {
-        ProviderPreset::all()
+        let mut presets = ProviderPreset::all();
+        for preset in &mut presets {
+            let oauth_env = match preset.provider {
+                novamail_ipc::MailProvider::Gmail => "NOVAMAIL_GOOGLE_CLIENT_ID",
+                novamail_ipc::MailProvider::Microsoft365 => "NOVAMAIL_MS_CLIENT_ID",
+                novamail_ipc::MailProvider::Yahoo => "NOVAMAIL_YAHOO_CLIENT_ID",
+                _ => continue,
+            };
+            let has_oauth = std::env::var(oauth_env)
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            match preset.provider {
+                novamail_ipc::MailProvider::Yahoo if has_oauth => {
+                    preset.auth_type = novamail_ipc::AuthType::OAuth2;
+                    preset.oauth_authorize_url =
+                        Some("https://api.login.yahoo.com/oauth2/request_auth".into());
+                }
+                novamail_ipc::MailProvider::Gmail | novamail_ipc::MailProvider::Microsoft365
+                    if !has_oauth =>
+                {
+                    // Keep OAuth UI, but authorize will return a clear error.
+                    // Gmail/Microsoft basic auth is broadly blocked; don't pretend password works.
+                }
+                _ => {}
+            }
+        }
+        presets
     }
 
     pub fn list_accounts(&self) -> CoreResult<Vec<AccountDto>> {
