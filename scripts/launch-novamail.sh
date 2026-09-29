@@ -2,7 +2,12 @@
 # Launch NovaMail in the Cloud Desktop / local Linux shell.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve through symlinks (e.g. ~/.local/bin/novamail -> scripts/launch-novamail.sh).
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || echo "$SCRIPT_PATH")"
+fi
+ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 cd "$ROOT"
 
 # GUI launchers often have a minimal PATH — restore Node / Rust / local bins.
@@ -47,22 +52,85 @@ binary_stale() {
   return 1
 }
 
-# Avoid stacking multiple instances (looks like a hang / crash on second launch).
-# Match by /proc/*/exe so we never kill/match this launcher shell.
-already_running=0
-for proc in /proc/[0-9]*; do
-  exe="$(readlink "$proc/exe" 2>/dev/null || true)"
-  if [[ "$exe" == "$BIN" || "$exe" == *"/novamail-desktop" ]]; then
-    already_running=1
-    break
+list_novamail_pids() {
+  local proc exe
+  for proc in /proc/[0-9]*; do
+    exe="$(readlink "$proc/exe" 2>/dev/null || true)"
+    if [[ "$exe" == "$BIN" || "$exe" == *"/novamail-desktop" ]]; then
+      printf '%s\n' "${proc##*/}"
+    fi
+  done
+}
+
+pid_alive() {
+  local pid="$1"
+  [[ -n "$pid" && -d "/proc/$pid" ]] || return 1
+  local exe
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  [[ "$exe" == "$BIN" || "$exe" == *"/novamail-desktop" ]]
+}
+
+# Drop X11 windows whose owning process is already gone (looks like a hung app).
+cleanup_orphan_windows() {
+  command -v wmctrl >/dev/null 2>&1 || return 0
+  command -v xprop >/dev/null 2>&1 || return 0
+  local line wid pid
+  while read -r line; do
+    wid="$(awk '{print $1}' <<<"$line")"
+    [[ -n "$wid" ]] || continue
+    pid="$(xprop -id "$wid" _NET_WM_PID 2>/dev/null | awk -F'= ' '{print $2}' | tr -d ' ')"
+    if [[ -z "$pid" ]] || ! pid_alive "$pid"; then
+      echo "Closing orphan NovaMail window $wid (pid=${pid:-none})." >>"$LOG_FILE"
+      wmctrl -ic "$wid" 2>/dev/null || true
+      if command -v xdotool >/dev/null 2>&1; then
+        xdotool windowkill "$wid" 2>/dev/null || true
+      fi
+    fi
+  done < <(wmctrl -l 2>/dev/null | grep -i 'NovaMail' || true)
+}
+
+focus_live_novamail_window() {
+  command -v wmctrl >/dev/null 2>&1 || return 1
+  local line wid pid
+  while read -r line; do
+    wid="$(awk '{print $1}' <<<"$line")"
+    pid="$(xprop -id "$wid" _NET_WM_PID 2>/dev/null | awk -F'= ' '{print $2}' | tr -d ' ')"
+    if pid_alive "$pid"; then
+      wmctrl -ia "$wid" 2>/dev/null && return 0
+    fi
+  done < <(wmctrl -l 2>/dev/null | grep -i 'NovaMail' || true)
+  if command -v xdotool >/dev/null 2>&1; then
+    local cand
+    for cand in $(xdotool search --name NovaMail 2>/dev/null || true); do
+      pid="$(xprop -id "$cand" _NET_WM_PID 2>/dev/null | awk -F'= ' '{print $2}' | tr -d ' ')"
+      if pid_alive "$pid"; then
+        xdotool windowactivate "$cand" 2>/dev/null && return 0
+      fi
+    done
   fi
-done
-if ((already_running)); then
-  echo "NovaMail already running — focusing existing window." >>"$LOG_FILE"
-  if command -v wmctrl >/dev/null 2>&1; then
-    wmctrl -a NovaMail 2>/dev/null || true
+  return 1
+}
+
+cleanup_orphan_windows
+
+mapfile -t RUNNING_PIDS < <(list_novamail_pids)
+if ((${#RUNNING_PIDS[@]} > 0)); then
+  if focus_live_novamail_window; then
+    echo "NovaMail already running — focused existing window (pids: ${RUNNING_PIDS[*]})." >>"$LOG_FILE"
+    exit 0
   fi
-  exit 0
+  echo "NovaMail process(es) without usable window — restarting (${RUNNING_PIDS[*]})." >>"$LOG_FILE"
+  for pid in "${RUNNING_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 0.4
+  for pid in "${RUNNING_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+  sleep 0.2
+  cleanup_orphan_windows
 fi
 
 if frontend_stale; then
