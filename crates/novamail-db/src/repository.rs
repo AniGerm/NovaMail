@@ -1189,8 +1189,8 @@ impl Database {
         for attachment in attachments {
             conn.execute(
                 r#"
-                INSERT INTO attachments (id, message_id, filename, mime, size, path)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                INSERT INTO attachments (id, message_id, filename, mime, size, path, content_id)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 "#,
                 params![
                     attachment.id.to_string(),
@@ -1199,6 +1199,7 @@ impl Database {
                     attachment.mime,
                     attachment.size as i64,
                     attachment.path,
+                    attachment.content_id,
                 ],
             )?;
         }
@@ -1208,7 +1209,7 @@ impl Database {
     pub fn list_attachments(&self, message_id: Uuid) -> DbResult<Vec<AttachmentDto>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, message_id, filename, mime, size, path FROM attachments WHERE message_id = ?1 ORDER BY filename",
+            "SELECT id, message_id, filename, mime, size, path, content_id FROM attachments WHERE message_id = ?1 ORDER BY filename",
         )?;
         let rows = stmt.query_map(params![message_id.to_string()], |row| {
             Ok(AttachmentDto {
@@ -1218,6 +1219,7 @@ impl Database {
                 mime: row.get(3)?,
                 size: row.get::<_, i64>(4)? as u64,
                 path: row.get(5)?,
+                content_id: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1230,7 +1232,7 @@ impl Database {
     pub fn get_attachment(&self, attachment_id: Uuid) -> DbResult<AttachmentDto> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, message_id, filename, mime, size, path FROM attachments WHERE id = ?1",
+            "SELECT id, message_id, filename, mime, size, path, content_id FROM attachments WHERE id = ?1",
             params![attachment_id.to_string()],
             |row| {
                 Ok(AttachmentDto {
@@ -1240,6 +1242,7 @@ impl Database {
                     mime: row.get(3)?,
                     size: row.get::<_, i64>(4)? as u64,
                     path: row.get(5)?,
+                    content_id: row.get(6)?,
                 })
             },
         )

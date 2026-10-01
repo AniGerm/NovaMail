@@ -47,9 +47,9 @@ use novamail_ipc::{
     UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    append_sent_remote, archive_remote, delete_remote, move_remote, offload_message_remote,
-    probe_account_quota, save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
-    SyncEngine,
+    append_sent_remote, archive_remote, delete_remote, execute_delete_remote, move_remote,
+    offload_message_remote, plan_delete_remote, probe_account_quota, save_draft_remote,
+    set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -64,7 +64,7 @@ use crate::offline_mailbox::{
     self, OfflineMailboxSettings, SETTINGS_KEY as OFFLINE_MAILBOX_KEY,
 };
 use crate::paths::AppPaths;
-use crate::sanitize::sanitize_html;
+use crate::sanitize::{rewrite_cid_urls, sanitize_html};
 use crate::spam::{self, SpamSettings};
 use crate::{CoreError, CoreResult};
 
@@ -503,7 +503,23 @@ impl AppState {
     pub fn get_message(&self, message_id: Uuid) -> CoreResult<MessageDetailDto> {
         let mut detail = self.db.get_message(message_id)?;
         if let Some(html) = detail.body_html.take() {
+            let mut html = html;
+            if html.to_ascii_lowercase().contains("cid:") {
+                let mut cid_map = Vec::new();
+                for att in &detail.attachments {
+                    let Some(cid) = att.content_id.as_ref() else {
+                        continue;
+                    };
+                    if let Ok(data) = std::fs::read(&att.path) {
+                        cid_map.push((cid.clone(), att.mime.clone(), data));
+                    }
+                }
+                if !cid_map.is_empty() {
+                    html = rewrite_cid_urls(&html, &cid_map);
+                }
+            }
             let cleaned = sanitize_html(&html);
+            // Prefer HTML even when sparse — plaintext fallback only when empty.
             detail.body_html = if cleaned.trim().is_empty() {
                 None
             } else {
@@ -517,17 +533,17 @@ impl AppState {
         self.db
             .set_flags(request.message_id, request.unread, request.starred)?;
         // Mailbox unread/total counts are refreshed inside db.set_flags.
-        if let Err(err) = set_flags_remote(
-            &self.db,
-            &self.secrets,
-            request.message_id,
-            request.unread,
-            request.starred,
-        )
-        .await
-        {
-            tracing::warn!(error = %err, "IMAP flag sync failed; local flags kept");
-        }
+        // Push IMAP flags in the background so UI actions (quick sort, open-to-read) stay snappy.
+        let db = self.db.clone();
+        let secrets = self.secrets.clone();
+        let message_id = request.message_id;
+        let unread = request.unread;
+        let starred = request.starred;
+        tokio::spawn(async move {
+            if let Err(err) = set_flags_remote(&db, &secrets, message_id, unread, starred).await {
+                tracing::warn!(error = %err, "IMAP flag sync failed; local flags kept");
+            }
+        });
         Ok(())
     }
 
@@ -1016,14 +1032,28 @@ impl AppState {
     }
 
     pub async fn delete_message(&self, message_id: Uuid) -> CoreResult<()> {
-        if let Err(err) = delete_remote(&self.db, &self.secrets, message_id).await {
-            tracing::warn!(error = %err, "IMAP delete failed; removing local copy anyway");
-        }
-        let detail = self.get_message(message_id)?;
+        // Snapshot IMAP coordinates before local delete, then remove locally immediately
+        // so quick-sort / keyboard triage never waits on the network.
+        let plan = match plan_delete_remote(&self.db, message_id) {
+            Ok(plan) => plan,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not plan IMAP delete");
+                None
+            }
+        };
+        let detail = self.db.get_message(message_id)?;
         for attachment in detail.attachments {
             let _ = std::fs::remove_file(attachment.path);
         }
         self.db.delete_message(message_id)?;
+        if let Some(plan) = plan {
+            let secrets = self.secrets.clone();
+            tokio::spawn(async move {
+                if let Err(err) = execute_delete_remote(&secrets, plan).await {
+                    tracing::warn!(error = %err, "IMAP delete failed; local copy already removed");
+                }
+            });
+        }
         Ok(())
     }
 

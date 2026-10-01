@@ -331,6 +331,12 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_calendar_invitations_partstat
       ON calendar_invitations(partstat, received_at DESC);
     "#,
+    // v10 — attachment Content-ID for HTML cid: image rewrite
+    r#"
+    ALTER TABLE attachments ADD COLUMN content_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_attachments_content_id
+      ON attachments(message_id, content_id);
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -383,7 +389,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

@@ -218,6 +218,7 @@ impl SyncEngine {
                         mime: attachment.mime,
                         size: attachment.data.len() as u64,
                         path: path.to_string_lossy().to_string(),
+                        content_id: attachment.content_id,
                     });
                 }
                 self.db.replace_attachments(message_id, &records)?;

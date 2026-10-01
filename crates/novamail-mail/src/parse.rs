@@ -1,3 +1,4 @@
+use base64::Engine;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
 use novamail_ipc::AddressDto;
 
@@ -8,6 +9,7 @@ pub struct ParsedAttachment {
     pub filename: String,
     pub mime: String,
     pub data: Vec<u8>,
+    pub content_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,14 +79,11 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         .unwrap_or_else(|| chrono::Utc::now().timestamp());
 
     let body_text = message.body_text(0).map(|s| s.to_string());
-    let body_html = message.body_html(0).map(|s| s.to_string());
-    let snippet_source = body_text
-        .clone()
-        .or_else(|| body_html.clone().map(strip_tags))
-        .unwrap_or_default();
-    let snippet = snippet_source.chars().take(180).collect::<String>();
+    let mut body_html = message.body_html(0).map(|s| s.to_string());
 
     let mut attachments = Vec::new();
+    let mut cid_parts: Vec<(String, String, Vec<u8>)> = Vec::new();
+
     for (idx, part) in message.attachments().enumerate() {
         let filename = part
             .attachment_name()
@@ -110,12 +109,67 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         if data.is_empty() {
             continue;
         }
+        let content_id = part.content_id().map(|cid| normalize_cid(cid));
+        if let Some(cid) = content_id.clone() {
+            cid_parts.push((cid, mime.clone(), data.clone()));
+        }
         attachments.push(ParsedAttachment {
             filename,
             mime,
             data,
+            content_id,
         });
     }
+
+    // Also collect Content-ID parts that mail-parser did not classify as attachments
+    // (some clients put related images only in multipart/related).
+    for part in message.parts.iter() {
+        let Some(cid) = part.content_id().map(normalize_cid) else {
+            continue;
+        };
+        if cid_parts.iter().any(|(existing, _, _)| existing == &cid) {
+            continue;
+        }
+        let mime = part
+            .content_type()
+            .map(|ct| {
+                format!(
+                    "{}/{}",
+                    ct.c_type,
+                    ct.c_subtype.as_deref().unwrap_or("octet-stream")
+                )
+            })
+            .unwrap_or_else(|| "application/octet-stream".into());
+        let data = match &part.body {
+            PartType::Binary(bytes) | PartType::InlineBinary(bytes) => bytes.to_vec(),
+            PartType::Text(text) if mime.starts_with("image/") => text.as_bytes().to_vec(),
+            _ => continue,
+        };
+        if data.is_empty() {
+            continue;
+        }
+        let filename = part
+            .attachment_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("inline-{}.bin", attachments.len()));
+        cid_parts.push((cid.clone(), mime.clone(), data.clone()));
+        attachments.push(ParsedAttachment {
+            filename,
+            mime,
+            data,
+            content_id: Some(cid),
+        });
+    }
+
+    if let Some(html) = body_html.as_mut() {
+        *html = rewrite_cid_to_data(html, &cid_parts);
+    }
+
+    let snippet_source = body_text
+        .clone()
+        .or_else(|| body_html.clone().map(strip_tags))
+        .unwrap_or_default();
+    let snippet = snippet_source.chars().take(180).collect::<String>();
 
     let message_id = message.message_id().map(|s| s.to_string());
     let in_reply_to = message.in_reply_to().as_text().map(|s| s.to_string());
@@ -142,6 +196,35 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         seen: flags_seen,
         starred: flags_flagged,
     })
+}
+
+fn normalize_cid(cid: &str) -> String {
+    cid.trim()
+        .trim_matches(|c| c == '<' || c == '>')
+        .to_string()
+}
+
+fn rewrite_cid_to_data(html: &str, cid_parts: &[(String, String, Vec<u8>)]) -> String {
+    if cid_parts.is_empty() || !html.to_ascii_lowercase().contains("cid:") {
+        return html.to_string();
+    }
+    let mut out = html.to_string();
+    for (cid, mime, data) in cid_parts {
+        if data.is_empty() || cid.is_empty() {
+            continue;
+        }
+        let data_url = format!(
+            "data:{};base64,{}",
+            mime,
+            base64::engine::general_purpose::STANDARD.encode(data)
+        );
+        for candidate in [format!("cid:{cid}"), format!("cid:<{cid}>")] {
+            if out.contains(&candidate) {
+                out = out.replace(&candidate, &data_url);
+            }
+        }
+    }
+    out
 }
 
 fn strip_tags(html: String) -> String {
@@ -176,5 +259,32 @@ Hi Bob!\r\n";
         assert_eq!(parsed.from.email, "alice@example.com");
         assert!(parsed.body_text.unwrap().contains("Hi Bob"));
         assert!(!parsed.seen);
+    }
+
+    #[test]
+    fn rewrites_inline_cid_images_in_html() {
+        let raw = b"From: Alice <alice@example.com>\r\n\
+To: Bob <bob@example.com>\r\n\
+Subject: Pic\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/related; boundary=\"b1\"\r\n\
+\r\n\
+--b1\r\n\
+Content-Type: text/html; charset=utf-8\r\n\
+\r\n\
+<html><body><img src=\"cid:img1@x\"><p>Hello</p></body></html>\r\n\
+--b1\r\n\
+Content-Type: image/png\r\n\
+Content-ID: <img1@x>\r\n\
+Content-Transfer-Encoding: base64\r\n\
+Content-Disposition: inline; filename=\"dot.png\"\r\n\
+\r\n\
+iVBORw0KGgo=\r\n\
+--b1--\r\n";
+        let parsed = parse_rfc822(raw, true, false).unwrap();
+        let html = parsed.body_html.expect("html body");
+        assert!(html.contains("data:image/png;base64,"));
+        assert!(!html.to_ascii_lowercase().contains("cid:"));
+        assert!(html.contains("Hello"));
     }
 }

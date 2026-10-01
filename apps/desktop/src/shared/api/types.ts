@@ -48,6 +48,7 @@ export interface AttachmentDto {
   mime: string;
   size: number;
   path: string;
+  contentId?: string | null;
 }
 
 export interface OutgoingAttachment {

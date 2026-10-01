@@ -144,29 +144,45 @@ pub async fn move_remote(
     Ok(())
 }
 
-pub async fn delete_remote(
-    db: &Database,
-    secrets: &SecretStore,
-    message_id: Uuid,
-) -> MailResult<()> {
+#[derive(Debug, Clone)]
+pub struct DeleteRemotePlan {
+    pub account: AccountRecord,
+    pub mailbox_name: String,
+    pub uid: u32,
+    pub trash_mailbox: Option<String>,
+}
+
+/// Capture everything needed for an IMAP delete while the local message row still exists.
+pub fn plan_delete_remote(db: &Database, message_id: Uuid) -> MailResult<Option<DeleteRemotePlan>> {
     let Some(locator) = load_locator(db, message_id)? else {
-        return Ok(());
+        return Ok(None);
     };
     let account = db.get_account(locator.account_id)?;
-    let credentials = ensure_fresh_credentials(&account, secrets).await?;
-    let mut imap = LiveImap::connect(&account, &credentials).await?;
-    imap.select(&locator.mailbox_name).await?;
-    let uid = locator.uid.to_string();
-
-    if let Some(trash) = db
+    let trash_mailbox = db
         .find_mailbox_by_role(locator.account_id, "trash")?
         .or(db.find_mailbox_by_role(locator.account_id, "junk")?)
-    {
-        if trash.name != locator.mailbox_name {
-            if imap.uid_move(&uid, &trash.name).await.is_ok() {
-                let _ = imap.logout().await;
-                return Ok(());
-            }
+        .map(|m| m.name);
+    Ok(Some(DeleteRemotePlan {
+        account,
+        mailbox_name: locator.mailbox_name,
+        uid: locator.uid,
+        trash_mailbox,
+    }))
+}
+
+pub async fn execute_delete_remote(
+    secrets: &SecretStore,
+    plan: DeleteRemotePlan,
+) -> MailResult<()> {
+    let credentials = ensure_fresh_credentials(&plan.account, secrets).await?;
+    let mut imap = LiveImap::connect(&plan.account, &credentials).await?;
+    imap.select(&plan.mailbox_name).await?;
+    let uid = plan.uid.to_string();
+
+    if let Some(trash) = plan.trash_mailbox.as_deref() {
+        if trash != plan.mailbox_name && imap.uid_move(&uid, trash).await.is_ok() {
+            let _ = imap.logout().await;
+            return Ok(());
         }
     }
 
@@ -174,6 +190,17 @@ pub async fn delete_remote(
     imap.uid_expunge(&uid).await?;
     let _ = imap.logout().await;
     Ok(())
+}
+
+pub async fn delete_remote(
+    db: &Database,
+    secrets: &SecretStore,
+    message_id: Uuid,
+) -> MailResult<()> {
+    let Some(plan) = plan_delete_remote(db, message_id)? else {
+        return Ok(());
+    };
+    execute_delete_remote(secrets, plan).await
 }
 
 /// Hard-purge a message from IMAP while keeping the local SQLite/blob copy.
@@ -320,6 +347,7 @@ async fn ensure_full_local_copy(
                 mime: attachment.mime,
                 size: attachment.data.len() as u64,
                 path: path.to_string_lossy().to_string(),
+                content_id: attachment.content_id,
             });
         }
         db.replace_attachments(message_id, &records)?;
