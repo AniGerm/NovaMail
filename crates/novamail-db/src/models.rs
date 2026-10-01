@@ -95,6 +95,8 @@ pub struct AttachmentRecord {
     pub mime: String,
     pub size: u64,
     pub path: String,
+    #[serde(default)]
+    pub content_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

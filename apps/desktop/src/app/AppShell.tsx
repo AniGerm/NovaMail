@@ -392,6 +392,17 @@ export function AppShell() {
     inboxFilters.viewMode === "threads"
       ? (threadsQuery.data?.total ?? threads.length)
       : (messagesQuery.data?.total ?? messages.length);
+  const selectedMailboxId =
+    inboxFilters.mailboxId ?? messageQuery.data?.summary.mailboxId ?? null;
+  const selectedMailboxRole = selectedMailboxId
+    ? (mailboxes.find((m) => m.id === selectedMailboxId)?.role ?? null)
+    : inboxFilters.mailboxRole;
+  const inSentOrDrafts =
+    selectedMailboxRole === "sent" ||
+    selectedMailboxRole === "drafts" ||
+    inboxFilters.mailboxRole === "drafts";
+  const aiReplyEnabled =
+    Boolean(aiSettingsQuery.data?.enabled) && !inSentOrDrafts;
 
   const navigateList = useCallback(
     (delta: number) => {
@@ -1035,7 +1046,7 @@ export function AppShell() {
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
               <ReadingPane
                 message={messageQuery.data}
-                aiEnabled={Boolean(aiSettingsQuery.data?.enabled)}
+                aiEnabled={aiReplyEnabled}
                 inSpamFolder={inboxFilters.mailboxRole === "junk"}
                 onReply={() => {
                   setComposerBody("");

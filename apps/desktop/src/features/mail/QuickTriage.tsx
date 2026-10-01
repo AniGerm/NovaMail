@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Eye, EyeOff, Inbox, Paperclip, Trash2, X } from "lucide-react";
 import { useKeyboardShortcuts } from "@novamail/hooks";
 import { Button, IconButton } from "@novamail/ui";
@@ -37,25 +37,50 @@ function plainPreview(htmlOrText: string): string {
 export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
-  const queue = useMemo(() => messages, [messages]);
+  const [queue, setQueue] = useState<MessageSummaryDto[]>([]);
   const [index, setIndex] = useState(0);
   const [preview, setPreview] = useState<MessageDetailDto | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingRef = useRef(0);
+  const refreshTimer = useRef<number | null>(null);
 
   const current = queue[index] ?? null;
   const progress = queue.length === 0 ? 0 : Math.min((index + (current ? 0 : 1)) / queue.length, 1);
 
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current != null) {
+      window.clearTimeout(refreshTimer.current);
+    }
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      onChanged();
+    }, 400);
+  }, [onChanged]);
+
+  // Snapshot the queue only when the dialog opens so background refreshes
+  // don't reset progress mid-triage.
   useEffect(() => {
     if (!open) return;
+    const unread = messages.filter((m) => m.unread);
+    setQueue(unread.length > 0 ? unread : messages);
     setIndex(0);
     setPreview(null);
     setPreviewOpen(false);
     setAiSummary(null);
     setError(null);
+    pendingRef.current = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot on open only
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimer.current != null) {
+        window.clearTimeout(refreshTimer.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || !current) return;
@@ -95,49 +120,51 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
     setIndex((i) => i + 1);
   }, []);
 
-  const handleKeep = useCallback(async () => {
-    if (!current || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.messagesSetFlags({ messageId: current.id, unread: false });
-      onChanged();
-      advance();
-    } catch (err) {
-      setError((err as AppError).message || t("keepFailed"));
-    } finally {
-      setBusy(false);
-    }
-  }, [advance, busy, current, onChanged, t]);
+  const handleKeep = useCallback(() => {
+    if (!current) return;
+    const id = current.id;
+    advance();
+    pendingRef.current += 1;
+    void api
+      .messagesSetFlags({ messageId: id, unread: false })
+      .catch((err) => {
+        setError((err as AppError).message || t("keepFailed"));
+      })
+      .finally(() => {
+        pendingRef.current = Math.max(0, pendingRef.current - 1);
+        scheduleRefresh();
+      });
+  }, [advance, current, scheduleRefresh, t]);
 
-  const handleDelete = useCallback(async () => {
-    if (!current || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.messagesDelete(current.id);
-      onChanged();
-      advance();
-    } catch (err) {
-      setError((err as AppError).message || t("deleteFailed"));
-    } finally {
-      setBusy(false);
-    }
-  }, [advance, busy, current, onChanged, t]);
+  const handleDelete = useCallback(() => {
+    if (!current) return;
+    const id = current.id;
+    advance();
+    pendingRef.current += 1;
+    void api
+      .messagesDelete(id)
+      .catch((err) => {
+        setError((err as AppError).message || t("deleteFailed"));
+      })
+      .finally(() => {
+        pendingRef.current = Math.max(0, pendingRef.current - 1);
+        scheduleRefresh();
+      });
+  }, [advance, current, scheduleRefresh, t]);
 
   const shortcuts = useMemo(() => {
     const map: Record<string, () => void> = {
       b: () => {
-        void handleKeep();
+        handleKeep();
       },
       k: () => {
-        void handleKeep();
+        handleKeep();
       },
       l: () => {
-        void handleDelete();
+        handleDelete();
       },
       d: () => {
-        void handleDelete();
+        handleDelete();
       },
       v: () => setPreviewOpen((value) => !value),
       enter: () => setPreviewOpen(true),
@@ -260,9 +287,16 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
                       </p>
                     ) : null}
                     {preview ? (
-                      <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
-                        {previewText || current.snippet}
-                      </div>
+                      preview.bodyHtml ? (
+                        <div
+                          className="nova-html-body text-[14px] leading-6 text-[var(--nova-ink)]"
+                          dangerouslySetInnerHTML={{ __html: preview.bodyHtml }}
+                        />
+                      ) : (
+                        <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
+                          {previewText || current.snippet}
+                        </div>
+                      )
                     ) : (
                       <p className="text-sm text-[var(--nova-ink-muted)]">
                         {t("loadingPreview")}
@@ -286,7 +320,6 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
               type="button"
               variant="secondary"
               size="lg"
-              disabled={busy}
               className="min-w-[140px]"
               onClick={() => setPreviewOpen((value) => !value)}
             >
@@ -300,7 +333,6 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
               type="button"
               variant="primary"
               size="lg"
-              disabled={busy}
               className="w-full"
               onClick={handleKeep}
             >
@@ -314,7 +346,6 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
               type="button"
               variant="danger"
               size="lg"
-              disabled={busy}
               className="w-full"
               onClick={handleDelete}
             >

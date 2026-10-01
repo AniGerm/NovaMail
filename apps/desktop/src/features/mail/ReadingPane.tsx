@@ -109,6 +109,11 @@ export function ReadingPane({
         if (!cancelled && result) setPgpResult(result);
       })
       .catch(() => undefined);
+    if (!aiEnabled) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const loadInsights = () =>
       api
         .aiMessageInsights(id)
@@ -139,7 +144,7 @@ export function ReadingPane({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [message?.summary.id]);
+  }, [aiEnabled, message?.summary.id]);
 
   if (!message) {
     return (
@@ -425,7 +430,7 @@ export function ReadingPane({
           </p>
           {current.bodyHtml ? (
             <div
-              className="prose max-w-none text-[15px] leading-7 text-[var(--nova-ink)]"
+              className="nova-html-body max-w-none overflow-x-auto text-[15px] leading-7 text-[var(--nova-ink)] [&_img]:h-auto [&_img]:max-w-full [&_table]:max-w-full"
               dangerouslySetInnerHTML={{ __html: current.bodyHtml }}
             />
           ) : (
@@ -537,9 +542,7 @@ export function ReadingPane({
               </Button>
             </div>
           </section>
-        ) : (
-          <p className="text-sm text-[var(--nova-ink-muted)]">{t("aiDisabledHint")}</p>
-        )}
+        ) : null}
       </div>
     </article>
   );

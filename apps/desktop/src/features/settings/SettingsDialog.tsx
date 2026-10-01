@@ -485,9 +485,10 @@ export function SettingsDialog({
       onClose={onClose}
       title={t("settingsTitle")}
       description={t("settingsDescription")}
-      className="max-w-3xl"
+      className="h-[min(80vh,720px)] max-w-5xl w-[min(960px,96vw)]"
     >
-      <div className="flex flex-wrap gap-1 border-b border-[var(--nova-border)] pb-2">
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 flex-wrap gap-1 border-b border-[var(--nova-border)] pb-2">
         {(
           [
             ["general", t("settingsTabGeneral")],
@@ -511,7 +512,7 @@ export function SettingsDialog({
           </button>
         ))}
       </div>
-      <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
+      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto pt-4 text-sm">
         {settingsTab === "accounts" ? (
           <AccountsPanel
             accounts={accounts}
@@ -1194,6 +1195,7 @@ export function SettingsDialog({
       <DialogActions>
         <Button onClick={onClose}>{t("done")}</Button>
       </DialogActions>
+      </div>
     </Dialog>
   );
 }
