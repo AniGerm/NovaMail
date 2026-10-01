@@ -93,6 +93,7 @@ export function AppShell() {
     useState<PlannedSummaryDto | null>(null);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
   const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
 
   useEffect(() => {
@@ -195,6 +196,7 @@ export function AppShell() {
       .onMailNew(() => {
         void queryClient.invalidateQueries({ queryKey: ["messages"] });
         void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        void queryClient.invalidateQueries({ queryKey: ["message"] });
       })
       .then((fn) => {
         unlisten = fn;
@@ -203,6 +205,31 @@ export function AppShell() {
       unlisten?.();
     };
   }, [desktop, queryClient]);
+
+  // Every scheduled IMAP cycle — keep inbox live even when no "new UID" event fired.
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onSyncCycle(() => {
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop, queryClient]);
+
+  // Keep WebKit spellcheck language in sync with settings.
+  useEffect(() => {
+    if (!desktop) return;
+    const code = spellcheckLang || "de_DE";
+    const short = code.split("_")[0] ?? code;
+    void api.spellcheckSetLanguages([code, short, "en_US", "en"]).catch(() => undefined);
+  }, [desktop, spellcheckLang]);
 
   // Opening a message marks it read so sidebar unread badges update live.
   useEffect(() => {

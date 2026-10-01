@@ -26,12 +26,15 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let state = DesktopState::new()?;
+            // WebKitGTK spellcheck is off by default — HTML spellCheck alone is a no-op.
+            #[cfg(target_os = "linux")]
+            enable_webkit_spellcheck(app, &["de_DE", "de", "en_US", "en"]);
             // Poll IMAP frequently so new mail appears without a manual Sync click.
             let scheduler = SyncScheduler::new(
                 state.app.db().clone(),
                 state.app.secrets().clone(),
                 state.app.paths.blobs_dir.clone(),
-                Duration::from_secs(60),
+                Duration::from_secs(20),
             );
             let handle = app.handle().clone();
             let handle_offline = app.handle().clone();
@@ -77,6 +80,8 @@ pub fn run() {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             });
+            let handle_cycle = app.handle().clone();
+            let app_for_backfill = state.app.clone();
             let _sync_task = scheduler.spawn(
                 move |event| {
                     let _ = handle.emit("sync://progress", &event);
@@ -120,6 +125,11 @@ pub fn run() {
                             }
                         }
                     });
+                },
+                move || {
+                    // Always refresh UI after a scheduled cycle (even if no "new" UIDs).
+                    let _ = handle_cycle.emit("sync://cycle", &true);
+                    app_for_backfill.enqueue_missing_ai_insights(40);
                 },
             );
             app.manage(state);
@@ -247,7 +257,45 @@ pub fn run() {
             commands::updates_check,
             commands::updates_download,
             commands::updates_install,
+            commands::spellcheck_set_languages,
+            commands::ai_optimize_draft,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");
+}
+
+/// WebKitGTK leaves spell checking disabled on the web context; without this,
+/// `spellCheck` / red underlines / right-click suggestions never appear.
+#[cfg(target_os = "linux")]
+fn enable_webkit_spellcheck(app: &tauri::App, languages: &[&str]) {
+    use tauri::Manager;
+    use webkit2gtk::{WebContextExt, WebViewExt};
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let langs: Vec<String> = languages.iter().map(|s| (*s).to_string()).collect();
+    let _ = window.with_webview(move |webview| {
+        let Some(context) = webview.inner().context() else {
+            return;
+        };
+        context.set_spell_checking_enabled(true);
+        let refs: Vec<&str> = langs.iter().map(String::as_str).collect();
+        context.set_spell_checking_languages(&refs);
+        tracing::info!(?refs, "WebKitGTK spellcheck enabled");
+    });
+}
+
+#[cfg(target_os = "linux")]
+pub fn set_webkit_spellcheck_languages(window: &tauri::WebviewWindow, languages: &[String]) {
+    use webkit2gtk::{WebContextExt, WebViewExt};
+    let langs = languages.to_vec();
+    let _ = window.with_webview(move |webview| {
+        let Some(context) = webview.inner().context() else {
+            return;
+        };
+        context.set_spell_checking_enabled(true);
+        let refs: Vec<&str> = langs.iter().map(String::as_str).collect();
+        context.set_spell_checking_languages(&refs);
+    });
 }

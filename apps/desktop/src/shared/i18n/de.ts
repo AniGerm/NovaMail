@@ -104,6 +104,13 @@ export const de = {
   fontSizeXLarge: "Sehr groß",
   spellcheckHint:
     "Rechtschreibung ist aktiv (rote Unterstreichungen). Rechtsklick zeigt Korrekturvorschläge.",
+  composeAiImprove: "Mit KI verbessern",
+  composeAiImproveHint: "Vorschlag für Klarheit und Ton — annehmen oder ablehnen.",
+  composeAiSuggestion: "KI-Vorschlag",
+  composeAiAccept: "Annehmen",
+  composeAiReject: "Ablehnen",
+  composeAiAccepted: "Vorschlag übernommen.",
+  composeAiFailed: "KI-Vorschlag fehlgeschlagen.",
   spellcheckTitle: "Rechtschreibung",
   spellcheckDescription:
     "Wörterbücher für die Prüfung im Schreibfeld. Beim Sprachwechsel wird das passende Wörterbuch automatisch nachgeladen. Weitere Sprachen lassen sich hier per Klick installieren (ohne Administratorrechte).",

@@ -31,6 +31,7 @@ use novamail_ipc::{
     ImportBackupRequest, ImportBackupResult, InvitationResponse, JobsTickReport, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListCalendarRangeRequest,
     ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailboxDto, MessageAiInsights,
+    MessageSortBy, OptimizeDraftRequest, OptimizeDraftResponse, SortDirection,
     MessageDetailDto, MessageSummaryDto, MoveMessageRequest, OAuthExchangeRequest,
     OAuthExchangeResponse, OAuthTokensDto, OfflineMailboxAccountPolicy, OfflineMailboxMode,
     OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto,
@@ -145,10 +146,16 @@ impl AppState {
         }
         settings.model = settings.model.trim().to_string();
         settings.base_url = settings.base_url.trim_end_matches('/').to_string();
+        if settings.enabled {
+            settings.onboarding_completed = true;
+        }
         let raw =
             serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?;
         self.db.set_setting("ai.settings", &raw)?;
         *self.ai.write() = Self::provider_from_settings(&settings);
+        if settings.enabled {
+            self.enqueue_missing_ai_insights(25);
+        }
         Ok(settings)
     }
 
@@ -1736,6 +1743,14 @@ impl AppState {
             .or(insight_provider(&self.db, message_id, "event_suggestions")?)
             .or(insight_provider(&self.db, message_id, "reply_a")?)
             .or(insight_provider(&self.db, message_id, "reply")?);
+        let incomplete = summary.is_none()
+            || reply_a.is_none()
+            || reply_b.is_none()
+            || !insight_event_suggestions_current(&self.db, message_id).unwrap_or(false);
+        if incomplete {
+            // Opening a mail should kick background generation if sync already missed it.
+            self.enqueue_ai_insights(&[message_id]);
+        }
         Ok(MessageAiInsights {
             message_id,
             summary,
@@ -1747,12 +1762,87 @@ impl AppState {
         })
     }
 
+    /// Backfill AI insights for recent messages that still lack them.
+    pub fn enqueue_missing_ai_insights(&self, limit: u32) {
+        let settings = Self::load_ai_settings(&self.db);
+        if !settings.enabled {
+            return;
+        }
+        let Ok((messages, _)) = self.db.list_messages(&ListMessagesRequest {
+            account_id: None,
+            mailbox_id: None,
+            unified: true,
+            mailbox_role: None,
+            unread_only: false,
+            starred_only: false,
+            has_attachments: false,
+            local_only: false,
+            snoozed_only: false,
+            limit: limit.max(1).min(100),
+            offset: 0,
+            query: None,
+            sort_by: MessageSortBy::Date,
+            sort_dir: SortDirection::Desc,
+        }) else {
+            return;
+        };
+        let mut missing = Vec::new();
+        for msg in messages {
+            let has_summary = self
+                .db
+                .has_ai_insight(msg.id, "summary")
+                .unwrap_or(false);
+            let has_replies = self.db.has_ai_insight(msg.id, "reply_a").unwrap_or(false)
+                && self.db.has_ai_insight(msg.id, "reply_b").unwrap_or(false);
+            let has_events =
+                insight_event_suggestions_current(&self.db, msg.id).unwrap_or(false);
+            if !(has_summary && has_replies && has_events) {
+                missing.push(msg.id);
+            }
+        }
+        if !missing.is_empty() {
+            self.enqueue_ai_insights(&missing);
+        }
+    }
+
+    pub async fn optimize_draft(
+        &self,
+        request: OptimizeDraftRequest,
+    ) -> CoreResult<OptimizeDraftResponse> {
+        let ai = self.ai_provider();
+        let suggestion = match ai
+            .optimize_draft(
+                &request.subject,
+                &request.body_text,
+                request.preferred_language.as_deref(),
+            )
+            .await
+        {
+            Ok(text) => text,
+            Err(err) => {
+                tracing::warn!(error = %err, "optimize draft failed; using offline fallback");
+                Self::offline_ai()
+                    .optimize_draft(
+                        &request.subject,
+                        &request.body_text,
+                        request.preferred_language.as_deref(),
+                    )
+                    .await?
+            }
+        };
+        Ok(OptimizeDraftResponse {
+            suggestion,
+            provider: ai.name().into(),
+        })
+    }
+
     pub fn enqueue_ai_insights(&self, message_ids: &[Uuid]) {
         if message_ids.is_empty() {
             return;
         }
         let settings = Self::load_ai_settings(&self.db);
-        if !settings.enabled || !settings.onboarding_completed {
+        // Prefer generating once AI is enabled; onboarding flag alone should not block.
+        if !settings.enabled {
             return;
         }
         // Cap backlog so a large first sync does not saturate the CPU for hours.

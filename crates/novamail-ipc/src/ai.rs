@@ -150,6 +150,22 @@ pub struct EventSuggestionDto {
     pub confidence: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeDraftRequest {
+    pub subject: String,
+    pub body_text: String,
+    #[serde(default)]
+    pub preferred_language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeDraftResponse {
+    pub suggestion: String,
+    pub provider: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageAiInsights {

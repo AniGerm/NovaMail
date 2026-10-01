@@ -261,6 +261,26 @@ impl AiProvider for OllamaProvider {
             provider: format!("{}:{}", self.name(), self.model),
         })
     }
+
+    async fn optimize_draft(
+        &self,
+        subject: &str,
+        body_text: &str,
+        preferred_language: Option<&str>,
+    ) -> AiResult<String> {
+        let lang = crate::resolve_output_language(subject, body_text, preferred_language);
+        let lang_name = crate::language_label(lang);
+        let lang_native = crate::language_native_name(lang);
+        let prompt = format!(
+            "You are an email writing assistant. Improve the user's draft below.\n\
+             CRITICAL: Write ONLY in {lang_name} ({lang_native}).\n\
+             Keep intent, facts, names, and commitments. Improve clarity, tone, and structure.\n\
+             Output ONLY the improved email body — no Subject line, no commentary, no markdown fences.\n\n\
+             Subject: {subject}\n\nDraft:\n{}",
+            truncate(body_text, 3_500)
+        );
+        self.generate_with_limit(&prompt, 320).await
+    }
 }
 
 fn merge_event_suggestions(

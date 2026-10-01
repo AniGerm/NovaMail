@@ -106,6 +106,13 @@ export const en: Translations = {
   fontSizeXLarge: "Extra large",
   spellcheckHint:
     "Spellcheck is on (red underlines). Right-click a word for corrections.",
+  composeAiImprove: "Improve with AI",
+  composeAiImproveHint: "Clarity and tone suggestion — accept or reject.",
+  composeAiSuggestion: "AI suggestion",
+  composeAiAccept: "Accept",
+  composeAiReject: "Reject",
+  composeAiAccepted: "Suggestion applied.",
+  composeAiFailed: "AI suggestion failed.",
   spellcheckTitle: "Spellcheck",
   spellcheckDescription:
     "Dictionaries used in the composer. Changing the UI language auto-loads a matching dictionary. Install more languages here with one click (no admin rights).",

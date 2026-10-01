@@ -241,6 +241,16 @@ export const api = {
     call<SpellDictionaryDto>("spellcheck_install", { code }),
   spellcheckEnsureForLocale: (locale: string) =>
     call<SpellDictionaryDto>("spellcheck_ensure_for_locale", { locale }),
+  spellcheckSetLanguages: (languages: string[]) =>
+    call<void>("spellcheck_set_languages", { languages }),
+  aiOptimizeDraft: (request: {
+    subject: string;
+    bodyText: string;
+    preferredLanguage?: string | null;
+  }) =>
+    call<{ suggestion: string; provider: string }>("ai_optimize_draft", {
+      request,
+    }),
   contactsUpsert: (request: UpsertContactRequest) =>
     call<ContactDto>("contacts_upsert", { request }),
   contactsDelete: (contactId: string) =>
@@ -527,6 +537,12 @@ export const api = {
     if (!isTauri()) return () => undefined;
     return listen<number>("mail://new", (event) => {
       handler(event.payload);
+    });
+  },
+  onSyncCycle: async (handler: () => void): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<boolean>("sync://cycle", () => {
+      handler();
     });
   },
 };

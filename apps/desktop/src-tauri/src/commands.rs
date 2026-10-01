@@ -10,6 +10,7 @@ use novamail_ipc::{
     JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
     ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
     MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
+    OptimizeDraftRequest, OptimizeDraftResponse,
     MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy,
     OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
     OutboundQueueItemDto, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest, PgpKeyDto,
@@ -334,6 +335,31 @@ pub async fn spellcheck_ensure_for_locale(
         .spellcheck_ensure_for_locale(locale)
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spellcheck_set_languages(
+    app: AppHandle,
+    languages: Vec<String>,
+) -> Result<(), AppError> {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window("main") {
+            crate::set_webkit_spellcheck_languages(&window, &languages);
+        }
+    }
+    let _ = app;
+    let _ = languages;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_optimize_draft(
+    state: State<'_, DesktopState>,
+    request: OptimizeDraftRequest,
+) -> Result<OptimizeDraftResponse, AppError> {
+    state.app.optimize_draft(request).await.map_err(map_err)
 }
 
 #[tauri::command]

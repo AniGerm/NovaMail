@@ -124,6 +124,14 @@ pub trait AiProvider: Send + Sync {
         &self,
         request: ExtractEventsRequest,
     ) -> AiResult<ExtractEventsResponse>;
+
+    /// Polish the user's own draft (composer AI assist).
+    async fn optimize_draft(
+        &self,
+        subject: &str,
+        body_text: &str,
+        preferred_language: Option<&str>,
+    ) -> AiResult<String>;
 }
 
 /// Deterministic offline fallback used when no local model is reachable.
@@ -284,6 +292,28 @@ impl AiProvider for NullAiProvider {
             ),
             provider: self.name().into(),
         })
+    }
+
+    async fn optimize_draft(
+        &self,
+        subject: &str,
+        body_text: &str,
+        preferred_language: Option<&str>,
+    ) -> AiResult<String> {
+        let lang = crate::resolve_output_language(subject, body_text, preferred_language);
+        let cleaned = collapse_whitespace(body_text);
+        if cleaned.is_empty() {
+            return Ok(String::new());
+        }
+        if lang == "de" {
+            Ok(format!(
+                "Betreff: {subject}\n\n{cleaned}\n\n— (Offline-Entwurf, leicht geglättet)"
+            ))
+        } else {
+            Ok(format!(
+                "Subject: {subject}\n\n{cleaned}\n\n— (Offline draft, lightly polished)"
+            ))
+        }
     }
 }
 

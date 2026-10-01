@@ -553,7 +553,16 @@ export function SettingsDialog({
             <Select
               className="h-11"
               value={spellcheckLang}
-              onChange={(e) => setSpellcheckLang(e.target.value)}
+              onChange={(e) => {
+                const code = e.target.value;
+                setSpellcheckLang(code);
+                const short = code.split("_")[0] ?? code;
+                if (isDesktopShell()) {
+                  void api
+                    .spellcheckSetLanguages([code, short, "en_US", "en"])
+                    .catch(() => undefined);
+                }
+              }}
             >
               {spellDicts.map((dict) => (
                 <option key={dict.code} value={dict.code} disabled={!dict.installed}>
