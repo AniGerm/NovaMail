@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AccountDto,
   AddAccountPasswordRequest,
+  UpdateAccountRequest,
   AppError,
   AttachmentDto,
   CardDavServerStatus,
@@ -72,6 +73,10 @@ import type {
   SyncProgressEvent,
   SyncResult,
   UpsertContactRequest,
+  AppVersionInfo,
+  UpdateActionResult,
+  UpdateCheckResult,
+  UpdateStatusEvent,
 } from "./types";
 
 export type { SendMessageRequest, OutgoingAttachment };
@@ -142,6 +147,8 @@ export const api = {
   }) => call<AccountDto>("accounts_add_oauth", { request }),
   accountsRemove: (accountId: string) =>
     call<void>("accounts_remove", { accountId }),
+  accountsUpdate: (request: UpdateAccountRequest) =>
+    call<AccountDto>("accounts_update", { request }),
   mailboxesList: (accountId?: string | null) =>
     call<MailboxDto[]>("mailboxes_list", { accountId: accountId ?? null }),
   messagesList: (request: ListMessagesRequest) =>
@@ -162,17 +169,33 @@ export const api = {
     call<void>("messages_delete", { messageId }),
   mailSync: (accountId?: string | null) =>
     call<SyncResult[]>("mail_sync", { request: { accountId: accountId ?? null } }),
-  aiSummarizeMessage: (messageId: string) =>
+  aiSummarizeMessage: (messageId: string, preferredLanguage?: string | null) =>
     call<SummarizeMessageResponse>("ai_summarize_message", {
-      request: { messageId },
+      request: { messageId, preferredLanguage: preferredLanguage ?? null },
     }),
-  aiSuggestReply: (messageId: string, facts?: string | null) =>
+  aiSuggestReply: (
+    messageId: string,
+    facts?: string | null,
+    preferredLanguage?: string | null,
+  ) =>
     call<SuggestReplyMessageResponse>("ai_suggest_reply", {
-      request: { messageId, facts: facts ?? null },
+      request: {
+        messageId,
+        facts: facts ?? null,
+        preferredLanguage: preferredLanguage ?? null,
+      },
     }),
-  aiSuggestReplies: (messageId: string, facts?: string | null) =>
+  aiSuggestReplies: (
+    messageId: string,
+    facts?: string | null,
+    preferredLanguage?: string | null,
+  ) =>
     call<SuggestRepliesMessageResponse>("ai_suggest_replies", {
-      request: { messageId, facts: facts ?? null },
+      request: {
+        messageId,
+        facts: facts ?? null,
+        preferredLanguage: preferredLanguage ?? null,
+      },
     }),
   aiMessageInsights: (messageId: string) =>
     call<MessageAiInsights>("ai_message_insights", { messageId }),
@@ -218,6 +241,16 @@ export const api = {
     call<SpellDictionaryDto>("spellcheck_install", { code }),
   spellcheckEnsureForLocale: (locale: string) =>
     call<SpellDictionaryDto>("spellcheck_ensure_for_locale", { locale }),
+  spellcheckSetLanguages: (languages: string[]) =>
+    call<void>("spellcheck_set_languages", { languages }),
+  aiOptimizeDraft: (request: {
+    subject: string;
+    bodyText: string;
+    preferredLanguage?: string | null;
+  }) =>
+    call<{ suggestion: string; provider: string }>("ai_optimize_draft", {
+      request,
+    }),
   contactsUpsert: (request: UpsertContactRequest) =>
     call<ContactDto>("contacts_upsert", { request }),
   contactsDelete: (contactId: string) =>
@@ -466,6 +499,18 @@ export const api = {
     call<CalendarInvitationDto>("calendar_invitations_respond", {
       request: { id, response },
     }),
+  appVersion: () => call<AppVersionInfo>("app_version"),
+  updatesCheck: () => call<UpdateCheckResult>("updates_check"),
+  updatesDownload: () => call<UpdateActionResult>("updates_download"),
+  updatesInstall: () => call<UpdateActionResult>("updates_install"),
+  onUpdateStatus: async (
+    handler: (event: UpdateStatusEvent) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<UpdateStatusEvent>("update://status", (event) => {
+      handler(event.payload);
+    });
+  },
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),
   oauthWaitCallback: (timeoutSecs = 180) =>
@@ -486,6 +531,18 @@ export const api = {
     if (!isTauri()) return () => undefined;
     return listen<SyncProgressEvent>("sync://progress", (event) => {
       handler(event.payload);
+    });
+  },
+  onMailNew: async (handler: (count: number) => void): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<number>("mail://new", (event) => {
+      handler(event.payload);
+    });
+  },
+  onSyncCycle: async (handler: () => void): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<boolean>("sync://cycle", () => {
+      handler();
     });
   },
 };

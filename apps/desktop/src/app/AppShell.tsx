@@ -93,11 +93,29 @@ export function AppShell() {
     useState<PlannedSummaryDto | null>(null);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
+  const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
 
   useEffect(() => {
     if (!desktop) return;
     void api.spellcheckEnsureForLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
+
+  useEffect(() => {
+    if (!desktop || !autoCheckUpdates) return;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      void api.updatesCheck().catch(() => undefined);
+    };
+    const start = window.setTimeout(run, 10_000);
+    const interval = window.setInterval(run, 4 * 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+      window.clearInterval(interval);
+    };
+  }, [desktop, autoCheckUpdates]);
 
   const accountsQuery = useQuery({
     queryKey: ["accounts"],
@@ -106,9 +124,9 @@ export function AppShell() {
   });
 
   const mailboxesQuery = useQuery({
-    queryKey: ["mailboxes", inboxFilters.accountId],
+    queryKey: ["mailboxes", "all"],
     enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
-    queryFn: () => api.mailboxesList(inboxFilters.accountId),
+    queryFn: () => api.mailboxesList(null),
   });
 
   const listRequest = useMemo(
@@ -159,6 +177,7 @@ export function AppShell() {
         );
         if (event.done) {
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
         }
       })
       .then((fn) => {
@@ -168,6 +187,64 @@ export function AppShell() {
       unlisten?.();
     };
   }, [desktop, queryClient, setSyncStatus]);
+
+  // Refresh list + sidebar badges as soon as background sync finds new mail.
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onMailNew(() => {
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        void queryClient.invalidateQueries({ queryKey: ["message"] });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop, queryClient]);
+
+  // Every scheduled IMAP cycle — keep inbox live even when no "new UID" event fired.
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onSyncCycle(() => {
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop, queryClient]);
+
+  // Keep WebKit spellcheck language in sync with settings.
+  useEffect(() => {
+    if (!desktop) return;
+    const code = spellcheckLang || "de_DE";
+    const short = code.split("_")[0] ?? code;
+    void api.spellcheckSetLanguages([code, short, "en_US", "en"]).catch(() => undefined);
+  }, [desktop, spellcheckLang]);
+
+  // Opening a message marks it read so sidebar unread badges update live.
+  useEffect(() => {
+    if (!desktop || !selectedMessageId || !messageQuery.data) return;
+    if (!messageQuery.data.summary.unread) return;
+    const id = selectedMessageId;
+    void api
+      .messagesSetFlags({ messageId: id, unread: false })
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["message", id] });
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      })
+      .catch(() => undefined);
+  }, [desktop, messageQuery.data, queryClient, selectedMessageId]);
 
   useEffect(() => {
     if (!desktop) return;
@@ -278,6 +355,7 @@ export function AppShell() {
         queryKey: ["message", id],
       });
       await queryClient.invalidateQueries({ queryKey: ["messages"] });
+      await queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
     },
     [desktop, messageQuery.data, queryClient],
   );
@@ -337,6 +415,23 @@ export function AppShell() {
       snoozedOnly: false,
     }));
   }, []);
+
+  const handleSelectMailbox = useCallback(
+    (accountId: string, mailboxId: string) => {
+      selectMessage(null);
+      setPlannedOpen(false);
+      setCalendarOpen(false);
+      setInboxFilters((prev) => ({
+        ...prev,
+        accountId,
+        mailboxId,
+        mailboxRole: null,
+        localOnly: false,
+        snoozedOnly: false,
+      }));
+    },
+    [selectMessage],
+  );
 
   const handleSelectDrafts = useCallback(() => {
     selectMessage(null);
@@ -845,7 +940,9 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           accounts={accounts}
+          mailboxes={mailboxes}
           selectedAccountId={inboxFilters.accountId}
+          selectedMailboxId={inboxFilters.mailboxId}
           draftsSelected={inboxFilters.mailboxRole === "drafts"}
           spamSelected={inboxFilters.mailboxRole === "junk"}
           offlineSelected={inboxFilters.localOnly}
@@ -859,6 +956,7 @@ export function AppShell() {
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
+          onSelectMailbox={handleSelectMailbox}
           onSelectDrafts={handleSelectDrafts}
           onSelectSpam={handleSelectSpam}
           onSelectOffline={handleSelectOffline}
@@ -1077,6 +1175,14 @@ export function AppShell() {
           void queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
         }}
         accounts={accounts}
+        onAccountsChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        }}
+        onAddAccount={() => {
+          setSettingsOpen(false);
+          setAccountSetupOpen(true);
+        }}
       />
       <ContactsDialog
         open={contactsOpen}

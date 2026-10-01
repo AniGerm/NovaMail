@@ -10,7 +10,9 @@ import type {
   LabelDto,
   SignatureDto,
   SpellDictionaryDto,
+  UpdateStatusEvent,
 } from "@/shared/api/types";
+import { AccountsPanel } from "@/features/settings/AccountsPanel";
 import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
 import { PgpKeysPanel } from "@/features/settings/PgpKeysPanel";
 import { RulesSpamPanel } from "@/features/settings/RulesSpamPanel";
@@ -56,14 +58,105 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+type UpdateUiState = {
+  status: string;
+  availableVersion: string | null;
+  downloadedVersion: string | null;
+  progress: number | null;
+  checking: boolean;
+  downloading: boolean;
+};
+
+const INITIAL_UPDATE: UpdateUiState = {
+  status: "",
+  availableVersion: null,
+  downloadedVersion: null,
+  progress: null,
+  checking: false,
+  downloading: false,
+};
+
+function applyUpdateEvent(
+  prev: UpdateUiState,
+  event: UpdateStatusEvent,
+  labels: {
+    checking: string;
+    available: (version: string) => string;
+    notAvailable: string;
+    downloading: (percent: number) => string;
+    downloaded: (version: string) => string;
+    installing: string;
+  },
+): UpdateUiState {
+  switch (event.type) {
+    case "checking":
+      return { ...prev, checking: true, status: labels.checking };
+    case "update-available":
+      return {
+        ...prev,
+        checking: false,
+        availableVersion: event.version,
+        downloadedVersion: null,
+        progress: null,
+        status: labels.available(event.version),
+      };
+    case "update-not-available":
+      return {
+        ...prev,
+        checking: false,
+        availableVersion: null,
+        status: labels.notAvailable,
+      };
+    case "download-progress":
+      return {
+        ...prev,
+        downloading: true,
+        progress: event.percent,
+        status: labels.downloading(event.percent),
+      };
+    case "update-downloaded":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        progress: 100,
+        availableVersion: event.version,
+        downloadedVersion: event.version,
+        status: labels.downloaded(event.version),
+      };
+    case "installing":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: labels.installing,
+      };
+    case "error":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: event.message,
+      };
+    default:
+      return prev;
+  }
+}
+
+type SettingsTab = "general" | "accounts" | "ai" | "mail" | "privacy";
+
 export function SettingsDialog({
   open,
   onClose,
   accounts = [],
+  onAccountsChanged,
+  onAddAccount,
 }: {
   open: boolean;
   onClose: () => void;
   accounts?: AccountDto[];
+  onAccountsChanged?: () => void;
+  onAddAccount?: () => void;
 }) {
   const t = useT();
   const theme = useUiStore((s) => s.theme);
@@ -78,6 +171,8 @@ export function SettingsDialog({
   const setHighContrast = useUiStore((s) => s.setHighContrast);
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
+  const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
+  const setAutoCheckUpdates = useUiStore((s) => s.setAutoCheckUpdates);
 
   const [signatures, setSignatures] = useState<SignatureDto[]>([]);
   const [labels, setLabels] = useState<LabelDto[]>([]);
@@ -92,6 +187,9 @@ export function SettingsDialog({
   const importFileRef = useRef<File | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateChannel, setUpdateChannel] = useState("dev");
+  const [updateUi, setUpdateUi] = useState<UpdateUiState>(INITIAL_UPDATE);
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     enabled: false,
     model: AI_DEFAULT_MODEL,
@@ -108,6 +206,7 @@ export function SettingsDialog({
   const [spellBusyCode, setSpellBusyCode] = useState<string | null>(null);
   const [spellStatus, setSpellStatus] = useState<string | null>(null);
   const [otherLangsOpen, setOtherLangsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const primarySpellDicts = spellDicts.filter((d) =>
     PRIMARY_SPELL_CODES.has(d.code),
   );
@@ -153,6 +252,10 @@ export function SettingsDialog({
   }
 
   useEffect(() => {
+    if (open) setSettingsTab("general");
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     setSigName(t("defaultSignatureName"));
     setBackupPassphrase("");
@@ -165,6 +268,39 @@ export function SettingsDialog({
     refreshExtras().catch((err) => setError((err as AppError).message));
     refreshAi().catch((err) => setError((err as AppError).message));
     refreshSpellcheck().catch(() => undefined);
+    if (isDesktopShell()) {
+      void api
+        .appVersion()
+        .then((info) => {
+          setAppVersion(info.version);
+          setUpdateChannel(info.channel);
+        })
+        .catch(() => undefined);
+    }
+  }, [open, t]);
+
+  useEffect(() => {
+    if (!open || !isDesktopShell()) return;
+    let unlisten: (() => void) | undefined;
+    void api
+      .onUpdateStatus((event) => {
+        setUpdateUi((prev) =>
+          applyUpdateEvent(prev, event, {
+            checking: t("updatesChecking"),
+            available: (version) => t("updatesAvailable", { version }),
+            notAvailable: t("updatesNotAvailable"),
+            downloading: (percent) => t("updatesDownloading", { percent }),
+            downloaded: (version) => t("updatesDownloaded", { version }),
+            installing: t("updatesInstalling"),
+          }),
+        );
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
   }, [open, t]);
 
   async function handleSaveAi() {
@@ -295,6 +431,54 @@ export function SettingsDialog({
     }
   }
 
+  async function handleCheckUpdates() {
+    if (!isDesktopShell()) return;
+    setUpdateUi((prev) => ({
+      ...prev,
+      checking: true,
+      status: t("updatesChecking"),
+    }));
+    try {
+      await api.updatesCheck();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
+    }
+  }
+
+  async function handleDownloadUpdate() {
+    if (!isDesktopShell()) return;
+    setUpdateUi((prev) => ({ ...prev, downloading: true, progress: 0 }));
+    try {
+      await api.updatesDownload();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!isDesktopShell()) return;
+    try {
+      await api.updatesInstall();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
+    }
+  }
+
   return (
     <Dialog
       open={open}
@@ -303,7 +487,41 @@ export function SettingsDialog({
       description={t("settingsDescription")}
       className="max-w-3xl"
     >
+      <div className="flex flex-wrap gap-1 border-b border-[var(--nova-border)] pb-2">
+        {(
+          [
+            ["general", t("settingsTabGeneral")],
+            ["accounts", t("settingsTabAccounts")],
+            ["ai", t("settingsTabAi")],
+            ["mail", t("settingsTabMail")],
+            ["privacy", t("settingsTabPrivacy")],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSettingsTab(id)}
+            className={
+              settingsTab === id
+                ? "rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--nova-accent)]"
+                : "rounded-[var(--nova-radius-sm)] px-3 py-1.5 text-sm text-[var(--nova-ink-muted)] hover:bg-[var(--nova-surface-2)]"
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
+        {settingsTab === "accounts" ? (
+          <AccountsPanel
+            accounts={accounts}
+            onChanged={() => onAccountsChanged?.()}
+            onAddAccount={() => onAddAccount?.()}
+          />
+        ) : null}
+        {settingsTab === "general" ? (
+        <>
+
         <label className="grid gap-1">
           <span>{t("language")}</span>
           <Select
@@ -335,7 +553,16 @@ export function SettingsDialog({
             <Select
               className="h-11"
               value={spellcheckLang}
-              onChange={(e) => setSpellcheckLang(e.target.value)}
+              onChange={(e) => {
+                const code = e.target.value;
+                setSpellcheckLang(code);
+                const short = code.split("_")[0] ?? code;
+                if (isDesktopShell()) {
+                  void api
+                    .spellcheckSetLanguages([code, short, "en_US", "en"])
+                    .catch(() => undefined);
+                }
+              }}
             >
               {spellDicts.map((dict) => (
                 <option key={dict.code} value={dict.code} disabled={!dict.installed}>
@@ -509,6 +736,74 @@ export function SettingsDialog({
           {t("highContrast")}
         </label>
 
+        <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+          <h3 className="font-medium">{t("updatesTitle")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("updatesCurrentVersion", {
+              version: appVersion || "…",
+            })}
+            {" — "}
+            {updateChannel === "deb"
+              ? t("updatesDescriptionDeb")
+              : t("updatesDescriptionDev")}
+          </p>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={autoCheckUpdates}
+              onChange={(e) => setAutoCheckUpdates(e.target.checked)}
+            />
+            {t("updatesAutoCheck")}
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={
+                !isDesktopShell() || updateUi.checking || updateUi.downloading
+              }
+              onClick={() => void handleCheckUpdates()}
+            >
+              {t("updatesCheck")}
+            </Button>
+            {updateUi.availableVersion && !updateUi.downloadedVersion ? (
+              <Button
+                type="button"
+                disabled={updateUi.downloading}
+                onClick={() => void handleDownloadUpdate()}
+              >
+                {t("updatesDownload")}
+              </Button>
+            ) : null}
+            {updateUi.downloadedVersion ? (
+              <Button type="button" onClick={() => void handleInstallUpdate()}>
+                {t("updatesInstall")}
+              </Button>
+            ) : null}
+          </div>
+          {updateUi.progress !== null && updateUi.downloading ? (
+            <div
+              className="h-2 overflow-hidden rounded-full bg-[var(--nova-border)]"
+              role="progressbar"
+              aria-valuenow={updateUi.progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full bg-[var(--nova-accent)] transition-[width]"
+                style={{ width: `${updateUi.progress}%` }}
+              />
+            </div>
+          ) : null}
+          {updateUi.status ? (
+            <p className="text-xs text-[var(--nova-ink-muted)]">{updateUi.status}</p>
+          ) : null}
+        </section>
+
+        </>
+        ) : null}
+        {settingsTab === "ai" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("aiSettingsTitle")}</h3>
           <p className="text-xs text-[var(--nova-ink-muted)]">
@@ -740,6 +1035,10 @@ export function SettingsDialog({
           ) : null}
         </section>
 
+        </>
+        ) : null}
+        {settingsTab === "privacy" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("backupTitle")}</h3>
           <p className="text-xs text-[var(--nova-ink-muted)]">
@@ -810,6 +1109,11 @@ export function SettingsDialog({
           ) : null}
         </section>
 
+        <PgpKeysPanel />
+        </>
+        ) : null}
+        {settingsTab === "mail" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("signatures")}</h3>
           <Input value={sigName} onChange={(e) => setSigName(e.target.value)} />
@@ -877,8 +1181,9 @@ export function SettingsDialog({
         </section>
 
         <OfflineMailboxPanel accounts={accounts} />
-        <PgpKeysPanel />
         <RulesSpamPanel accounts={accounts} />
+        </>
+        ) : null}
 
         {error ? (
           <p className="text-[var(--nova-danger)]" role="alert">

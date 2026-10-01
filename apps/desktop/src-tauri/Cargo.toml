@@ -16,6 +16,8 @@ tauri-build = { version = "2", features = [] }
 novamail-core = { workspace = true }
 novamail-ipc = { workspace = true }
 novamail-mail = { workspace = true }
+dirs = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
@@ -25,6 +27,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+
+# Match wry's WebKitGTK bindings so we can enable native spellcheck on Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
 
 [features]
 default = ["custom-protocol"]

@@ -46,16 +46,19 @@ impl SyncScheduler {
     /// `on_new_messages` receives local message IDs newly inserted in a cycle
     /// (for AI insights + mail rules).
     /// `on_accounts_synced` receives account IDs that completed sync (offline quota).
-    pub fn spawn<F, N, A>(
+    /// `on_cycle_done` runs after every finished cycle (UI refresh / AI backfill).
+    pub fn spawn<F, N, A, C>(
         self,
         mut on_progress: F,
         mut on_new_messages: N,
         mut on_accounts_synced: A,
+        mut on_cycle_done: C,
     ) -> std::thread::JoinHandle<()>
     where
         F: FnMut(SyncProgressEvent) + Send + 'static,
         N: FnMut(Vec<Uuid>) + Send + 'static,
         A: FnMut(Vec<Uuid>) + Send + 'static,
+        C: FnMut() + Send + 'static,
     {
         std::thread::Builder::new()
             .name("novamail-sync-scheduler".into())
@@ -71,6 +74,7 @@ impl SyncScheduler {
                     }
                 };
                 runtime.block_on(async move {
+                    // Immediate first sync, then wait between cycles.
                     loop {
                         {
                             let mut guard = self.running.lock().await;
@@ -89,6 +93,7 @@ impl SyncScheduler {
                                     Err(err) => {
                                         warn!(error = %err, "scheduler failed to list accounts");
                                         *self.running.lock().await = false;
+                                        on_cycle_done();
                                         tokio::time::sleep(self.interval).await;
                                         continue;
                                     }
@@ -121,6 +126,7 @@ impl SyncScheduler {
                                     on_accounts_synced(synced_accounts);
                                 }
                                 *self.running.lock().await = false;
+                                on_cycle_done();
                             }
                         }
                         tokio::time::sleep(self.interval).await;

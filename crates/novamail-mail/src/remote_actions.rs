@@ -3,7 +3,7 @@
 use futures::TryStreamExt;
 use novamail_crypto::SecretStore;
 use novamail_db::{AccountRecord, Database};
-use novamail_ipc::SaveDraftRequest;
+use novamail_ipc::{SaveDraftRequest, SendMessageRequest};
 use uuid::Uuid;
 
 use crate::credentials::ensure_fresh_credentials;
@@ -477,6 +477,64 @@ async fn resolve_drafts_mailbox(
     }
     let _ = db.ensure_mailbox(account_id, "Drafts", "drafts");
     Ok("Drafts".into())
+}
+
+/// Append a copy of a successfully sent message into the IMAP Sent folder.
+pub async fn append_sent_remote(
+    db: &Database,
+    secrets: &SecretStore,
+    account: &AccountRecord,
+    request: &SendMessageRequest,
+) -> MailResult<()> {
+    let credentials = ensure_fresh_credentials(account, secrets).await?;
+    let mut imap = LiveImap::connect(account, &credentials).await?;
+    let sent_name = resolve_sent_mailbox(&mut imap, db, account.id).await?;
+    let rfc_message_id = format!("<{}@novamail.local>", Uuid::new_v4());
+    let draft_shaped = SaveDraftRequest {
+        id: None,
+        account_id: request.account_id,
+        to: request.to.clone(),
+        cc: request.cc.clone(),
+        subject: request.subject.clone(),
+        body_text: request.body_text.clone(),
+        body_html: request.body_html.clone(),
+        in_reply_to: request.in_reply_to.clone(),
+        references: request.references.clone(),
+    };
+    let raw = build_draft_rfc822(account, &draft_shaped, &rfc_message_id)?;
+    imap.append(&sent_name, Some(r"(\Seen)"), &raw).await?;
+    tracing::info!(
+        account = %account.email,
+        mailbox = %sent_name,
+        "IMAP APPEND to Sent succeeded"
+    );
+    let _ = imap.logout().await;
+    Ok(())
+}
+
+async fn resolve_sent_mailbox(
+    imap: &mut LiveImap,
+    db: &Database,
+    account_id: Uuid,
+) -> MailResult<String> {
+    if let Ok(listed) = imap.list_mailboxes().await {
+        for (name, role) in &listed {
+            if role.as_deref() == Some("sent") {
+                let _ = db.ensure_mailbox(account_id, name, "sent");
+                return Ok(name.clone());
+            }
+        }
+    }
+
+    if let Some(existing) = db.find_mailbox_by_role(account_id, "sent")? {
+        return Ok(existing.name);
+    }
+
+    if let Err(err) = imap.create_mailbox("Sent").await {
+        tracing::warn!(error = %err, "CREATE Sent failed; trying APPEND anyway");
+    }
+    let _ = db.ensure_mailbox(account_id, "Sent", "sent");
+    Ok("Sent".into())
 }
 
 /// Drain a uid_store / uid_expunge stream so the command completes.

@@ -23,6 +23,7 @@ mod signatures;
 mod spam;
 mod spellcheck;
 mod sync;
+mod update;
 
 pub use account::*;
 pub use ai::*;
@@ -43,3 +44,4 @@ pub use signatures::*;
 pub use spam::*;
 pub use spellcheck::*;
 pub use sync::*;
+pub use update::*;

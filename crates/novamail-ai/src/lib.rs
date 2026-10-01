@@ -4,6 +4,7 @@
 //! offline fallback (deterministic extractive summary), not fabricated mail.
 
 mod install;
+mod language;
 mod ollama;
 mod provider;
 mod runtime;
@@ -12,9 +13,10 @@ pub use install::{
     ensure_ollama_running, install_ollama_system, install_ollama_user, probe_ollama,
     InstallProgress, OllamaPresence,
 };
+pub use language::{language_label, language_native_name, resolve_output_language, LangTag};
 pub use ollama::OllamaProvider;
 pub use provider::{
-    heuristic_event_suggestions, AiError, AiProvider, AiResult, EventSuggestion,
+    heuristic_event_suggestions, strip_quoted_reply, AiError, AiProvider, AiResult, EventSuggestion,
     ExtractEventsRequest, ExtractEventsResponse, NullAiProvider, PrioritizeRequest,
     PrioritizeResponse, SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse,
     SummarizeRequest, SummarizeResponse,

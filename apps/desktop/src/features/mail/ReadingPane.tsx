@@ -109,24 +109,35 @@ export function ReadingPane({
         if (!cancelled && result) setPgpResult(result);
       })
       .catch(() => undefined);
-    void api
-      .aiMessageInsights(id)
-      .then((insights) => {
-        if (cancelled) return;
-        if (insights.summary) setSummary(insights.summary);
-        setEventSuggestions(insights.eventSuggestions ?? []);
-        const a = insights.replyA ?? insights.replySuggestion ?? null;
-        const b = insights.replyB ?? null;
-        setVariantA(a);
-        setVariantB(b);
-        if (a) {
-          setActiveVariant("a");
-          setDraft(a);
-        }
-      })
-      .catch(() => undefined);
+    const loadInsights = () =>
+      api
+        .aiMessageInsights(id)
+        .then((insights) => {
+          if (cancelled) return false;
+          if (insights.summary) setSummary(insights.summary);
+          setEventSuggestions(insights.eventSuggestions ?? []);
+          const a = insights.replyA ?? insights.replySuggestion ?? null;
+          const b = insights.replyB ?? null;
+          setVariantA(a);
+          setVariantB(b);
+          if (a) {
+            setActiveVariant("a");
+            setDraft(a);
+          }
+          // Incomplete → background AI still running; keep polling briefly.
+          return Boolean(insights.summary && a && b);
+        })
+        .catch(() => false);
+
+    void loadInsights();
+    const timer = window.setInterval(() => {
+      void loadInsights().then((done) => {
+        if (done) window.clearInterval(timer);
+      });
+    }, 2500);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [message?.summary.id]);
 
@@ -150,7 +161,7 @@ export function ReadingPane({
     setAiBusy(true);
     setAiError(null);
     try {
-      const result = await api.aiSummarizeMessage(current.summary.id);
+      const result = await api.aiSummarizeMessage(current.summary.id, locale);
       setSummary(result.summary);
     } catch (error) {
       setAiError((error as AppError).message || t("summarizeFailed"));
@@ -166,7 +177,11 @@ export function ReadingPane({
     setAiBusy(true);
     setAiError(null);
     try {
-      const result = await api.aiSuggestReplies(current.summary.id);
+      const result = await api.aiSuggestReplies(
+        current.summary.id,
+        null,
+        locale,
+      );
       const a = result.variants[0] ?? "";
       const b = result.variants[1] ?? result.variants[0] ?? "";
       setVariantA(a || null);
@@ -190,9 +205,8 @@ export function ReadingPane({
   }
 
   function selectOwn() {
-    setActiveVariant("own");
-    setDraft("");
-    requestAnimationFrame(() => draftRef.current?.focus());
+    // Open the full composer instead of the inline mini draft.
+    onReply();
   }
 
   async function handleSendReply() {

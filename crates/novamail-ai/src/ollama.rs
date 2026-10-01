@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::provider::{
-    heuristic_event_suggestions, AiError, AiProvider, AiResult, EventSuggestion,
+    heuristic_event_suggestions, strip_quoted_reply, AiError, AiProvider, AiResult, EventSuggestion,
     ExtractEventsRequest, ExtractEventsResponse, PrioritizeRequest, PrioritizeResponse,
     SuggestReplyRequest, SuggestReplyResponse, SuggestReplyVariantsResponse, SummarizeRequest,
     SummarizeResponse,
@@ -112,9 +112,19 @@ impl AiProvider for OllamaProvider {
     }
 
     async fn summarize(&self, request: SummarizeRequest) -> AiResult<SummarizeResponse> {
+        let lang = crate::resolve_output_language(
+            &request.subject,
+            &request.body_text,
+            request.preferred_language.as_deref(),
+        );
+        let lang_name = crate::language_label(lang);
+        let lang_native = crate::language_native_name(lang);
         let prompt = format!(
-            "Summarize this work email in at most 2 short sentences (German or English, \
-             matching the email language). Reply with the summary only.\n\nSubject: {}\n\n{}",
+            "You are an email assistant. Summarize this work email in at most 2 short sentences.\n\
+             CRITICAL: Write the summary ONLY in {lang_name} ({lang_native}). \
+             Do not use any other language.\n\
+             Reply with the summary text only — no labels, no markdown.\n\n\
+             Subject: {}\n\n{}",
             request.subject,
             truncate(&request.body_text, 3_500)
         );
@@ -125,6 +135,13 @@ impl AiProvider for OllamaProvider {
     }
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse> {
+        let lang = crate::resolve_output_language(
+            &request.subject,
+            &request.body_text,
+            request.preferred_language.as_deref(),
+        );
+        let lang_name = crate::language_label(lang);
+        let lang_native = crate::language_native_name(lang);
         let facts_block = request
             .facts
             .as_deref()
@@ -137,14 +154,19 @@ impl AiProvider for OllamaProvider {
                 )
             })
             .unwrap_or_default();
-        let style = match request.style.as_deref() {
-            Some("concise") => "concise and direct",
-            Some("friendly") => "warm and friendly",
+        let style = match (request.style.as_deref(), lang) {
+            (Some("concise"), "de") => "knapp und klar",
+            (Some("friendly"), "de") => "warm und freundlich",
+            (_, "de") => "professionell",
+            (Some("concise"), _) => "concise and direct",
+            (Some("friendly"), _) => "warm and friendly",
             _ => "professional",
         };
         let prompt = format!(
-            "Write a complete {style} email reply body with greeting, 3-6 sentences, and sign-off. \
-             Match German or English to the original mail. \
+            "You are an email assistant. Write a complete {style} email reply body \
+             with greeting, 3-6 sentences, and sign-off.\n\
+             CRITICAL: Write the entire reply ONLY in {lang_name} ({lang_native}). \
+             Do not mix languages. Do not answer in English unless the required language is English.\n\
              Output ONLY the reply body — no Subject line, no markdown, no commentary.\
              {facts_block}\nOriginal From: {}\nOriginal Subject: {}\n\nOriginal body:\n{}",
             request.from_email,
@@ -199,20 +221,38 @@ impl AiProvider for OllamaProvider {
         let ref_iso = chrono::DateTime::from_timestamp(request.reference_at, 0)
             .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
             .unwrap_or_else(|| "unknown".into());
+        // Never feed quoted reply history / "Am … schrieb" headers to the model.
+        let clean_body = strip_quoted_reply(&request.body_text);
+        let heuristics = heuristic_event_suggestions(
+            &request.subject,
+            &clean_body,
+            request.reference_at,
+        );
         let prompt = format!(
-            "Extract meeting/appointment suggestions from this email. \
-             Reference datetime (UTC): {ref_iso}. \
-             Reply with JSON ONLY: {{\"suggestions\":[{{\"label\":\"Thu 14:00\",\"startsAt\":1710000000,\"endsAt\":1710003600,\"location\":\"Zoom\",\"confidence\":0.8}}]}}. \
-             Use unix seconds. Max 5 suggestions. Empty array if none.\n\nSubject: {}\n\n{}",
+            "Extract meeting/appointment suggestions from the NEW message content only.\n\
+             CRITICAL RULES:\n\
+             - Ignore quoted replies, forwarded headers, and lines like \
+             \"Am Donnerstag, … schrieb …\" / \"On … wrote:\".\n\
+             - Do NOT treat the email Date header or send timestamp as an appointment.\n\
+             - Resolve relative words against the reference datetime: \
+             German morgen/heute/übermorgen and English tomorrow/today/day after tomorrow.\n\
+             - Example: \"morgen 18:00\" with reference Thursday 2026-10-01 → Friday 18:00.\n\
+             Reference datetime (UTC): {ref_iso}.\n\
+             Reply with JSON ONLY: {{\"suggestions\":[{{\"label\":\"Fri 18:00\",\"startsAt\":1710000000,\"endsAt\":1710003600,\"location\":\"Bowling\",\"confidence\":0.85}}]}}.\n\
+             Use unix seconds. Max 5 suggestions. Empty array if none.\n\n\
+             Subject: {}\n\n{}",
             request.subject,
-            truncate(&request.body_text, 3_500)
+            truncate(&clean_body, 3_500)
         );
         let raw = self.generate_with_limit(&prompt, 400).await?;
-        let mut suggestions = parse_event_suggestions_json(&raw);
+        let mut llm = parse_event_suggestions_json(&raw);
+        // Drop suggestions that are just the message send time (±3 min).
+        llm.retain(|s| (s.starts_at - request.reference_at).abs() > 180);
+        let mut suggestions = merge_event_suggestions(heuristics, llm);
         if suggestions.is_empty() {
             suggestions = heuristic_event_suggestions(
                 &request.subject,
-                &request.body_text,
+                &clean_body,
                 request.reference_at,
             );
         }
@@ -221,6 +261,50 @@ impl AiProvider for OllamaProvider {
             provider: format!("{}:{}", self.name(), self.model),
         })
     }
+
+    async fn optimize_draft(
+        &self,
+        subject: &str,
+        body_text: &str,
+        preferred_language: Option<&str>,
+    ) -> AiResult<String> {
+        let lang = crate::resolve_output_language(subject, body_text, preferred_language);
+        let lang_name = crate::language_label(lang);
+        let lang_native = crate::language_native_name(lang);
+        let prompt = format!(
+            "You are an email writing assistant. Improve the user's draft below.\n\
+             CRITICAL: Write ONLY in {lang_name} ({lang_native}).\n\
+             Keep intent, facts, names, and commitments. Improve clarity, tone, and structure.\n\
+             Output ONLY the improved email body — no Subject line, no commentary, no markdown fences.\n\n\
+             Subject: {subject}\n\nDraft:\n{}",
+            truncate(body_text, 3_500)
+        );
+        self.generate_with_limit(&prompt, 320).await
+    }
+}
+
+fn merge_event_suggestions(
+    heuristics: Vec<EventSuggestion>,
+    llm: Vec<EventSuggestion>,
+) -> Vec<EventSuggestion> {
+    let mut combined = heuristics;
+    for suggestion in llm {
+        let near_existing = combined
+            .iter()
+            .any(|h| (h.starts_at - suggestion.starts_at).abs() < 120);
+        if !near_existing {
+            combined.push(suggestion);
+        }
+    }
+    combined.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.starts_at.cmp(&b.starts_at))
+    });
+    combined.dedup_by_key(|s| s.starts_at);
+    combined.truncate(5);
+    combined
 }
 
 fn parse_event_suggestions_json(raw: &str) -> Vec<EventSuggestion> {
@@ -290,6 +374,7 @@ mod live_tests {
             .summarize(SummarizeRequest {
                 subject: "Termin verschieben".into(),
                 body_text: "Hallo Team,\n\nkönnen wir das Meeting von Dienstag auf Donnerstag 14 Uhr verschieben? Bitte kurz rückmelden.\n\nViele Grüße\nAnna".into(),
+                preferred_language: Some("de".into()),
             })
             .await
         {
@@ -307,6 +392,7 @@ mod live_tests {
                 from_email: "anna@example.com".into(),
                 facts: None,
                 style: None,
+                preferred_language: Some("de".into()),
             })
             .await
             .expect("qwen reply");
@@ -320,6 +406,7 @@ mod live_tests {
                 from_email: "anna@example.com".into(),
                 facts: Some("Donnerstag 14 Uhr passt. Bitte Zoom-Link schicken.".into()),
                 style: None,
+                preferred_language: Some("de".into()),
             })
             .await
             .expect("qwen variants");

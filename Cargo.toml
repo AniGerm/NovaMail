@@ -16,10 +16,10 @@ members = [
 default-members = ["apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.5"
 edition = "2021"
 license = "MPL-2.0"
-repository = "https://github.com/novamail/novamail"
+repository = "https://github.com/AniGerm/NovaMail"
 authors = ["NovaMail Contributors"]
 
 [workspace.dependencies]

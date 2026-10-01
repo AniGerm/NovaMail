@@ -84,6 +84,8 @@ importers:
         specifier: ^6.2.0
         version: 6.4.3(jiti@1.21.7)
 
+  packages/eslint-config: {}
+
   packages/hooks:
     dependencies:
       react:

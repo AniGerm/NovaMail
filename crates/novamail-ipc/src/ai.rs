@@ -90,6 +90,9 @@ pub struct AiPullProgressEvent {
 #[serde(rename_all = "camelCase")]
 pub struct SummarizeMessageRequest {
     pub message_id: Uuid,
+    /// UI locale (`de` / `en`) used when mail language is ambiguous.
+    #[serde(default)]
+    pub preferred_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -106,6 +109,8 @@ pub struct SuggestReplyMessageRequest {
     pub message_id: Uuid,
     #[serde(default)]
     pub facts: Option<String>,
+    #[serde(default)]
+    pub preferred_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -123,6 +128,8 @@ pub struct SuggestRepliesMessageRequest {
     /// Optional facts / instructions to weave into both variants.
     #[serde(default)]
     pub facts: Option<String>,
+    #[serde(default)]
+    pub preferred_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,6 +148,22 @@ pub struct EventSuggestionDto {
     pub ends_at: Option<i64>,
     pub location: Option<String>,
     pub confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeDraftRequest {
+    pub subject: String,
+    pub body_text: String,
+    #[serde(default)]
+    pub preferred_language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeDraftResponse {
+    pub suggestion: String,
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

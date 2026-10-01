@@ -196,11 +196,16 @@ export function RichTextEditor({
           aria-label={t("message")}
           contentEditable
           suppressContentEditableWarning
-          spellCheck
+          spellCheck={true}
           lang={spellcheckLang.replace("_", "-")}
           className="nova-rich-editor min-h-[220px] max-h-[420px] overflow-y-auto px-3 py-2 text-[var(--nova-ink)] outline-none"
           onInput={emitChange}
           onBlur={emitChange}
+          // Help WebKit keep spellcheck language attached after focus changes.
+          onFocus={(e) => {
+            e.currentTarget.lang = spellcheckLang.replace("_", "-");
+            e.currentTarget.spellcheck = true;
+          }}
           onPaste={(e) => {
             // Prefer plain text paste to avoid messy Word/HTML junk.
             e.preventDefault();

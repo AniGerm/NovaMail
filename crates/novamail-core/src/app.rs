@@ -20,6 +20,7 @@ use novamail_crypto::{
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
+    UpdateAccountRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalDavCollectionDto,
@@ -30,6 +31,7 @@ use novamail_ipc::{
     ImportBackupRequest, ImportBackupResult, InvitationResponse, JobsTickReport, LabelDto,
     LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings, ListCalendarRangeRequest,
     ListMessagesRequest, ListMessagesResponse, ListThreadsResponse, MailboxDto, MessageAiInsights,
+    MessageSortBy, OptimizeDraftRequest, OptimizeDraftResponse, SortDirection,
     MessageDetailDto, MessageSummaryDto, MoveMessageRequest, OAuthExchangeRequest,
     OAuthExchangeResponse, OAuthTokensDto, OfflineMailboxAccountPolicy, OfflineMailboxMode,
     OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent, OutboundQueueItemDto,
@@ -45,8 +47,9 @@ use novamail_ipc::{
     UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    archive_remote, delete_remote, move_remote, offload_message_remote, probe_account_quota,
-    save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
+    append_sent_remote, archive_remote, delete_remote, move_remote, offload_message_remote,
+    probe_account_quota, save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
+    SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -143,10 +146,16 @@ impl AppState {
         }
         settings.model = settings.model.trim().to_string();
         settings.base_url = settings.base_url.trim_end_matches('/').to_string();
+        if settings.enabled {
+            settings.onboarding_completed = true;
+        }
         let raw =
             serde_json::to_string(&settings).map_err(|e| CoreError::Message(e.to_string()))?;
         self.db.set_setting("ai.settings", &raw)?;
         *self.ai.write() = Self::provider_from_settings(&settings);
+        if settings.enabled {
+            self.enqueue_missing_ai_insights(25);
+        }
         Ok(settings)
     }
 
@@ -330,6 +339,7 @@ impl AppState {
         };
 
         SyncEngine::test_connection(&account, &credentials).await?;
+        SmtpClient::test_connection(&account, &credentials).await?;
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
 
@@ -378,8 +388,78 @@ impl AppState {
         };
 
         SyncEngine::test_connection(&account, &credentials).await?;
+        SmtpClient::test_connection(&account, &credentials).await?;
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
+
+        Ok(AccountDto {
+            id: account.id,
+            name: account.name,
+            email: account.email,
+            provider: account.provider,
+            auth_type: account.auth_type,
+            imap_host: account.imap_host,
+            imap_port: account.imap_port,
+            imap_tls: account.imap_tls,
+            smtp_host: account.smtp_host,
+            smtp_port: account.smtp_port,
+            smtp_tls: account.smtp_tls,
+            created_at: account.created_at,
+        })
+    }
+
+    pub async fn update_account(&self, request: UpdateAccountRequest) -> CoreResult<AccountDto> {
+        let existing = self.db.get_account(request.id)?;
+        let mut account = existing.clone();
+        account.name = request.name;
+        account.email = request.email;
+        account.provider = request.provider;
+        account.imap_host = request.imap_host;
+        account.imap_port = request.imap_port;
+        account.imap_tls = request.imap_tls;
+        account.smtp_host = request.smtp_host;
+        account.smtp_port = request.smtp_port;
+        account.smtp_tls = request.smtp_tls;
+
+        let password = request
+            .password
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty());
+
+        let credentials = if let Some(password) = password {
+            if account.auth_type != novamail_ipc::AuthType::Password {
+                return Err(CoreError::Message(
+                    "password update is only supported for password-auth accounts".into(),
+                ));
+            }
+            AccountCredentials::Password {
+                password: password.to_string(),
+            }
+        } else {
+            self.secrets
+                .load_credentials(account.id)
+                .map_err(|e| CoreError::Message(e.to_string()))?
+        };
+
+        let servers_changed = existing.imap_host != account.imap_host
+            || existing.imap_port != account.imap_port
+            || existing.imap_tls != account.imap_tls
+            || existing.smtp_host != account.smtp_host
+            || existing.smtp_port != account.smtp_port
+            || existing.smtp_tls != account.smtp_tls
+            || existing.email != account.email
+            || password.is_some();
+
+        if servers_changed {
+            SyncEngine::test_connection(&account, &credentials).await?;
+            SmtpClient::test_connection(&account, &credentials).await?;
+        }
+
+        if password.is_some() {
+            self.secrets.store_credentials(account.id, &credentials)?;
+        }
+        self.db.update_account(&account)?;
 
         Ok(AccountDto {
             id: account.id,
@@ -436,6 +516,7 @@ impl AppState {
     pub async fn set_flags(&self, request: SetFlagsRequest) -> CoreResult<()> {
         self.db
             .set_flags(request.message_id, request.unread, request.starred)?;
+        // Mailbox unread/total counts are refreshed inside db.set_flags.
         if let Err(err) = set_flags_remote(
             &self.db,
             &self.secrets,
@@ -531,6 +612,17 @@ impl AppState {
         let draft_id = request.draft_id;
         let request = self.apply_pgp_to_send(request)?;
         SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
+        if !account.imap_host.trim().is_empty() {
+            if let Err(err) =
+                append_sent_remote(&self.db, &self.secrets, &account, &request).await
+            {
+                tracing::warn!(
+                    account = %account.email,
+                    error = %err,
+                    "IMAP APPEND to Sent failed after SMTP accept"
+                );
+            }
+        }
         if let Some(id) = draft_id {
             if !account.imap_host.trim().is_empty() {
                 if let Err(err) = delete_remote(&self.db, &self.secrets, id).await {
@@ -1651,6 +1743,14 @@ impl AppState {
             .or(insight_provider(&self.db, message_id, "event_suggestions")?)
             .or(insight_provider(&self.db, message_id, "reply_a")?)
             .or(insight_provider(&self.db, message_id, "reply")?);
+        let incomplete = summary.is_none()
+            || reply_a.is_none()
+            || reply_b.is_none()
+            || !insight_event_suggestions_current(&self.db, message_id).unwrap_or(false);
+        if incomplete {
+            // Opening a mail should kick background generation if sync already missed it.
+            self.enqueue_ai_insights(&[message_id]);
+        }
         Ok(MessageAiInsights {
             message_id,
             summary,
@@ -1662,12 +1762,87 @@ impl AppState {
         })
     }
 
+    /// Backfill AI insights for recent messages that still lack them.
+    pub fn enqueue_missing_ai_insights(&self, limit: u32) {
+        let settings = Self::load_ai_settings(&self.db);
+        if !settings.enabled {
+            return;
+        }
+        let Ok((messages, _)) = self.db.list_messages(&ListMessagesRequest {
+            account_id: None,
+            mailbox_id: None,
+            unified: true,
+            mailbox_role: None,
+            unread_only: false,
+            starred_only: false,
+            has_attachments: false,
+            local_only: false,
+            snoozed_only: false,
+            limit: limit.max(1).min(100),
+            offset: 0,
+            query: None,
+            sort_by: MessageSortBy::Date,
+            sort_dir: SortDirection::Desc,
+        }) else {
+            return;
+        };
+        let mut missing = Vec::new();
+        for msg in messages {
+            let has_summary = self
+                .db
+                .has_ai_insight(msg.id, "summary")
+                .unwrap_or(false);
+            let has_replies = self.db.has_ai_insight(msg.id, "reply_a").unwrap_or(false)
+                && self.db.has_ai_insight(msg.id, "reply_b").unwrap_or(false);
+            let has_events =
+                insight_event_suggestions_current(&self.db, msg.id).unwrap_or(false);
+            if !(has_summary && has_replies && has_events) {
+                missing.push(msg.id);
+            }
+        }
+        if !missing.is_empty() {
+            self.enqueue_ai_insights(&missing);
+        }
+    }
+
+    pub async fn optimize_draft(
+        &self,
+        request: OptimizeDraftRequest,
+    ) -> CoreResult<OptimizeDraftResponse> {
+        let ai = self.ai_provider();
+        let suggestion = match ai
+            .optimize_draft(
+                &request.subject,
+                &request.body_text,
+                request.preferred_language.as_deref(),
+            )
+            .await
+        {
+            Ok(text) => text,
+            Err(err) => {
+                tracing::warn!(error = %err, "optimize draft failed; using offline fallback");
+                Self::offline_ai()
+                    .optimize_draft(
+                        &request.subject,
+                        &request.body_text,
+                        request.preferred_language.as_deref(),
+                    )
+                    .await?
+            }
+        };
+        Ok(OptimizeDraftResponse {
+            suggestion,
+            provider: ai.name().into(),
+        })
+    }
+
     pub fn enqueue_ai_insights(&self, message_ids: &[Uuid]) {
         if message_ids.is_empty() {
             return;
         }
         let settings = Self::load_ai_settings(&self.db);
-        if !settings.enabled || !settings.onboarding_completed {
+        // Prefer generating once AI is enabled; onboarding flag alone should not block.
+        if !settings.enabled {
             return;
         }
         // Cap backlog so a large first sync does not saturate the CPU for hours.
@@ -1693,7 +1868,7 @@ impl AppState {
     ) -> CoreResult<()> {
         let has_replies = db.has_ai_insight(message_id, "reply_a")?
             && db.has_ai_insight(message_id, "reply_b")?;
-        let has_events = db.has_ai_insight(message_id, "event_suggestions")?;
+        let has_events = insight_event_suggestions_current(db, message_id)?;
         if db.has_ai_insight(message_id, "summary")? && has_replies && has_events {
             return Ok(());
         }
@@ -1708,6 +1883,7 @@ impl AppState {
                 .summarize(SummarizeRequest {
                     subject: detail.summary.subject.clone(),
                     body_text: body.clone(),
+                    preferred_language: None,
                 })
                 .await
             {
@@ -1717,6 +1893,7 @@ impl AppState {
                         .summarize(SummarizeRequest {
                             subject: detail.summary.subject.clone(),
                             body_text: body.clone(),
+                            preferred_language: None,
                         })
                         .await?
                 }
@@ -1752,6 +1929,7 @@ impl AppState {
                 })
                 .collect();
             let payload = serde_json::json!({
+                "version": EVENT_SUGGESTIONS_VERSION,
                 "suggestions": suggestions,
                 "provider": result.provider,
             });
@@ -1765,6 +1943,7 @@ impl AppState {
                 from_email: detail.summary.from.email.clone(),
                 facts: None,
                 style: None,
+                preferred_language: None,
             };
             let result = match ai.suggest_reply_variants(ai_request.clone()).await {
                 Ok(r) => r,
@@ -1821,6 +2000,7 @@ impl AppState {
             .summarize(SummarizeRequest {
                 subject: detail.summary.subject.clone(),
                 body_text: body.clone(),
+                preferred_language: request.preferred_language.clone(),
             })
             .await
         {
@@ -1831,6 +2011,7 @@ impl AppState {
                     .summarize(SummarizeRequest {
                         subject: detail.summary.subject,
                         body_text: body,
+                        preferred_language: request.preferred_language.clone(),
                     })
                     .await?
             }
@@ -1857,6 +2038,7 @@ impl AppState {
             .suggest_replies_message(SuggestRepliesMessageRequest {
                 message_id: request.message_id,
                 facts: request.facts,
+                preferred_language: request.preferred_language,
             })
             .await?;
         let suggestion = variants
@@ -1909,6 +2091,7 @@ impl AppState {
             from_email: detail.summary.from.email.clone(),
             facts: facts.clone(),
             style: None,
+            preferred_language: request.preferred_language.clone(),
         };
         let ai = self.ai_provider();
         let result = match ai.suggest_reply_variants(ai_request.clone()).await {
@@ -3406,6 +3589,19 @@ fn insight_provider(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<O
     }))
 }
 
+/// Bump when event extraction logic changes so stale cached suggestions re-run.
+const EVENT_SUGGESTIONS_VERSION: i64 = 2;
+
+fn insight_event_suggestions_current(db: &Database, message_id: Uuid) -> CoreResult<bool> {
+    let Some(raw) = db.get_ai_insight(message_id, "event_suggestions")? else {
+        return Ok(false);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(false);
+    };
+    Ok(value.get("version").and_then(|v| v.as_i64()) == Some(EVENT_SUGGESTIONS_VERSION))
+}
+
 fn insight_event_suggestions(
     db: &Database,
     message_id: Uuid,
@@ -3416,6 +3612,10 @@ fn insight_event_suggestions(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(Vec::new());
     };
+    // Ignore stale extractions that used quote-header timestamps.
+    if value.get("version").and_then(|v| v.as_i64()) != Some(EVENT_SUGGESTIONS_VERSION) {
+        return Ok(Vec::new());
+    }
     let Some(arr) = value.get("suggestions").and_then(|v| v.as_array()) else {
         return Ok(Vec::new());
     };

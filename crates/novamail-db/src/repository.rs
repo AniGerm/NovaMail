@@ -1078,11 +1078,11 @@ impl Database {
         archived: Option<bool>,
     ) -> DbResult<()> {
         let conn = self.conn.lock();
-        let flags: i64 = conn
+        let (flags, mailbox_id): (i64, String) = conn
             .query_row(
-                "SELECT flags FROM messages WHERE id = ?1",
+                "SELECT flags, mailbox_id FROM messages WHERE id = ?1",
                 params![message_id.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or_else(|| DbError::NotFound(format!("message {message_id}")))?;
@@ -1113,6 +1113,19 @@ impl Database {
         conn.execute(
             "UPDATE messages SET flags = ?1 WHERE id = ?2",
             params![flags, message_id.to_string()],
+        )?;
+        // Keep sidebar badge counts in sync without waiting for IMAP sync.
+        conn.execute(
+            r#"
+            UPDATE mailboxes SET
+              total_count = (SELECT COUNT(*) FROM messages WHERE mailbox_id = ?1),
+              unread_count = (
+                SELECT COUNT(*) FROM messages
+                WHERE mailbox_id = ?1 AND (flags & 1) = 0
+              )
+            WHERE id = ?1
+            "#,
+            params![mailbox_id],
         )?;
         Ok(())
     }

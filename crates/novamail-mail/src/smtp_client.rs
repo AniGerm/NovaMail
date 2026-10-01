@@ -14,6 +14,39 @@ use crate::{MailError, MailResult};
 pub struct SmtpClient;
 
 impl SmtpClient {
+    /// Verify SMTP login / TLS without sending a message.
+    pub async fn test_connection(
+        account: &AccountRecord,
+        credentials: &AccountCredentials,
+    ) -> MailResult<()> {
+        let tls_mode = if account.smtp_tls && account.smtp_port == 465 {
+            "smtps/wrapper"
+        } else if account.smtp_tls {
+            "starttls"
+        } else {
+            "plain"
+        };
+        tracing::info!(
+            account = %account.email,
+            host = %account.smtp_host,
+            port = account.smtp_port,
+            tls = tls_mode,
+            "SMTP connection test starting"
+        );
+        let transport = build_transport(account, credentials)?;
+        transport
+            .test_connection()
+            .await
+            .map_err(|e| MailError::Smtp(format!("SMTP test failed: {e}")))?;
+        tracing::info!(
+            account = %account.email,
+            host = %account.smtp_host,
+            port = account.smtp_port,
+            "SMTP connection test OK"
+        );
+        Ok(())
+    }
+
     pub async fn send_with_secrets(
         account: &AccountRecord,
         secrets: &SecretStore,
@@ -81,12 +114,48 @@ impl SmtpClient {
             .multipart(mixed)
             .map_err(|e| MailError::Smtp(e.to_string()))?;
 
+        let tls_mode = if account.smtp_tls && account.smtp_port == 465 {
+            "smtps/wrapper"
+        } else if account.smtp_tls {
+            "starttls"
+        } else {
+            "plain"
+        };
+        let to_list: Vec<&str> = request.to.iter().map(|a| a.email.as_str()).collect();
+        tracing::info!(
+            account = %account.email,
+            host = %account.smtp_host,
+            port = account.smtp_port,
+            tls = tls_mode,
+            to = ?to_list,
+            subject = %request.subject,
+            "SMTP send starting"
+        );
+
         let transport = build_transport(account, credentials)?;
-        transport
-            .send(email)
-            .await
-            .map_err(|e| MailError::Smtp(e.to_string()))?;
-        Ok(())
+        match transport.send(email).await {
+            Ok(response) => {
+                tracing::info!(
+                    account = %account.email,
+                    host = %account.smtp_host,
+                    port = account.smtp_port,
+                    code = ?response.code(),
+                    "SMTP send accepted by server"
+                );
+                Ok(())
+            }
+            Err(err) => {
+                tracing::error!(
+                    account = %account.email,
+                    host = %account.smtp_host,
+                    port = account.smtp_port,
+                    tls = tls_mode,
+                    error = %err,
+                    "SMTP send failed"
+                );
+                Err(MailError::Smtp(err.to_string()))
+            }
+        }
     }
 }
 

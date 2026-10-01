@@ -1,5 +1,6 @@
 use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
+    UpdateAccountRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
     CalDavCollectionDto, CalendarAccountDto, CalendarCollectionDto, CalendarEventDto,
@@ -9,6 +10,7 @@ use novamail_ipc::{
     JobsTickReport, LabelDto, LdapSearchRequest, LdapSyncRequest, LdapSyncResult, LdapSyncSettings,
     ListCalendarRangeRequest, ListMessagesRequest, ListMessagesResponse, ListThreadsResponse,
     MailProvider, MailboxDto, MessageAiInsights, MessageDetailDto, MessageSummaryDto,
+    OptimizeDraftRequest, OptimizeDraftResponse,
     MoveMessageRequest, OAuthExchangeRequest, OAuthExchangeResponse, OfflineMailboxAccountPolicy,
     OfflineMailboxMode, OfflineMailboxSettingsDto, OfflineOffloadReport, OfflinePromptEvent,
     OutboundQueueItemDto, PgpDecryptResult, PgpGenerateRequest, PgpImportRequest, PgpKeyDto,
@@ -21,12 +23,13 @@ use novamail_ipc::{
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
     UpsertCalendarAccountRequest, UpsertCalendarCollectionRequest, UpsertCalendarEventRequest,
     UpsertCalendarTaskRequest, UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest,
-    UpsertSignatureRequest,
+    UpsertSignatureRequest, AppVersionInfo, UpdateActionResult, UpdateCheckResult,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::state::DesktopState;
+use crate::updater;
 
 fn map_err(err: novamail_core::CoreError) -> AppError {
     err.into()
@@ -68,6 +71,14 @@ pub fn accounts_remove(
     account_id: Uuid,
 ) -> Result<(), AppError> {
     state.app.remove_account(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn accounts_update(
+    state: State<'_, DesktopState>,
+    request: UpdateAccountRequest,
+) -> Result<AccountDto, AppError> {
+    state.app.update_account(request).await.map_err(map_err)
 }
 
 #[tauri::command]
@@ -324,6 +335,31 @@ pub async fn spellcheck_ensure_for_locale(
         .spellcheck_ensure_for_locale(locale)
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spellcheck_set_languages(
+    app: AppHandle,
+    languages: Vec<String>,
+) -> Result<(), AppError> {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window("main") {
+            crate::set_webkit_spellcheck_languages(&window, &languages);
+        }
+    }
+    let _ = app;
+    let _ = languages;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_optimize_draft(
+    state: State<'_, DesktopState>,
+    request: OptimizeDraftRequest,
+) -> Result<OptimizeDraftResponse, AppError> {
+    state.app.optimize_draft(request).await.map_err(map_err)
 }
 
 #[tauri::command]
@@ -1057,4 +1093,24 @@ pub async fn calendar_invitations_respond(
         .respond_calendar_invitation(request)
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn app_version() -> AppVersionInfo {
+    updater::app_version_info()
+}
+
+#[tauri::command]
+pub async fn updates_check(app: AppHandle) -> Result<UpdateCheckResult, AppError> {
+    updater::check_for_updates(app).await
+}
+
+#[tauri::command]
+pub async fn updates_download(app: AppHandle) -> Result<UpdateActionResult, AppError> {
+    updater::download_update(app).await
+}
+
+#[tauri::command]
+pub async fn updates_install(app: AppHandle) -> Result<UpdateActionResult, AppError> {
+    updater::install_update(app).await
 }

@@ -18,6 +18,7 @@ import type {
   OutgoingAttachment,
 } from "@/shared/api/types";
 import { useT } from "@/shared/i18n/useT";
+import { useUiStore } from "@/shared/store/uiStore";
 
 interface ComposerProps {
   open: boolean;
@@ -110,7 +111,10 @@ export function Composer({
   const [sendLaterOpen, setSendLaterOpen] = useState(false);
   const [pgpSign, setPgpSign] = useState(false);
   const [pgpEncrypt, setPgpEncrypt] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const locale = useUiStore((s) => s.locale);
 
   useEffect(() => {
     if (!open) return;
@@ -130,6 +134,7 @@ export function Composer({
       setSendLaterOpen(false);
       setPgpSign(false);
       setPgpEncrypt(false);
+      setAiSuggestion(null);
       return;
     }
 
@@ -153,6 +158,7 @@ export function Composer({
     setSendLaterOpen(false);
     setPgpSign(false);
     setPgpEncrypt(false);
+    setAiSuggestion(null);
 
     if (!replyTo && !initialBody && accounts[0]?.id) {
       api
@@ -373,6 +379,69 @@ export function Composer({
               setBodyText(plain);
             }}
           />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={aiBusy || busy || !bodyText.trim()}
+              onClick={() => {
+                setAiBusy(true);
+                setError(null);
+                void api
+                  .aiOptimizeDraft({
+                    subject,
+                    bodyText,
+                    preferredLanguage: locale,
+                  })
+                  .then((result) => {
+                    setAiSuggestion(result.suggestion.trim());
+                  })
+                  .catch((err) => {
+                    setError((err as AppError).message || t("composeAiFailed"));
+                  })
+                  .finally(() => setAiBusy(false));
+              }}
+            >
+              {aiBusy ? t("working") : t("composeAiImprove")}
+            </Button>
+            <span className="text-xs text-[var(--nova-ink-muted)]">
+              {t("composeAiImproveHint")}
+            </span>
+          </div>
+          {aiSuggestion ? (
+            <div className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-accent-soft)_40%,var(--nova-surface))] p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-accent)]">
+                {t("composeAiSuggestion")}
+              </p>
+              <pre className="mb-3 max-h-48 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[var(--nova-ink)]">
+                {aiSuggestion}
+              </pre>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    const html = plainToHtml(aiSuggestion);
+                    setBodyHtml(html);
+                    setBodyText(htmlToPlain(html));
+                    setAiSuggestion(null);
+                    setStatus(t("composeAiAccepted"));
+                  }}
+                >
+                  {t("composeAiAccept")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setAiSuggestion(null)}
+                >
+                  {t("composeAiReject")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-1 text-sm">
             <span>{t("attachments")}</span>
             <input

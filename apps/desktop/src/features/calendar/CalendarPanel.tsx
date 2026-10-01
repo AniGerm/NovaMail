@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Input } from "@novamail/ui";
 
+import {
+  planPushBack,
+  TimedEventGrid,
+  type TimedCommit,
+} from "@/features/calendar/TimedEventGrid";
 import { api } from "@/shared/api/client";
 import type {
   AppError,
@@ -172,12 +177,14 @@ export function CalendarPanel() {
 
   const openNewEvent = (dayStartMs?: number) => {
     const base = dayStartMs ?? Date.now();
-    const startsAt = Math.floor(base / 1000);
-    const rounded = startsAt - (startsAt % 3600) + 3600;
+    const raw = Math.floor(base / 1000);
+    // Grid clicks pass an exact slot; the toolbar button rounds to the next hour.
+    const startsAt =
+      dayStartMs != null ? raw : raw - (raw % 3600) + 3600;
     setDraft({
       title: "",
-      startsAt: rounded,
-      endsAt: rounded + 3600,
+      startsAt,
+      endsAt: startsAt + 3600,
       location: "",
       description: "",
       allDay: false,
@@ -253,7 +260,84 @@ export function CalendarPanel() {
     }
   };
 
-  const hourSlots = useMemo(() => Array.from({ length: 14 }, (_, i) => i + 7), []);
+  const [conflictPrompt, setConflictPrompt] = useState<{
+    primary: TimedCommit;
+    push: Array<{ id: string; startsAt: number; endsAt: number; title: string }>;
+  } | null>(null);
+
+  const persistEventTimes = useCallback(
+    async (
+      updates: Array<{
+        id: string;
+        startsAt: number;
+        endsAt: number;
+      }>,
+    ) => {
+      for (const update of updates) {
+        const ev = events.find((item) => item.id === update.id);
+        if (!ev) continue;
+        await api.calendarEventsUpsert({
+          id: ev.id,
+          collectionId: ev.collectionId,
+          calendarAccountId: ev.calendarAccountId,
+          title: ev.title,
+          startsAt: update.startsAt,
+          endsAt: update.endsAt,
+          location: ev.location,
+          description: ev.description,
+          allDay: ev.allDay,
+          reminders: ev.reminders,
+          status: ev.status,
+        });
+      }
+      await refresh();
+    },
+    [events, refresh],
+  );
+
+  const applyTimedCommit = useCallback(
+    async (commit: TimedCommit, pushOthers: boolean) => {
+      const updates = [
+        {
+          id: commit.id,
+          startsAt: commit.startsAt,
+          endsAt: commit.endsAt,
+        },
+      ];
+      if (pushOthers && commit.conflicts.length > 0) {
+        updates.push(
+          ...planPushBack(commit.id, commit.endsAt, commit.conflicts),
+        );
+      }
+      try {
+        await persistEventTimes(updates);
+        setStatus(
+          pushOthers && commit.conflicts.length > 0
+            ? t("calendarOptimized")
+            : t("calendarSaved"),
+        );
+      } catch (err) {
+        setError((err as AppError).message);
+      }
+    },
+    [persistEventTimes, t],
+  );
+
+  const handleTimedCommit = useCallback(
+    async (commit: TimedCommit) => {
+      if (commit.conflicts.length === 0) {
+        await applyTimedCommit(commit, false);
+        return;
+      }
+      const push = planPushBack(commit.id, commit.endsAt, commit.conflicts);
+      if (push.length === 0) {
+        await applyTimedCommit(commit, false);
+        return;
+      }
+      setConflictPrompt({ primary: commit, push });
+    },
+    [applyTimedCommit],
+  );
 
   const segmentBtn = (active: boolean) =>
     active
@@ -512,102 +596,18 @@ export function CalendarPanel() {
                       );
                     })}
                   </div>
-                  <div className="relative max-h-[min(70vh,720px)] overflow-y-auto">
-                    {(() => {
-                      const nowSec = Math.floor(Date.now() / 1000);
-                      const today = days.find((d) => d.isToday);
-                      if (!today) return null;
-                      const gridStart = today.dayStart + hourSlots[0]! * 3600;
-                      const gridEnd =
-                        today.dayStart +
-                        (hourSlots[hourSlots.length - 1]! + 1) * 3600;
-                      if (nowSec < gridStart || nowSec >= gridEnd) return null;
-                      const top = ((nowSec - gridStart) / 3600) * 44;
-                      const col = days.findIndex((d) => d.isToday);
-                      return (
-                        <div
-                          className="pointer-events-none absolute left-12 right-0 z-10"
-                          style={{ top }}
-                          aria-hidden
-                        >
-                          <div
-                            className="absolute flex items-center"
-                            style={{
-                              left: `calc(${col} * (100% / 7))`,
-                              width: `calc(100% / 7)`,
-                            }}
-                          >
-                            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-danger)]" />
-                            <span className="h-px flex-1 bg-[var(--nova-danger)]" />
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    {hourSlots.map((hour) => (
-                      <div
-                        key={hour}
-                        className="grid grid-cols-[48px_repeat(7,minmax(0,1fr))] border-b border-[var(--nova-border)] last:border-0"
-                      >
-                        <div className="border-r border-[var(--nova-border)] px-1 py-1 text-right text-[10px] tabular-nums text-[var(--nova-ink-muted)]">
-                          {String(hour).padStart(2, "0")}:00
-                        </div>
-                        {days.map((day) => {
-                          const slotStart = day.dayStart + hour * 3600;
-                          const slotEnd = slotStart + 3600;
-                          const slotEvents = day.events.filter(
-                            (ev) =>
-                              !ev.allDay &&
-                              ev.startsAt < slotEnd &&
-                              (ev.endsAt ?? ev.startsAt + 3600) > slotStart &&
-                              // Only render in the hour where the event starts (or first visible hour).
-                              (ev.startsAt >= slotStart ||
-                                (hour === hourSlots[0] &&
-                                  ev.startsAt < slotStart)),
-                          );
-                          return (
-                            <button
-                              key={`${day.start}-${hour}`}
-                              type="button"
-                              onClick={() => openNewEvent(slotStart * 1000)}
-                              className="min-h-[44px] space-y-0.5 border-r border-[var(--nova-border)] p-0.5 text-left last:border-r-0 hover:bg-[var(--nova-accent-soft)]"
-                            >
-                              {slotEvents.map((ev) => {
-                                const end = ev.endsAt ?? ev.startsAt + 3600;
-                                const spanHours = Math.max(
-                                  1,
-                                  Math.ceil((end - Math.max(ev.startsAt, slotStart)) / 3600),
-                                );
-                                return (
-                                  <span
-                                    key={ev.id}
-                                    role="link"
-                                    tabIndex={0}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditEvent(ev);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.stopPropagation();
-                                        openEditEvent(ev);
-                                      }
-                                    }}
-                                    className="block truncate rounded px-1 py-0.5 text-[10px] font-medium text-white"
-                                    style={{
-                                      background: ev.color ?? "var(--nova-accent)",
-                                      minHeight: Math.min(spanHours, 3) * 18,
-                                    }}
-                                  >
-                                    {formatTime(ev.startsAt, locale)} {ev.title}
-                                  </span>
-                                );
-                              })}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
+                  <TimedEventGrid
+                    days={days.map((day) => ({
+                      dayStart: day.dayStart,
+                      events: day.events,
+                      isToday: day.isToday,
+                    }))}
+                    locale={locale}
+                    compact
+                    onCreateAt={(unix) => openNewEvent(unix * 1000)}
+                    onOpenEvent={openEditEvent}
+                    onCommitChange={handleTimedCommit}
+                  />
                 </div>
               ) : null}
 
@@ -627,83 +627,21 @@ export function CalendarPanel() {
                         {ev.location ? ` · ${ev.location}` : ""}
                       </button>
                     ))}
-                  <div className="relative mt-2">
-                    {(() => {
-                      const dayStart =
-                        days[0]?.dayStart ?? Math.floor(anchor / 1000);
-                      const nowSec = Math.floor(Date.now() / 1000);
-                      const gridStart = dayStart + hourSlots[0]! * 3600;
-                      const gridEnd =
-                        dayStart +
-                        (hourSlots[hourSlots.length - 1]! + 1) * 3600;
-                      const showNow =
-                        nowSec >= gridStart &&
-                        nowSec < gridEnd &&
-                        startOfDay(Date.now()) === startOfDay(anchor);
-                      if (!showNow) return null;
-                      const top = ((nowSec - gridStart) / 3600) * 52;
-                      return (
-                        <div
-                          className="pointer-events-none absolute left-14 right-3 z-10 flex items-center"
-                          style={{ top }}
-                          aria-hidden
-                        >
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--nova-danger)]" />
-                          <span className="h-px flex-1 bg-[var(--nova-danger)]" />
-                        </div>
-                      );
-                    })()}
-                    {hourSlots.map((hour) => {
-                      const slotStart =
-                        (days[0]?.dayStart ?? Math.floor(anchor / 1000)) +
-                        hour * 3600;
-                      const slotEnd = slotStart + 3600;
-                      const slotEvents = (days[0]?.events ?? []).filter(
-                        (ev) =>
-                          !ev.allDay &&
-                          ev.startsAt < slotEnd &&
-                          (ev.endsAt ?? ev.startsAt + 3600) > slotStart,
-                      );
-                      return (
-                        <div
-                          key={hour}
-                          className="grid min-h-[52px] grid-cols-[56px_1fr] border-b border-[var(--nova-border)] last:border-0"
-                        >
-                          <button
-                            type="button"
-                            className="px-2 py-1 text-right text-xs tabular-nums text-[var(--nova-ink-muted)] hover:text-[var(--nova-accent)]"
-                            onClick={() =>
-                              openNewEvent(
-                                ((days[0]?.dayStart ?? 0) + hour * 3600) *
-                                  1000,
-                              )
-                            }
-                          >
-                            {String(hour).padStart(2, "0")}:00
-                          </button>
-                          <div className="flex flex-col gap-1 px-2 py-1">
-                            {slotEvents.map((ev) => (
-                              <button
-                                key={ev.id}
-                                type="button"
-                                onClick={() => openEditEvent(ev)}
-                                className="rounded-md px-2.5 py-1.5 text-left text-sm text-white transition-transform hover:scale-[1.01]"
-                                style={{
-                                  background: ev.color ?? "var(--nova-accent)",
-                                }}
-                              >
-                                <span className="font-medium">{ev.title}</span>
-                                {ev.location ? (
-                                  <span className="ml-2 opacity-90">
-                                    · {ev.location}
-                                  </span>
-                                ) : null}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="mt-2">
+                    <TimedEventGrid
+                      days={[
+                        {
+                          dayStart:
+                            days[0]?.dayStart ?? Math.floor(anchor / 1000),
+                          events: days[0]?.events ?? [],
+                          isToday: startOfDay(Date.now()) === startOfDay(anchor),
+                        },
+                      ]}
+                      locale={locale}
+                      onCreateAt={(unix) => openNewEvent(unix * 1000)}
+                      onOpenEvent={openEditEvent}
+                      onCommitChange={handleTimedCommit}
+                    />
                   </div>
                 </div>
               ) : null}
@@ -1133,6 +1071,74 @@ export function CalendarPanel() {
         ) : null}
       </div>
 
+      {conflictPrompt ? (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[color-mix(in_srgb,var(--nova-ink)_35%,transparent)] p-4">
+          <div
+            role="dialog"
+            aria-labelledby="cal-conflict-title"
+            className="w-full max-w-md rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-5 shadow-[var(--nova-shadow)]"
+          >
+            <h2
+              id="cal-conflict-title"
+              className="font-[family-name:var(--nova-font-display)] text-xl"
+            >
+              {t("calendarConflictTitle")}
+            </h2>
+            <p className="mt-2 text-sm text-[var(--nova-ink-muted)]">
+              {t("calendarConflictBody", {
+                title:
+                  events.find((ev) => ev.id === conflictPrompt.primary.id)
+                    ?.title ?? "…",
+              })}
+            </p>
+            <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm">
+              {conflictPrompt.push.map((item) => (
+                <li key={item.id} className="text-[var(--nova-ink)]">
+                  → {item.title}{" "}
+                  <span className="text-[var(--nova-ink-muted)]">
+                    {formatTime(item.startsAt, locale)}–
+                    {formatTime(item.endsAt, locale)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setConflictPrompt(null);
+                  void refresh();
+                }}
+              >
+                {t("cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  const commit = conflictPrompt.primary;
+                  setConflictPrompt(null);
+                  void applyTimedCommit(commit, false);
+                }}
+              >
+                {t("calendarConflictKeep")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const commit = conflictPrompt.primary;
+                  setConflictPrompt(null);
+                  void applyTimedCommit(commit, true);
+                }}
+              >
+                {t("calendarConflictPush")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {draft ? (
         <div className="absolute inset-0 z-20 flex justify-end bg-[color-mix(in_srgb,var(--nova-ink)_28%,transparent)]">
           <div className="nova-slide-in flex h-full w-full max-w-md flex-col border-l border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]">
@@ -1161,36 +1167,104 @@ export function CalendarPanel() {
                 />
                 {t("calendarAllDay")}
               </label>
-              <label className="block text-xs text-[var(--nova-ink-muted)]">
-                {t("calendarStarts")}
-                <input
-                  type="datetime-local"
-                  className="mt-1 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm"
-                  value={toLocalInput(draft.startsAt)}
-                  onChange={(e) => {
-                    const startsAt = fromLocalInput(e.target.value);
-                    setDraft({
-                      ...draft,
-                      startsAt,
-                      endsAt: Math.max(draft.endsAt, startsAt + 1800),
-                    });
-                  }}
-                />
-              </label>
-              <label className="block text-xs text-[var(--nova-ink-muted)]">
-                {t("calendarEnds")}
-                <input
-                  type="datetime-local"
-                  className="mt-1 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm"
-                  value={toLocalInput(draft.endsAt)}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      endsAt: fromLocalInput(e.target.value),
-                    })
+              <fieldset className="grid gap-2">
+                <legend className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarStarts")}
+                </legend>
+                <div
+                  className={
+                    draft.allDay
+                      ? "grid gap-2"
+                      : "grid grid-cols-2 gap-2"
                   }
-                />
-              </label>
+                >
+                  <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                    <span>{t("calendarDate")}</span>
+                    <input
+                      type="date"
+                      className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                      value={toLocalDate(draft.startsAt)}
+                      onChange={(e) => {
+                        const startsAt = withLocalDate(
+                          draft.startsAt,
+                          e.target.value,
+                        );
+                        setDraft({
+                          ...draft,
+                          startsAt,
+                          endsAt: Math.max(draft.endsAt, startsAt + 1800),
+                        });
+                      }}
+                    />
+                  </label>
+                  {draft.allDay ? null : (
+                    <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                      <span>{t("calendarTime")}</span>
+                      <input
+                        type="time"
+                        step={60}
+                        className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                        value={toLocalTime(draft.startsAt)}
+                        onChange={(e) => {
+                          const startsAt = withLocalTime(
+                            draft.startsAt,
+                            e.target.value,
+                          );
+                          setDraft({
+                            ...draft,
+                            startsAt,
+                            endsAt: Math.max(draft.endsAt, startsAt + 1800),
+                          });
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </fieldset>
+              <fieldset className="grid gap-2">
+                <legend className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarEnds")}
+                </legend>
+                <div
+                  className={
+                    draft.allDay
+                      ? "grid gap-2"
+                      : "grid grid-cols-2 gap-2"
+                  }
+                >
+                  <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                    <span>{t("calendarDate")}</span>
+                    <input
+                      type="date"
+                      className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                      value={toLocalDate(draft.endsAt)}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          endsAt: withLocalDate(draft.endsAt, e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  {draft.allDay ? null : (
+                    <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                      <span>{t("calendarTime")}</span>
+                      <input
+                        type="time"
+                        step={60}
+                        className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                        value={toLocalTime(draft.endsAt)}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            endsAt: withLocalTime(draft.endsAt, e.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </fieldset>
               <Input
                 value={draft.location}
                 onChange={(e) =>
@@ -1325,15 +1399,35 @@ function formatDateTime(unix: number, locale: string): string {
   );
 }
 
-function toLocalInput(unix: number): string {
-  const d = new Date(unix * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-function fromLocalInput(value: string): number {
-  const t = Date.parse(value);
-  return Number.isFinite(t)
-    ? Math.floor(t / 1000)
+function toLocalDate(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function toLocalTime(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Combine YYYY-MM-DD + HH:MM into unix seconds (local timezone). */
+function combineLocal(date: string, time: string): number {
+  const normalizedTime = time.length === 5 ? `${time}:00` : time || "00:00:00";
+  const parsed = Date.parse(`${date}T${normalizedTime}`);
+  return Number.isFinite(parsed)
+    ? Math.floor(parsed / 1000)
     : Math.floor(Date.now() / 1000);
+}
+
+function withLocalDate(unix: number, date: string): number {
+  if (!date) return unix;
+  return combineLocal(date, toLocalTime(unix));
+}
+
+function withLocalTime(unix: number, time: string): number {
+  if (!time) return unix;
+  return combineLocal(toLocalDate(unix), time);
 }
