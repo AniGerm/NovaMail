@@ -1,5 +1,6 @@
 use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest,
+    UpdateAccountRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
     CalDavCollectionDto, CalendarAccountDto, CalendarCollectionDto, CalendarEventDto,
@@ -69,6 +70,14 @@ pub fn accounts_remove(
     account_id: Uuid,
 ) -> Result<(), AppError> {
     state.app.remove_account(account_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn accounts_update(
+    state: State<'_, DesktopState>,
+    request: UpdateAccountRequest,
+) -> Result<AccountDto, AppError> {
+    state.app.update_account(request).await.map_err(map_err)
 }
 
 #[tauri::command]

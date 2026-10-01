@@ -68,6 +68,25 @@ pub struct AddAccountOAuthRequest {
     pub smtp_tls: bool,
 }
 
+/// Update an existing account. Password is optional — omit to keep the stored secret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAccountRequest {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub provider: MailProvider,
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_tls: bool,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_tls: bool,
+    /// When set (non-empty), replaces the stored password (password-auth accounts only).
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderPreset {

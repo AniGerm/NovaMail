@@ -1161,36 +1161,104 @@ export function CalendarPanel() {
                 />
                 {t("calendarAllDay")}
               </label>
-              <label className="block text-xs text-[var(--nova-ink-muted)]">
-                {t("calendarStarts")}
-                <input
-                  type="datetime-local"
-                  className="mt-1 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm"
-                  value={toLocalInput(draft.startsAt)}
-                  onChange={(e) => {
-                    const startsAt = fromLocalInput(e.target.value);
-                    setDraft({
-                      ...draft,
-                      startsAt,
-                      endsAt: Math.max(draft.endsAt, startsAt + 1800),
-                    });
-                  }}
-                />
-              </label>
-              <label className="block text-xs text-[var(--nova-ink-muted)]">
-                {t("calendarEnds")}
-                <input
-                  type="datetime-local"
-                  className="mt-1 w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm"
-                  value={toLocalInput(draft.endsAt)}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      endsAt: fromLocalInput(e.target.value),
-                    })
+              <fieldset className="grid gap-2">
+                <legend className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarStarts")}
+                </legend>
+                <div
+                  className={
+                    draft.allDay
+                      ? "grid gap-2"
+                      : "grid grid-cols-2 gap-2"
                   }
-                />
-              </label>
+                >
+                  <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                    <span>{t("calendarDate")}</span>
+                    <input
+                      type="date"
+                      className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                      value={toLocalDate(draft.startsAt)}
+                      onChange={(e) => {
+                        const startsAt = withLocalDate(
+                          draft.startsAt,
+                          e.target.value,
+                        );
+                        setDraft({
+                          ...draft,
+                          startsAt,
+                          endsAt: Math.max(draft.endsAt, startsAt + 1800),
+                        });
+                      }}
+                    />
+                  </label>
+                  {draft.allDay ? null : (
+                    <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                      <span>{t("calendarTime")}</span>
+                      <input
+                        type="time"
+                        step={60}
+                        className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                        value={toLocalTime(draft.startsAt)}
+                        onChange={(e) => {
+                          const startsAt = withLocalTime(
+                            draft.startsAt,
+                            e.target.value,
+                          );
+                          setDraft({
+                            ...draft,
+                            startsAt,
+                            endsAt: Math.max(draft.endsAt, startsAt + 1800),
+                          });
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </fieldset>
+              <fieldset className="grid gap-2">
+                <legend className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarEnds")}
+                </legend>
+                <div
+                  className={
+                    draft.allDay
+                      ? "grid gap-2"
+                      : "grid grid-cols-2 gap-2"
+                  }
+                >
+                  <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                    <span>{t("calendarDate")}</span>
+                    <input
+                      type="date"
+                      className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                      value={toLocalDate(draft.endsAt)}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          endsAt: withLocalDate(draft.endsAt, e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  {draft.allDay ? null : (
+                    <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
+                      <span>{t("calendarTime")}</span>
+                      <input
+                        type="time"
+                        step={60}
+                        className="w-full rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-transparent px-3 py-2 text-sm text-[var(--nova-ink)]"
+                        value={toLocalTime(draft.endsAt)}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            endsAt: withLocalTime(draft.endsAt, e.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </fieldset>
               <Input
                 value={draft.location}
                 onChange={(e) =>
@@ -1325,15 +1393,35 @@ function formatDateTime(unix: number, locale: string): string {
   );
 }
 
-function toLocalInput(unix: number): string {
-  const d = new Date(unix * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-function fromLocalInput(value: string): number {
-  const t = Date.parse(value);
-  return Number.isFinite(t)
-    ? Math.floor(t / 1000)
+function toLocalDate(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function toLocalTime(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Combine YYYY-MM-DD + HH:MM into unix seconds (local timezone). */
+function combineLocal(date: string, time: string): number {
+  const normalizedTime = time.length === 5 ? `${time}:00` : time || "00:00:00";
+  const parsed = Date.parse(`${date}T${normalizedTime}`);
+  return Number.isFinite(parsed)
+    ? Math.floor(parsed / 1000)
     : Math.floor(Date.now() / 1000);
+}
+
+function withLocalDate(unix: number, date: string): number {
+  if (!date) return unix;
+  return combineLocal(date, toLocalTime(unix));
+}
+
+function withLocalTime(unix: number, time: string): number {
+  if (!time) return unix;
+  return combineLocal(toLocalDate(unix), time);
 }

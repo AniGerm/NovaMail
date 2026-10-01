@@ -176,6 +176,7 @@ export function AppShell() {
         );
         if (event.done) {
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
         }
       })
       .then((fn) => {
@@ -185,6 +186,38 @@ export function AppShell() {
       unlisten?.();
     };
   }, [desktop, queryClient, setSyncStatus]);
+
+  // Refresh list + sidebar badges as soon as background sync finds new mail.
+  useEffect(() => {
+    if (!desktop) return;
+    let unlisten: (() => void) | undefined;
+    api
+      .onMailNew(() => {
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [desktop, queryClient]);
+
+  // Opening a message marks it read so sidebar unread badges update live.
+  useEffect(() => {
+    if (!desktop || !selectedMessageId || !messageQuery.data) return;
+    if (!messageQuery.data.summary.unread) return;
+    const id = selectedMessageId;
+    void api
+      .messagesSetFlags({ messageId: id, unread: false })
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["message", id] });
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      })
+      .catch(() => undefined);
+  }, [desktop, messageQuery.data, queryClient, selectedMessageId]);
 
   useEffect(() => {
     if (!desktop) return;
@@ -295,6 +328,7 @@ export function AppShell() {
         queryKey: ["message", id],
       });
       await queryClient.invalidateQueries({ queryKey: ["messages"] });
+      await queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
     },
     [desktop, messageQuery.data, queryClient],
   );
@@ -1114,6 +1148,14 @@ export function AppShell() {
           void queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
         }}
         accounts={accounts}
+        onAccountsChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        }}
+        onAddAccount={() => {
+          setSettingsOpen(false);
+          setAccountSetupOpen(true);
+        }}
       />
       <ContactsDialog
         open={contactsOpen}

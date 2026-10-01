@@ -199,6 +199,21 @@ export interface AddAccountPasswordRequest {
   smtpTls: boolean;
 }
 
+export interface UpdateAccountRequest {
+  id: string;
+  name: string;
+  email: string;
+  provider: MailProvider;
+  imapHost: string;
+  imapPort: number;
+  imapTls: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpTls: boolean;
+  /** Omit or null to keep the stored password. */
+  password?: string | null;
+}
+
 export interface SyncProgressEvent {
   accountId: string;
   mailboxName: string;

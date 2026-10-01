@@ -3113,7 +3113,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-ai"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-contacts"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "ammonia",
  "async-trait",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-crypto"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3201,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-db"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "chrono",
  "novamail-ipc",
@@ -3217,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-desktop"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "dirs 6.0.0",
  "novamail-core",
@@ -3238,7 +3238,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-ipc"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "chrono",
  "serde",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-mail"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-imap",
  "async-trait",
@@ -3276,7 +3276,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-plugins"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3286,7 +3286,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-rules"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "novamail-ipc",
  "serde",
@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "novamail-search"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "novamail-db",
  "novamail-ipc",

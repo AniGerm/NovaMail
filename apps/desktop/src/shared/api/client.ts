@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AccountDto,
   AddAccountPasswordRequest,
+  UpdateAccountRequest,
   AppError,
   AttachmentDto,
   CardDavServerStatus,
@@ -146,6 +147,8 @@ export const api = {
   }) => call<AccountDto>("accounts_add_oauth", { request }),
   accountsRemove: (accountId: string) =>
     call<void>("accounts_remove", { accountId }),
+  accountsUpdate: (request: UpdateAccountRequest) =>
+    call<AccountDto>("accounts_update", { request }),
   mailboxesList: (accountId?: string | null) =>
     call<MailboxDto[]>("mailboxes_list", { accountId: accountId ?? null }),
   messagesList: (request: ListMessagesRequest) =>
@@ -166,17 +169,33 @@ export const api = {
     call<void>("messages_delete", { messageId }),
   mailSync: (accountId?: string | null) =>
     call<SyncResult[]>("mail_sync", { request: { accountId: accountId ?? null } }),
-  aiSummarizeMessage: (messageId: string) =>
+  aiSummarizeMessage: (messageId: string, preferredLanguage?: string | null) =>
     call<SummarizeMessageResponse>("ai_summarize_message", {
-      request: { messageId },
+      request: { messageId, preferredLanguage: preferredLanguage ?? null },
     }),
-  aiSuggestReply: (messageId: string, facts?: string | null) =>
+  aiSuggestReply: (
+    messageId: string,
+    facts?: string | null,
+    preferredLanguage?: string | null,
+  ) =>
     call<SuggestReplyMessageResponse>("ai_suggest_reply", {
-      request: { messageId, facts: facts ?? null },
+      request: {
+        messageId,
+        facts: facts ?? null,
+        preferredLanguage: preferredLanguage ?? null,
+      },
     }),
-  aiSuggestReplies: (messageId: string, facts?: string | null) =>
+  aiSuggestReplies: (
+    messageId: string,
+    facts?: string | null,
+    preferredLanguage?: string | null,
+  ) =>
     call<SuggestRepliesMessageResponse>("ai_suggest_replies", {
-      request: { messageId, facts: facts ?? null },
+      request: {
+        messageId,
+        facts: facts ?? null,
+        preferredLanguage: preferredLanguage ?? null,
+      },
     }),
   aiMessageInsights: (messageId: string) =>
     call<MessageAiInsights>("ai_message_insights", { messageId }),
@@ -501,6 +520,12 @@ export const api = {
   ): Promise<UnlistenFn> => {
     if (!isTauri()) return () => undefined;
     return listen<SyncProgressEvent>("sync://progress", (event) => {
+      handler(event.payload);
+    });
+  },
+  onMailNew: async (handler: (count: number) => void): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<number>("mail://new", (event) => {
       handler(event.payload);
     });
   },

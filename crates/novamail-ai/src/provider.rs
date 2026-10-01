@@ -17,6 +17,9 @@ pub type AiResult<T> = Result<T, AiError>;
 pub struct SummarizeRequest {
     pub subject: String,
     pub body_text: String,
+    /// UI locale hint (`de` / `en`) when mail language is ambiguous.
+    #[serde(default)]
+    pub preferred_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +41,9 @@ pub struct SuggestReplyRequest {
     /// Optional style hint: "concise" | "friendly".
     #[serde(default)]
     pub style: Option<String>,
+    /// UI locale hint (`de` / `en`) when mail language is ambiguous.
+    #[serde(default)]
+    pub preferred_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,30 +139,56 @@ impl AiProvider for NullAiProvider {
     async fn summarize(&self, request: SummarizeRequest) -> AiResult<SummarizeResponse> {
         let body = collapse_whitespace(&request.body_text);
         let snippet: String = body.chars().take(280).collect();
+        let lang = crate::resolve_output_language(
+            &request.subject,
+            &request.body_text,
+            request.preferred_language.as_deref(),
+        );
+        let summary = if snippet.is_empty() {
+            request.subject
+        } else if lang == "de" {
+            format!("{} — {}", request.subject, snippet)
+        } else {
+            format!("{} — {}", request.subject, snippet)
+        };
         Ok(SummarizeResponse {
-            summary: if snippet.is_empty() {
-                request.subject
-            } else {
-                format!("{} — {}", request.subject, snippet)
-            },
+            summary,
             provider: self.name().into(),
         })
     }
 
     async fn suggest_reply(&self, request: SuggestReplyRequest) -> AiResult<SuggestReplyResponse> {
+        let lang = crate::resolve_output_language(
+            &request.subject,
+            &request.body_text,
+            request.preferred_language.as_deref(),
+        );
+        let name = guess_first_name(&request.from_email);
         let facts = request
             .facts
             .as_deref()
             .filter(|s| !s.trim().is_empty())
-            .map(|s| format!("\n\nPlease include these facts:\n{s}"))
+            .map(|s| {
+                if lang == "de" {
+                    format!("\n\nBitte berücksichtige diese Punkte:\n{s}")
+                } else {
+                    format!("\n\nPlease include these facts:\n{s}")
+                }
+            })
             .unwrap_or_default();
+        let suggestion = if lang == "de" {
+            format!(
+                "Hallo {name},\n\nvielen Dank für Ihre E-Mail zu \"{}\".{}\n\nFreundliche Grüße",
+                request.subject, facts
+            )
+        } else {
+            format!(
+                "Hi {name},\n\nThanks for your email regarding \"{}\".{}\n\nBest regards",
+                request.subject, facts
+            )
+        };
         Ok(SuggestReplyResponse {
-            suggestion: format!(
-                "Hi {},\n\nThanks for your email regarding \"{}\".{}\n\nBest regards",
-                guess_first_name(&request.from_email),
-                request.subject,
-                facts
-            ),
+            suggestion,
             provider: self.name().into(),
         })
     }
@@ -165,15 +197,26 @@ impl AiProvider for NullAiProvider {
         &self,
         request: SuggestReplyRequest,
     ) -> AiResult<SuggestReplyVariantsResponse> {
+        let lang = crate::resolve_output_language(
+            &request.subject,
+            &request.body_text,
+            request.preferred_language.as_deref(),
+        );
         let name = guess_first_name(&request.from_email);
         let facts = request
             .facts
             .as_deref()
             .filter(|s| !s.trim().is_empty())
-            .map(|s| format!("\n\nZu den Punkten: {s}"))
+            .map(|s| {
+                if lang == "de" {
+                    format!("\n\nZu den Punkten: {s}")
+                } else {
+                    format!("\n\nRegarding: {s}")
+                }
+            })
             .unwrap_or_default();
-        Ok(SuggestReplyVariantsResponse {
-            variants: vec![
+        let variants = if lang == "de" {
+            vec![
                 format!(
                     "Hallo {name},\n\nvielen Dank für Ihre Nachricht zu \"{}\".{} Wir melden uns zeitnah.\n\nFreundliche Grüße",
                     request.subject, facts
@@ -182,7 +225,21 @@ impl AiProvider for NullAiProvider {
                     "Hallo {name},\n\ndanke für die Mail.{} Gerne klären wir \"{}\" gemeinsam.\n\nViele Grüße",
                     facts, request.subject
                 ),
-            ],
+            ]
+        } else {
+            vec![
+                format!(
+                    "Hi {name},\n\nThanks for your message about \"{}\".{} We'll follow up shortly.\n\nBest regards",
+                    request.subject, facts
+                ),
+                format!(
+                    "Hello {name},\n\nThanks for the email.{} Happy to discuss \"{}\" further.\n\nKind regards",
+                    facts, request.subject
+                ),
+            ]
+        };
+        Ok(SuggestReplyVariantsResponse {
+            variants,
             provider: self.name().into(),
         })
     }
@@ -230,7 +287,62 @@ impl AiProvider for NullAiProvider {
     }
 }
 
-/// Lightweight offline / fallback extractor for ISO dates and HH:MM times.
+/// Strip quoted reply history so extractors only see the new message content.
+pub fn strip_quoted_reply(body: &str) -> String {
+    let mut keep = Vec::new();
+    for line in body.lines() {
+        let trimmed = line.trim_start().trim_start_matches('\u{00a0}');
+        let lower = trimmed.to_lowercase();
+        if is_quote_boundary(trimmed, &lower, keep.len()) {
+            break;
+        }
+        keep.push(line.to_string());
+    }
+    let out = keep.join("\n");
+    let trimmed = out.trim();
+    if trimmed.is_empty() {
+        body.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn is_quote_boundary(trimmed: &str, lower: &str, kept_lines: usize) -> bool {
+    if trimmed.starts_with('>') {
+        return true;
+    }
+    // German Thunderbird / Gmail: "Am Donnerstag, … schrieb Name <mail>:"
+    if (lower.starts_with("am ") || lower.starts_with("am\u{00a0}"))
+        && lower.contains(" schrieb")
+    {
+        return true;
+    }
+    // Broader: reply header with "schrieb" + email address.
+    if lower.contains(" schrieb ") && lower.contains('<') && lower.contains('@') {
+        return true;
+    }
+    if lower.starts_with("on ")
+        && (lower.contains(" wrote:") || lower.contains(" wrote ") || lower.ends_with(" wrote:"))
+    {
+        return true;
+    }
+    if lower.contains(" wrote:") && lower.contains('<') && lower.contains('@') {
+        return true;
+    }
+    if lower.starts_with("-----original message-----")
+        || lower.starts_with("----- forwarded message -----")
+        || lower.starts_with("begin forwarded message")
+    {
+        return true;
+    }
+    // Inline forwarded headers usually follow a blank line after content.
+    if lower.starts_with("from:") && kept_lines > 2 {
+        return true;
+    }
+    false
+}
+
+/// Lightweight offline / fallback extractor for relative + ISO dates and times.
 pub fn heuristic_event_suggestions(
     subject: &str,
     body: &str,
@@ -238,12 +350,51 @@ pub fn heuristic_event_suggestions(
 ) -> Vec<EventSuggestion> {
     use chrono::{Datelike, Duration, Local, TimeZone};
 
-    let text = format!("{subject}\n{body}");
+    let clean_body = strip_quoted_reply(body);
+    let text = format!("{subject}\n{clean_body}");
     let ref_dt = Local
         .timestamp_opt(reference_at, 0)
         .single()
         .unwrap_or_else(Local::now);
     let mut out = Vec::new();
+
+    // Relative day words first (morgen / heute / tomorrow) — highest signal for invites.
+    let lower = text.to_lowercase();
+    for (word, day_offset, confidence) in [
+        ("übermorgen", 2i64, 0.8f32),
+        ("uebermorgen", 2, 0.8),
+        ("morgen", 1, 0.85),
+        ("heute", 0, 0.8),
+        ("day after tomorrow", 2, 0.8),
+        ("tomorrow", 1, 0.85),
+        ("today", 0, 0.8),
+    ] {
+        if !contains_word(&lower, word) {
+            continue;
+        }
+        let time = find_time_near(&lower, word).unwrap_or((9, 0));
+        let Some(naive) = (ref_dt.date_naive() + Duration::days(day_offset))
+            .and_hms_opt(time.0, time.1, 0)
+        else {
+            continue;
+        };
+        let Some(local) = Local.from_local_datetime(&naive).single() else {
+            continue;
+        };
+        let label = format!(
+            "{} {:02}:{:02}",
+            local.format("%A"),
+            time.0,
+            time.1
+        );
+        out.push(EventSuggestion {
+            label,
+            starts_at: local.timestamp(),
+            ends_at: Some(local.timestamp() + 3600),
+            location: guess_location(&lower),
+            confidence,
+        });
+    }
 
     for (date, time) in regex_lite_iso(&text) {
         let (h, m) = time.unwrap_or((9, 0));
@@ -253,6 +404,10 @@ pub fn heuristic_event_suggestions(
         let Some(local) = Local.from_local_datetime(&naive).single() else {
             continue;
         };
+        // Ignore dates that are exactly the message timestamp (±2 min) — usually quote noise.
+        if (local.timestamp() - reference_at).abs() <= 120 {
+            continue;
+        }
         let label = if time.is_some() {
             format!("{} {h:02}:{m:02}", date.format("%a %d.%m."))
         } else {
@@ -262,11 +417,12 @@ pub fn heuristic_event_suggestions(
             label,
             starts_at: local.timestamp(),
             ends_at: Some(local.timestamp() + 3600),
-            location: None,
+            location: guess_location(&lower),
             confidence: 0.55,
         });
     }
 
+    // Weekday names only when paired with a nearby clock time in the NEW content.
     let weekdays = [
         ("montag", 1u32),
         ("dienstag", 2),
@@ -283,12 +439,14 @@ pub fn heuristic_event_suggestions(
         ("saturday", 6),
         ("sunday", 7),
     ];
-    let lower = text.to_lowercase();
     for (name, target_iso) in weekdays {
-        if !lower.contains(name) {
+        if !contains_word(&lower, name) {
             continue;
         }
-        let time = find_time_near(&lower, name).unwrap_or((10, 0));
+        let Some(time) = find_time_near(&lower, name) else {
+            // Bare weekday without a time is too ambiguous (and often quote headers).
+            continue;
+        };
         let mut days_ahead =
             (i32::try_from(target_iso).unwrap_or(1)
                 - i32::try_from(ref_dt.weekday().number_from_monday()).unwrap_or(1)
@@ -314,6 +472,9 @@ pub fn heuristic_event_suggestions(
         let Some(local) = Local.from_local_datetime(&naive).single() else {
             continue;
         };
+        if (local.timestamp() - reference_at).abs() <= 120 {
+            continue;
+        }
         let mut label_name = name.to_string();
         if let Some(first) = label_name.get_mut(0..1) {
             first.make_ascii_uppercase();
@@ -322,15 +483,56 @@ pub fn heuristic_event_suggestions(
             label: format!("{label_name} {:02}:{:02}", time.0, time.1),
             starts_at: local.timestamp(),
             ends_at: Some(local.timestamp() + 3600),
-            location: None,
-            confidence: 0.45,
+            location: guess_location(&lower),
+            confidence: 0.5,
         });
     }
 
-    out.sort_by_key(|s| s.starts_at);
+    out.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.starts_at.cmp(&b.starts_at))
+    });
     out.dedup_by_key(|s| s.starts_at);
     out.truncate(5);
     out
+}
+
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let mut rest = haystack;
+    while let Some(idx) = rest.find(word) {
+        let before_ok = idx == 0
+            || !rest
+                .as_bytes()
+                .get(idx.saturating_sub(1))
+                .map(|b| b.is_ascii_alphabetic())
+                .unwrap_or(false);
+        let after = idx + word.len();
+        let after_ok = rest
+            .as_bytes()
+            .get(after)
+            .map(|b| !b.is_ascii_alphabetic())
+            .unwrap_or(true);
+        if before_ok && after_ok {
+            return true;
+        }
+        rest = &rest[idx + word.len()..];
+    }
+    false
+}
+
+fn guess_location(lower: &str) -> Option<String> {
+    for place in ["bowling", "zoom", "teams", "meet", "café", "cafe", "büro", "buero", "office"] {
+        if contains_word(lower, place) {
+            let mut label = place.to_string();
+            if let Some(first) = label.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            return Some(label);
+        }
+    }
+    None
 }
 
 fn regex_lite_iso(text: &str) -> Vec<(chrono::NaiveDate, Option<(u32, u32)>)> {
@@ -436,6 +638,7 @@ fn guess_first_name(email: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Local, TimeZone};
 
     #[tokio::test]
     async fn null_provider_prioritizes_urgent_mail() {
@@ -464,5 +667,47 @@ mod tests {
             .unwrap();
         assert!(!result.suggestions.is_empty());
         assert!(result.suggestions.iter().any(|s| s.label.contains("14:30") || s.starts_at > 0));
+    }
+
+    #[test]
+    fn strips_german_thunderbird_quote_header() {
+        let body = "Hallo Max,\n\nich habe vor mich morgen 18:00Uhr mit dir zum Bowling zu treffen.\n\n\n\nAm Donnerstag, Oktober 1, 2026, 13:17 schrieb Maximilian <max@example.com>:\ntest\n";
+        let clean = strip_quoted_reply(body);
+        assert!(clean.contains("Bowling"));
+        assert!(!clean.to_lowercase().contains("schrieb"));
+        assert!(!clean.contains("13:17"));
+    }
+
+    #[test]
+    fn bowling_invite_uses_morgen_not_quote_timestamp() {
+        // Thursday 2026-10-01 13:17 local — the quoted reply header time must NOT win.
+        let reference = Local
+            .with_ymd_and_hms(2026, 10, 1, 13, 17, 0)
+            .single()
+            .expect("ref")
+            .timestamp();
+        let body = "Hallo Max,\n\nich habe vor mich morgen 18:00Uhr mit dir zum Bowling zu treffen. Hast du Zeit und Lust? Bis morgen und liebe Grüße!:)\n\n\n\nAm Donnerstag, Oktober 1, 2026, 13:17 schrieb Maximilian Dünnebier <maximilian@duennebier-online.de>:\ntest\n";
+        let suggestions = heuristic_event_suggestions("Bowling?", body, reference);
+        assert!(
+            !suggestions.is_empty(),
+            "expected at least one suggestion from morgen 18:00"
+        );
+        let top = &suggestions[0];
+        // Tomorrow = Friday 2026-10-02 18:00 local.
+        let expected = Local
+            .with_ymd_and_hms(2026, 10, 2, 18, 0, 0)
+            .single()
+            .expect("expected")
+            .timestamp();
+        assert_eq!(top.starts_at, expected, "label={}", top.label);
+        assert_ne!(top.starts_at, reference);
+        assert!(top.location.as_deref() == Some("Bowling") || top.label.contains("18:00"));
+        // Must not surface the quote header "Donnerstag 13:17".
+        assert!(
+            !suggestions
+                .iter()
+                .any(|s| s.label.to_lowercase().contains("donnerstag") && s.label.contains("13:17")),
+            "quote header leaked: {suggestions:?}"
+        );
     }
 }

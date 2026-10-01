@@ -26,14 +26,16 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let state = DesktopState::new()?;
+            // Poll IMAP frequently so new mail appears without a manual Sync click.
             let scheduler = SyncScheduler::new(
                 state.app.db().clone(),
                 state.app.secrets().clone(),
                 state.app.paths.blobs_dir.clone(),
-                Duration::from_secs(300),
+                Duration::from_secs(60),
             );
             let handle = app.handle().clone();
             let handle_offline = app.handle().clone();
+            let handle_new_mail = app.handle().clone();
             let app_for_ai = state.app.clone();
             let app_for_offline = state.app.clone();
             let app_for_jobs = state.app.clone();
@@ -80,7 +82,23 @@ pub fn run() {
                     let _ = handle.emit("sync://progress", &event);
                 },
                 move |new_ids| {
+                    let count = new_ids.len() as u32;
                     app_for_ai.on_new_messages_synced(&new_ids);
+                    if count > 0 {
+                        let _ = handle_new_mail.emit("mail://new", &count);
+                        use tauri_plugin_notification::NotificationExt;
+                        let body = if count == 1 {
+                            "1 new message".to_string()
+                        } else {
+                            format!("{count} new messages")
+                        };
+                        let _ = handle_new_mail
+                            .notification()
+                            .builder()
+                            .title("NovaMail")
+                            .body(body)
+                            .show();
+                    }
                 },
                 move |account_ids| {
                     let app = app_for_offline.clone();
@@ -113,6 +131,7 @@ pub fn run() {
             commands::accounts_add_password,
             commands::accounts_add_oauth,
             commands::accounts_remove,
+            commands::accounts_update,
             commands::mailboxes_list,
             commands::messages_list,
             commands::threads_list,

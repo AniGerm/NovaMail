@@ -20,6 +20,7 @@ use novamail_crypto::{
 use novamail_db::{AccountRecord, ContactRecord, Database, LabelRecord, RuleRecord, SignatureRecord};
 use novamail_ipc::{
     AccountDto, AccountQuotaDto, AddAccountOAuthRequest, AddAccountPasswordRequest, AddressDto,
+    UpdateAccountRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AttachmentDto,
     BackupAccount, BackupAccountCredentials, BackupContact, BackupPayload, CalDavCollectionDto,
@@ -331,6 +332,7 @@ impl AppState {
         };
 
         SyncEngine::test_connection(&account, &credentials).await?;
+        SmtpClient::test_connection(&account, &credentials).await?;
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
 
@@ -379,8 +381,78 @@ impl AppState {
         };
 
         SyncEngine::test_connection(&account, &credentials).await?;
+        SmtpClient::test_connection(&account, &credentials).await?;
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
+
+        Ok(AccountDto {
+            id: account.id,
+            name: account.name,
+            email: account.email,
+            provider: account.provider,
+            auth_type: account.auth_type,
+            imap_host: account.imap_host,
+            imap_port: account.imap_port,
+            imap_tls: account.imap_tls,
+            smtp_host: account.smtp_host,
+            smtp_port: account.smtp_port,
+            smtp_tls: account.smtp_tls,
+            created_at: account.created_at,
+        })
+    }
+
+    pub async fn update_account(&self, request: UpdateAccountRequest) -> CoreResult<AccountDto> {
+        let existing = self.db.get_account(request.id)?;
+        let mut account = existing.clone();
+        account.name = request.name;
+        account.email = request.email;
+        account.provider = request.provider;
+        account.imap_host = request.imap_host;
+        account.imap_port = request.imap_port;
+        account.imap_tls = request.imap_tls;
+        account.smtp_host = request.smtp_host;
+        account.smtp_port = request.smtp_port;
+        account.smtp_tls = request.smtp_tls;
+
+        let password = request
+            .password
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty());
+
+        let credentials = if let Some(password) = password {
+            if account.auth_type != novamail_ipc::AuthType::Password {
+                return Err(CoreError::Message(
+                    "password update is only supported for password-auth accounts".into(),
+                ));
+            }
+            AccountCredentials::Password {
+                password: password.to_string(),
+            }
+        } else {
+            self.secrets
+                .load_credentials(account.id)
+                .map_err(|e| CoreError::Message(e.to_string()))?
+        };
+
+        let servers_changed = existing.imap_host != account.imap_host
+            || existing.imap_port != account.imap_port
+            || existing.imap_tls != account.imap_tls
+            || existing.smtp_host != account.smtp_host
+            || existing.smtp_port != account.smtp_port
+            || existing.smtp_tls != account.smtp_tls
+            || existing.email != account.email
+            || password.is_some();
+
+        if servers_changed {
+            SyncEngine::test_connection(&account, &credentials).await?;
+            SmtpClient::test_connection(&account, &credentials).await?;
+        }
+
+        if password.is_some() {
+            self.secrets.store_credentials(account.id, &credentials)?;
+        }
+        self.db.update_account(&account)?;
 
         Ok(AccountDto {
             id: account.id,
@@ -437,6 +509,7 @@ impl AppState {
     pub async fn set_flags(&self, request: SetFlagsRequest) -> CoreResult<()> {
         self.db
             .set_flags(request.message_id, request.unread, request.starred)?;
+        // Mailbox unread/total counts are refreshed inside db.set_flags.
         if let Err(err) = set_flags_remote(
             &self.db,
             &self.secrets,
@@ -1705,7 +1778,7 @@ impl AppState {
     ) -> CoreResult<()> {
         let has_replies = db.has_ai_insight(message_id, "reply_a")?
             && db.has_ai_insight(message_id, "reply_b")?;
-        let has_events = db.has_ai_insight(message_id, "event_suggestions")?;
+        let has_events = insight_event_suggestions_current(db, message_id)?;
         if db.has_ai_insight(message_id, "summary")? && has_replies && has_events {
             return Ok(());
         }
@@ -1720,6 +1793,7 @@ impl AppState {
                 .summarize(SummarizeRequest {
                     subject: detail.summary.subject.clone(),
                     body_text: body.clone(),
+                    preferred_language: None,
                 })
                 .await
             {
@@ -1729,6 +1803,7 @@ impl AppState {
                         .summarize(SummarizeRequest {
                             subject: detail.summary.subject.clone(),
                             body_text: body.clone(),
+                            preferred_language: None,
                         })
                         .await?
                 }
@@ -1764,6 +1839,7 @@ impl AppState {
                 })
                 .collect();
             let payload = serde_json::json!({
+                "version": EVENT_SUGGESTIONS_VERSION,
                 "suggestions": suggestions,
                 "provider": result.provider,
             });
@@ -1777,6 +1853,7 @@ impl AppState {
                 from_email: detail.summary.from.email.clone(),
                 facts: None,
                 style: None,
+                preferred_language: None,
             };
             let result = match ai.suggest_reply_variants(ai_request.clone()).await {
                 Ok(r) => r,
@@ -1833,6 +1910,7 @@ impl AppState {
             .summarize(SummarizeRequest {
                 subject: detail.summary.subject.clone(),
                 body_text: body.clone(),
+                preferred_language: request.preferred_language.clone(),
             })
             .await
         {
@@ -1843,6 +1921,7 @@ impl AppState {
                     .summarize(SummarizeRequest {
                         subject: detail.summary.subject,
                         body_text: body,
+                        preferred_language: request.preferred_language.clone(),
                     })
                     .await?
             }
@@ -1869,6 +1948,7 @@ impl AppState {
             .suggest_replies_message(SuggestRepliesMessageRequest {
                 message_id: request.message_id,
                 facts: request.facts,
+                preferred_language: request.preferred_language,
             })
             .await?;
         let suggestion = variants
@@ -1921,6 +2001,7 @@ impl AppState {
             from_email: detail.summary.from.email.clone(),
             facts: facts.clone(),
             style: None,
+            preferred_language: request.preferred_language.clone(),
         };
         let ai = self.ai_provider();
         let result = match ai.suggest_reply_variants(ai_request.clone()).await {
@@ -3418,6 +3499,19 @@ fn insight_provider(db: &Database, message_id: Uuid, kind: &str) -> CoreResult<O
     }))
 }
 
+/// Bump when event extraction logic changes so stale cached suggestions re-run.
+const EVENT_SUGGESTIONS_VERSION: i64 = 2;
+
+fn insight_event_suggestions_current(db: &Database, message_id: Uuid) -> CoreResult<bool> {
+    let Some(raw) = db.get_ai_insight(message_id, "event_suggestions")? else {
+        return Ok(false);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(false);
+    };
+    Ok(value.get("version").and_then(|v| v.as_i64()) == Some(EVENT_SUGGESTIONS_VERSION))
+}
+
 fn insight_event_suggestions(
     db: &Database,
     message_id: Uuid,
@@ -3428,6 +3522,10 @@ fn insight_event_suggestions(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(Vec::new());
     };
+    // Ignore stale extractions that used quote-header timestamps.
+    if value.get("version").and_then(|v| v.as_i64()) != Some(EVENT_SUGGESTIONS_VERSION) {
+        return Ok(Vec::new());
+    }
     let Some(arr) = value.get("suggestions").and_then(|v| v.as_array()) else {
         return Ok(Vec::new());
     };

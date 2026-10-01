@@ -12,6 +12,7 @@ import type {
   SpellDictionaryDto,
   UpdateStatusEvent,
 } from "@/shared/api/types";
+import { AccountsPanel } from "@/features/settings/AccountsPanel";
 import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
 import { PgpKeysPanel } from "@/features/settings/PgpKeysPanel";
 import { RulesSpamPanel } from "@/features/settings/RulesSpamPanel";
@@ -142,14 +143,20 @@ function applyUpdateEvent(
   }
 }
 
+type SettingsTab = "general" | "accounts" | "ai" | "mail" | "privacy";
+
 export function SettingsDialog({
   open,
   onClose,
   accounts = [],
+  onAccountsChanged,
+  onAddAccount,
 }: {
   open: boolean;
   onClose: () => void;
   accounts?: AccountDto[];
+  onAccountsChanged?: () => void;
+  onAddAccount?: () => void;
 }) {
   const t = useT();
   const theme = useUiStore((s) => s.theme);
@@ -199,6 +206,7 @@ export function SettingsDialog({
   const [spellBusyCode, setSpellBusyCode] = useState<string | null>(null);
   const [spellStatus, setSpellStatus] = useState<string | null>(null);
   const [otherLangsOpen, setOtherLangsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const primarySpellDicts = spellDicts.filter((d) =>
     PRIMARY_SPELL_CODES.has(d.code),
   );
@@ -242,6 +250,10 @@ export function SettingsDialog({
     setAiSettings(settings);
     setAiRuntime(runtime);
   }
+
+  useEffect(() => {
+    if (open) setSettingsTab("general");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -475,7 +487,41 @@ export function SettingsDialog({
       description={t("settingsDescription")}
       className="max-w-3xl"
     >
+      <div className="flex flex-wrap gap-1 border-b border-[var(--nova-border)] pb-2">
+        {(
+          [
+            ["general", t("settingsTabGeneral")],
+            ["accounts", t("settingsTabAccounts")],
+            ["ai", t("settingsTabAi")],
+            ["mail", t("settingsTabMail")],
+            ["privacy", t("settingsTabPrivacy")],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSettingsTab(id)}
+            className={
+              settingsTab === id
+                ? "rounded-[var(--nova-radius-sm)] bg-[var(--nova-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--nova-accent)]"
+                : "rounded-[var(--nova-radius-sm)] px-3 py-1.5 text-sm text-[var(--nova-ink-muted)] hover:bg-[var(--nova-surface-2)]"
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="grid max-h-[70vh] gap-5 overflow-y-auto text-sm">
+        {settingsTab === "accounts" ? (
+          <AccountsPanel
+            accounts={accounts}
+            onChanged={() => onAccountsChanged?.()}
+            onAddAccount={() => onAddAccount?.()}
+          />
+        ) : null}
+        {settingsTab === "general" ? (
+        <>
+
         <label className="grid gap-1">
           <span>{t("language")}</span>
           <Select
@@ -745,6 +791,10 @@ export function SettingsDialog({
           ) : null}
         </section>
 
+        </>
+        ) : null}
+        {settingsTab === "ai" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("aiSettingsTitle")}</h3>
           <p className="text-xs text-[var(--nova-ink-muted)]">
@@ -976,6 +1026,10 @@ export function SettingsDialog({
           ) : null}
         </section>
 
+        </>
+        ) : null}
+        {settingsTab === "privacy" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("backupTitle")}</h3>
           <p className="text-xs text-[var(--nova-ink-muted)]">
@@ -1046,6 +1100,11 @@ export function SettingsDialog({
           ) : null}
         </section>
 
+        <PgpKeysPanel />
+        </>
+        ) : null}
+        {settingsTab === "mail" ? (
+        <>
         <section className="grid gap-2">
           <h3 className="font-medium">{t("signatures")}</h3>
           <Input value={sigName} onChange={(e) => setSigName(e.target.value)} />
@@ -1113,8 +1172,9 @@ export function SettingsDialog({
         </section>
 
         <OfflineMailboxPanel accounts={accounts} />
-        <PgpKeysPanel />
         <RulesSpamPanel accounts={accounts} />
+        </>
+        ) : null}
 
         {error ? (
           <p className="text-[var(--nova-danger)]" role="alert">

@@ -14,6 +14,39 @@ use crate::{MailError, MailResult};
 pub struct SmtpClient;
 
 impl SmtpClient {
+    /// Verify SMTP login / TLS without sending a message.
+    pub async fn test_connection(
+        account: &AccountRecord,
+        credentials: &AccountCredentials,
+    ) -> MailResult<()> {
+        let tls_mode = if account.smtp_tls && account.smtp_port == 465 {
+            "smtps/wrapper"
+        } else if account.smtp_tls {
+            "starttls"
+        } else {
+            "plain"
+        };
+        tracing::info!(
+            account = %account.email,
+            host = %account.smtp_host,
+            port = account.smtp_port,
+            tls = tls_mode,
+            "SMTP connection test starting"
+        );
+        let transport = build_transport(account, credentials)?;
+        transport
+            .test_connection()
+            .await
+            .map_err(|e| MailError::Smtp(format!("SMTP test failed: {e}")))?;
+        tracing::info!(
+            account = %account.email,
+            host = %account.smtp_host,
+            port = account.smtp_port,
+            "SMTP connection test OK"
+        );
+        Ok(())
+    }
+
     pub async fn send_with_secrets(
         account: &AccountRecord,
         secrets: &SecretStore,
