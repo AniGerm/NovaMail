@@ -10,6 +10,7 @@ import type {
   LabelDto,
   SignatureDto,
   SpellDictionaryDto,
+  UpdateStatusEvent,
 } from "@/shared/api/types";
 import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
 import { PgpKeysPanel } from "@/features/settings/PgpKeysPanel";
@@ -56,6 +57,91 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+type UpdateUiState = {
+  status: string;
+  availableVersion: string | null;
+  downloadedVersion: string | null;
+  progress: number | null;
+  checking: boolean;
+  downloading: boolean;
+};
+
+const INITIAL_UPDATE: UpdateUiState = {
+  status: "",
+  availableVersion: null,
+  downloadedVersion: null,
+  progress: null,
+  checking: false,
+  downloading: false,
+};
+
+function applyUpdateEvent(
+  prev: UpdateUiState,
+  event: UpdateStatusEvent,
+  labels: {
+    checking: string;
+    available: (version: string) => string;
+    notAvailable: string;
+    downloading: (percent: number) => string;
+    downloaded: (version: string) => string;
+    installing: string;
+  },
+): UpdateUiState {
+  switch (event.type) {
+    case "checking":
+      return { ...prev, checking: true, status: labels.checking };
+    case "update-available":
+      return {
+        ...prev,
+        checking: false,
+        availableVersion: event.version,
+        downloadedVersion: null,
+        progress: null,
+        status: labels.available(event.version),
+      };
+    case "update-not-available":
+      return {
+        ...prev,
+        checking: false,
+        availableVersion: null,
+        status: labels.notAvailable,
+      };
+    case "download-progress":
+      return {
+        ...prev,
+        downloading: true,
+        progress: event.percent,
+        status: labels.downloading(event.percent),
+      };
+    case "update-downloaded":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        progress: 100,
+        availableVersion: event.version,
+        downloadedVersion: event.version,
+        status: labels.downloaded(event.version),
+      };
+    case "installing":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: labels.installing,
+      };
+    case "error":
+      return {
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: event.message,
+      };
+    default:
+      return prev;
+  }
+}
+
 export function SettingsDialog({
   open,
   onClose,
@@ -78,6 +164,8 @@ export function SettingsDialog({
   const setHighContrast = useUiStore((s) => s.setHighContrast);
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
+  const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
+  const setAutoCheckUpdates = useUiStore((s) => s.setAutoCheckUpdates);
 
   const [signatures, setSignatures] = useState<SignatureDto[]>([]);
   const [labels, setLabels] = useState<LabelDto[]>([]);
@@ -92,6 +180,9 @@ export function SettingsDialog({
   const importFileRef = useRef<File | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateChannel, setUpdateChannel] = useState("dev");
+  const [updateUi, setUpdateUi] = useState<UpdateUiState>(INITIAL_UPDATE);
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     enabled: false,
     model: AI_DEFAULT_MODEL,
@@ -165,6 +256,39 @@ export function SettingsDialog({
     refreshExtras().catch((err) => setError((err as AppError).message));
     refreshAi().catch((err) => setError((err as AppError).message));
     refreshSpellcheck().catch(() => undefined);
+    if (isDesktopShell()) {
+      void api
+        .appVersion()
+        .then((info) => {
+          setAppVersion(info.version);
+          setUpdateChannel(info.channel);
+        })
+        .catch(() => undefined);
+    }
+  }, [open, t]);
+
+  useEffect(() => {
+    if (!open || !isDesktopShell()) return;
+    let unlisten: (() => void) | undefined;
+    void api
+      .onUpdateStatus((event) => {
+        setUpdateUi((prev) =>
+          applyUpdateEvent(prev, event, {
+            checking: t("updatesChecking"),
+            available: (version) => t("updatesAvailable", { version }),
+            notAvailable: t("updatesNotAvailable"),
+            downloading: (percent) => t("updatesDownloading", { percent }),
+            downloaded: (version) => t("updatesDownloaded", { version }),
+            installing: t("updatesInstalling"),
+          }),
+        );
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
   }, [open, t]);
 
   async function handleSaveAi() {
@@ -292,6 +416,54 @@ export function SettingsDialog({
       }
     } finally {
       setBackupBusy(false);
+    }
+  }
+
+  async function handleCheckUpdates() {
+    if (!isDesktopShell()) return;
+    setUpdateUi((prev) => ({
+      ...prev,
+      checking: true,
+      status: t("updatesChecking"),
+    }));
+    try {
+      await api.updatesCheck();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
+    }
+  }
+
+  async function handleDownloadUpdate() {
+    if (!isDesktopShell()) return;
+    setUpdateUi((prev) => ({ ...prev, downloading: true, progress: 0 }));
+    try {
+      await api.updatesDownload();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!isDesktopShell()) return;
+    try {
+      await api.updatesInstall();
+    } catch (err) {
+      setUpdateUi((prev) => ({
+        ...prev,
+        checking: false,
+        downloading: false,
+        status: (err as AppError).message,
+      }));
     }
   }
 
@@ -508,6 +680,70 @@ export function SettingsDialog({
           />
           {t("highContrast")}
         </label>
+
+        <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+          <h3 className="font-medium">{t("updatesTitle")}</h3>
+          <p className="text-xs text-[var(--nova-ink-muted)]">
+            {t("updatesCurrentVersion", {
+              version: appVersion || "…",
+            })}
+            {" — "}
+            {updateChannel === "deb"
+              ? t("updatesDescriptionDeb")
+              : t("updatesDescriptionDev")}
+          </p>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={autoCheckUpdates}
+              onChange={(e) => setAutoCheckUpdates(e.target.checked)}
+            />
+            {t("updatesAutoCheck")}
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={
+                !isDesktopShell() || updateUi.checking || updateUi.downloading
+              }
+              onClick={() => void handleCheckUpdates()}
+            >
+              {t("updatesCheck")}
+            </Button>
+            {updateUi.availableVersion && !updateUi.downloadedVersion ? (
+              <Button
+                type="button"
+                disabled={updateUi.downloading}
+                onClick={() => void handleDownloadUpdate()}
+              >
+                {t("updatesDownload")}
+              </Button>
+            ) : null}
+            {updateUi.downloadedVersion ? (
+              <Button type="button" onClick={() => void handleInstallUpdate()}>
+                {t("updatesInstall")}
+              </Button>
+            ) : null}
+          </div>
+          {updateUi.progress !== null && updateUi.downloading ? (
+            <div
+              className="h-2 overflow-hidden rounded-full bg-[var(--nova-border)]"
+              role="progressbar"
+              aria-valuenow={updateUi.progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full bg-[var(--nova-accent)] transition-[width]"
+                style={{ width: `${updateUi.progress}%` }}
+              />
+            </div>
+          ) : null}
+          {updateUi.status ? (
+            <p className="text-xs text-[var(--nova-ink-muted)]">{updateUi.status}</p>
+          ) : null}
+        </section>
 
         <section className="grid gap-2">
           <h3 className="font-medium">{t("aiSettingsTitle")}</h3>

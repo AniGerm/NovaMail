@@ -620,6 +620,22 @@ export const de = {
   aiInstallOpenSite: "ollama.com öffnen",
   aiInstallFound: "Ollama gefunden, aber noch nicht gestartet.",
   aiInstallMissing: "Ollama ist nicht installiert oder nicht erreichbar.",
+  updatesTitle: "Updates",
+  updatesDescriptionDeb:
+    "Update per Klick: .deb mit Passwort-Abfrage, danach startet NovaMail neu.",
+  updatesDescriptionDev:
+    "Die Update-Installation ist in der Ubuntu-.deb-Version verfügbar.",
+  updatesCurrentVersion: "Aktuelle Version: {version}",
+  updatesAutoCheck: "Automatisch nach Updates suchen",
+  updatesCheck: "Nach Updates suchen",
+  updatesDownload: "Herunterladen",
+  updatesInstall: "Jetzt installieren",
+  updatesChecking: "Suche nach Updates…",
+  updatesAvailable: "Version {version} verfügbar",
+  updatesNotAvailable: "Du hast die neueste Version.",
+  updatesDownloading: "Download… {percent} %",
+  updatesDownloaded: "Version {version} bereit zur Installation",
+  updatesInstalling: "App wird beendet — Installation startet…",
 } as const;
 
 export type TranslationKey = keyof typeof de;

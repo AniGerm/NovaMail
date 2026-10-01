@@ -21,6 +21,7 @@ interface UiState {
   spellcheckLang: string;
   highContrast: boolean;
   density: Density;
+  autoCheckUpdates: boolean;
   selectedMessageId: string | null;
   composerOpen: boolean;
   accountSetupOpen: boolean;
@@ -36,6 +37,7 @@ interface UiState {
   setSpellcheckLang: (lang: string) => void;
   setHighContrast: (value: boolean) => void;
   setDensity: (density: Density) => void;
+  setAutoCheckUpdates: (value: boolean) => void;
   selectMessage: (id: string | null) => void;
   setComposerOpen: (open: boolean) => void;
   setAccountSetupOpen: (open: boolean) => void;
@@ -56,6 +58,7 @@ export const useUiStore = create<UiState>()(
       spellcheckLang: "de_DE",
       highContrast: false,
       density: "comfortable",
+      autoCheckUpdates: true,
       selectedMessageId: null,
       composerOpen: false,
       accountSetupOpen: false,
@@ -72,6 +75,7 @@ export const useUiStore = create<UiState>()(
       setSpellcheckLang: (spellcheckLang) => set({ spellcheckLang }),
       setHighContrast: (highContrast) => set({ highContrast }),
       setDensity: (density) => set({ density }),
+      setAutoCheckUpdates: (autoCheckUpdates) => set({ autoCheckUpdates }),
       selectMessage: (selectedMessageId) => set({ selectedMessageId }),
       setComposerOpen: (composerOpen) => set({ composerOpen }),
       setAccountSetupOpen: (accountSetupOpen) => set({ accountSetupOpen }),
@@ -91,6 +95,7 @@ export const useUiStore = create<UiState>()(
         spellcheckLang: state.spellcheckLang,
         highContrast: state.highContrast,
         density: state.density,
+        autoCheckUpdates: state.autoCheckUpdates,
       }),
     },
   ),

@@ -93,11 +93,28 @@ export function AppShell() {
     useState<PlannedSummaryDto | null>(null);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
+  const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
 
   useEffect(() => {
     if (!desktop) return;
     void api.spellcheckEnsureForLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
+
+  useEffect(() => {
+    if (!desktop || !autoCheckUpdates) return;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      void api.updatesCheck().catch(() => undefined);
+    };
+    const start = window.setTimeout(run, 10_000);
+    const interval = window.setInterval(run, 4 * 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+      window.clearInterval(interval);
+    };
+  }, [desktop, autoCheckUpdates]);
 
   const accountsQuery = useQuery({
     queryKey: ["accounts"],

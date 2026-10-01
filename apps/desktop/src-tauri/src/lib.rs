@@ -1,5 +1,6 @@
 mod commands;
 mod state;
+mod updater;
 
 use std::time::Duration;
 
@@ -223,6 +224,10 @@ pub fn run() {
             commands::calendar_collections_set_default,
             commands::calendar_invitations_list,
             commands::calendar_invitations_respond,
+            commands::app_version,
+            commands::updates_check,
+            commands::updates_download,
+            commands::updates_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");

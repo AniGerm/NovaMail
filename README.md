@@ -185,6 +185,16 @@ pnpm dev
 
 `pnpm dev` launches the Tauri shell with Vite HMR on port `1420`.
 
+### Ubuntu `.deb` release
+
+Push a version tag matching `package.json` / `Cargo.toml` / `tauri.conf.json` (e.g. `v0.1.1`). GitHub Actions builds `.deb` + AppImage and publishes a [GitHub Release](https://github.com/AniGerm/NovaMail/releases).
+
+```bash
+sudo apt install ./novamail_*.deb
+```
+
+In **Settings → Updates**, NovaMail checks GitHub for newer releases and can download + install the `.deb` with a password prompt (same flow as Fax Inbox).
+
 ### Frontend-only Vite (no mail engine)
 
 ```bash

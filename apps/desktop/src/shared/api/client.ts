@@ -72,6 +72,10 @@ import type {
   SyncProgressEvent,
   SyncResult,
   UpsertContactRequest,
+  AppVersionInfo,
+  UpdateActionResult,
+  UpdateCheckResult,
+  UpdateStatusEvent,
 } from "./types";
 
 export type { SendMessageRequest, OutgoingAttachment };
@@ -466,6 +470,18 @@ export const api = {
     call<CalendarInvitationDto>("calendar_invitations_respond", {
       request: { id, response },
     }),
+  appVersion: () => call<AppVersionInfo>("app_version"),
+  updatesCheck: () => call<UpdateCheckResult>("updates_check"),
+  updatesDownload: () => call<UpdateActionResult>("updates_download"),
+  updatesInstall: () => call<UpdateActionResult>("updates_install"),
+  onUpdateStatus: async (
+    handler: (event: UpdateStatusEvent) => void,
+  ): Promise<UnlistenFn> => {
+    if (!isTauri()) return () => undefined;
+    return listen<UpdateStatusEvent>("update://status", (event) => {
+      handler(event.payload);
+    });
+  },
   oauthAuthorizeUrl: (provider: string) =>
     call<string>("oauth_authorize_url", { provider }),
   oauthWaitCallback: (timeoutSecs = 180) =>

@@ -622,4 +622,20 @@ export const en: Translations = {
   aiInstallOpenSite: "Open ollama.com",
   aiInstallFound: "Ollama is installed but not running yet.",
   aiInstallMissing: "Ollama is not installed or not reachable.",
+  updatesTitle: "Updates",
+  updatesDescriptionDeb:
+    "Updates install as a .deb with a password prompt, then NovaMail relaunches.",
+  updatesDescriptionDev:
+    "Update install is available in the packaged Ubuntu .deb build.",
+  updatesCurrentVersion: "Current version: {version}",
+  updatesAutoCheck: "Check for updates automatically",
+  updatesCheck: "Check for updates",
+  updatesDownload: "Download",
+  updatesInstall: "Install now",
+  updatesChecking: "Checking for updates…",
+  updatesAvailable: "Version {version} is available",
+  updatesNotAvailable: "You have the latest version.",
+  updatesDownloading: "Downloading… {percent}%",
+  updatesDownloaded: "Version {version} is ready to install",
+  updatesInstalling: "NovaMail will quit — installation starts…",
 };

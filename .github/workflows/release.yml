@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            patchelf libayatana-appindicator3-dev libssl-dev \
+            clang llvm pkg-config nettle-dev
+
+      - name: Verify tag matches package version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          CONF=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "$TAG" != "$PKG" ] || [ "$TAG" != "$CONF" ] || [ "$TAG" != "$CARGO" ]; then
+            echo "::error::Tag v${TAG} must match package.json (${PKG}), tauri.conf.json (${CONF}), and Cargo.toml (${CARGO})."
+            exit 1
+          fi
+          echo "Version OK: ${PKG}"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Linux .deb + AppImage
+        run: pnpm --filter @novamail/desktop tauri build -- --bundles deb,appimage
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist-release
+          # Workspace target (Cargo) and Tauri-local target both possible.
+          find target apps/desktop/src-tauri/target \
+            -type f \( -name '*.deb' -o -name '*.AppImage' \) \
+            2>/dev/null | while read -r f; do
+              cp -v "$f" dist-release/
+            done
+          ls -lah dist-release
+          test -n "$(find dist-release -name '*.deb' | head -1)"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: dist-release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

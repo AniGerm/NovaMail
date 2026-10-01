@@ -21,12 +21,13 @@ use novamail_ipc::{
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
     UpsertCalendarAccountRequest, UpsertCalendarCollectionRequest, UpsertCalendarEventRequest,
     UpsertCalendarTaskRequest, UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest,
-    UpsertSignatureRequest,
+    UpsertSignatureRequest, AppVersionInfo, UpdateActionResult, UpdateCheckResult,
 };
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::state::DesktopState;
+use crate::updater;
 
 fn map_err(err: novamail_core::CoreError) -> AppError {
     err.into()
@@ -1057,4 +1058,24 @@ pub async fn calendar_invitations_respond(
         .respond_calendar_invitation(request)
         .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn app_version() -> AppVersionInfo {
+    updater::app_version_info()
+}
+
+#[tauri::command]
+pub async fn updates_check(app: AppHandle) -> Result<UpdateCheckResult, AppError> {
+    updater::check_for_updates(app).await
+}
+
+#[tauri::command]
+pub async fn updates_download(app: AppHandle) -> Result<UpdateActionResult, AppError> {
+    updater::download_update(app).await
+}
+
+#[tauri::command]
+pub async fn updates_install(app: AppHandle) -> Result<UpdateActionResult, AppError> {
+    updater::install_update(app).await
 }

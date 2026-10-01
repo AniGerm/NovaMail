@@ -724,3 +724,28 @@ export interface ImportBackupResult {
   rulesImported: number;
   signaturesImported: number;
 }
+
+export interface AppVersionInfo {
+  version: string;
+  packaged: boolean;
+  channel: string;
+}
+
+export type UpdateStatusEvent =
+  | { type: "checking" }
+  | { type: "update-available"; version: string }
+  | { type: "update-not-available"; version?: string }
+  | { type: "download-progress"; percent: number }
+  | { type: "update-downloaded"; version: string }
+  | { type: "installing"; version?: string }
+  | { type: "error"; message: string };
+
+export interface UpdateCheckResult {
+  ok: boolean;
+  availableVersion?: string | null;
+}
+
+export interface UpdateActionResult {
+  ok: boolean;
+  reason?: string | null;
+}
