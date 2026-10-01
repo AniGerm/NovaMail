@@ -123,9 +123,9 @@ export function AppShell() {
   });
 
   const mailboxesQuery = useQuery({
-    queryKey: ["mailboxes", inboxFilters.accountId],
+    queryKey: ["mailboxes", "all"],
     enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
-    queryFn: () => api.mailboxesList(inboxFilters.accountId),
+    queryFn: () => api.mailboxesList(null),
   });
 
   const listRequest = useMemo(
@@ -354,6 +354,23 @@ export function AppShell() {
       snoozedOnly: false,
     }));
   }, []);
+
+  const handleSelectMailbox = useCallback(
+    (accountId: string, mailboxId: string) => {
+      selectMessage(null);
+      setPlannedOpen(false);
+      setCalendarOpen(false);
+      setInboxFilters((prev) => ({
+        ...prev,
+        accountId,
+        mailboxId,
+        mailboxRole: null,
+        localOnly: false,
+        snoozedOnly: false,
+      }));
+    },
+    [selectMessage],
+  );
 
   const handleSelectDrafts = useCallback(() => {
     selectMessage(null);
@@ -862,7 +879,9 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           accounts={accounts}
+          mailboxes={mailboxes}
           selectedAccountId={inboxFilters.accountId}
+          selectedMailboxId={inboxFilters.mailboxId}
           draftsSelected={inboxFilters.mailboxRole === "drafts"}
           spamSelected={inboxFilters.mailboxRole === "junk"}
           offlineSelected={inboxFilters.localOnly}
@@ -876,6 +895,7 @@ export function AppShell() {
           themeMode={theme}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
+          onSelectMailbox={handleSelectMailbox}
           onSelectDrafts={handleSelectDrafts}
           onSelectSpam={handleSelectSpam}
           onSelectOffline={handleSelectOffline}

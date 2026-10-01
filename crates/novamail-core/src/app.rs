@@ -45,8 +45,9 @@ use novamail_ipc::{
     UpsertContactRequest, UpsertLabelRequest, UpsertRuleRequest, UpsertSignatureRequest,
 };
 use novamail_mail::{
-    archive_remote, delete_remote, move_remote, offload_message_remote, probe_account_quota,
-    save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
+    append_sent_remote, archive_remote, delete_remote, move_remote, offload_message_remote,
+    probe_account_quota, save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient,
+    SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -531,6 +532,17 @@ impl AppState {
         let draft_id = request.draft_id;
         let request = self.apply_pgp_to_send(request)?;
         SmtpClient::send_with_secrets(&account, &self.secrets, &request).await?;
+        if !account.imap_host.trim().is_empty() {
+            if let Err(err) =
+                append_sent_remote(&self.db, &self.secrets, &account, &request).await
+            {
+                tracing::warn!(
+                    account = %account.email,
+                    error = %err,
+                    "IMAP APPEND to Sent failed after SMTP accept"
+                );
+            }
+        }
         if let Some(id) = draft_id {
             if !account.imap_host.trim().is_empty() {
                 if let Err(err) = delete_remote(&self.db, &self.secrets, id).await {
