@@ -275,6 +275,9 @@ export const de = {
   edit: "Bearbeiten",
   delete: "Löschen",
   archive: "Archivieren",
+  crashLogTitle: "Crash- / Diagnose-Log",
+  crashLogHint:
+    "Bei Abstürzen diese Datei öffnen (letzte Zeilen) und teilen. Enthält Zeitstempel und Panic-Meldungen.",
   spam: "Spam",
   trash: "Papierkorb",
   spamTitle: "Spam-Filter",

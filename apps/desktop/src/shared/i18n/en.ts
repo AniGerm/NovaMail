@@ -277,6 +277,9 @@ export const en: Translations = {
   edit: "Edit",
   delete: "Delete",
   archive: "Archive",
+  crashLogTitle: "Crash / diagnostic log",
+  crashLogHint:
+    "If the app crashes, open this file (last lines) and share it. Includes timestamps and panic messages.",
   spam: "Spam",
   trash: "Trash",
   spamTitle: "Spam filter",

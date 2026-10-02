@@ -1101,6 +1101,17 @@ pub fn app_version() -> AppVersionInfo {
 }
 
 #[tauri::command]
+pub fn logs_path() -> String {
+    dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("novamail")
+        .join("logs")
+        .join("novamail.log")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tauri::command]
 pub async fn updates_check(app: AppHandle) -> Result<UpdateCheckResult, AppError> {
     updater::check_for_updates(app).await
 }

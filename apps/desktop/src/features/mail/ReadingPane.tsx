@@ -456,7 +456,7 @@ export function ReadingPane({
           {current.bodyHtml ? (
             <HtmlMailBody
               html={current.bodyHtml}
-              attachments={attachments}
+              textFallback={body}
             />
           ) : (
             <div className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--nova-ink)]">
