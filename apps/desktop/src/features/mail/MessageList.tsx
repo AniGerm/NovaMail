@@ -403,12 +403,12 @@ export function MessageList({
                 onClick={() => onSelect(message.id)}
                 className={cn(
                   "absolute left-0 right-0 flex w-full flex-col gap-1 border-b border-[var(--nova-border)] text-left transition-colors",
-                  indented ? "py-2 pl-8 pr-4" : "px-4 py-3",
+                  indented ? "py-2 pl-12 pr-4" : "px-4 py-3",
                   selected
                     ? "bg-[var(--nova-accent-soft)]"
                     : "hover:bg-[var(--nova-surface-2)]",
                   indented &&
-                    "border-l-2 border-l-[var(--nova-accent)] bg-[color-mix(in_srgb,var(--nova-surface-2)_55%,transparent)]",
+                    "border-l-[3px] border-l-[var(--nova-accent)] bg-[color-mix(in_srgb,var(--nova-surface-2)_55%,transparent)]",
                 )}
                 style={{
                   height: `${item.size}px`,
@@ -418,11 +418,19 @@ export function MessageList({
                 <div className="flex items-center justify-between gap-2">
                   <span
                     className={cn(
-                      "truncate text-sm",
+                      "flex min-w-0 items-center gap-1.5 truncate text-sm",
                       message.unread ? "font-semibold" : "font-medium",
                     )}
                   >
-                    {displayName(message.from)}
+                    {indented ? (
+                      <span
+                        aria-hidden
+                        className="shrink-0 font-mono text-[var(--nova-ink-muted)]"
+                      >
+                        ↳
+                      </span>
+                    ) : null}
+                    <span className="truncate">{displayName(message.from)}</span>
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
                     <button

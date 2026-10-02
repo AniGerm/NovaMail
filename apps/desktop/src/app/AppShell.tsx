@@ -23,6 +23,7 @@ import { QuickTriage } from "@/features/mail/QuickTriage";
 import { OfflinePromptDialog } from "@/features/mail/OfflinePromptDialog";
 import { CalendarPanel } from "@/features/calendar/CalendarPanel";
 import { PlannedPanel } from "@/features/mail/PlannedPanel";
+import { MessageFocusDialog } from "@/features/mail/MessageFocusDialog";
 import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -68,6 +69,8 @@ export function AppShell() {
     theme,
     setTheme,
     density,
+    inboxViewMode,
+    setInboxViewMode,
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
@@ -80,11 +83,14 @@ export function AppShell() {
   const [contactPrefill, setContactPrefill] = useState<ContactPrefill | null>(
     null,
   );
+  const [messageFocusOpen, setMessageFocusOpen] = useState(false);
   const [paletteLabels, setPaletteLabels] = useState<LabelDto[]>([]);
   const [palettePeople, setPalettePeople] = useState<RecipientSuggestion[]>([]);
   const clearContactPrefill = useCallback(() => setContactPrefill(null), []);
-  const [inboxFilters, setInboxFilters] =
-    useState<InboxFilters>(defaultInboxFilters);
+  const [inboxFilters, setInboxFilters] = useState<InboxFilters>(() => ({
+    ...defaultInboxFilters,
+    viewMode: useUiStore.getState().inboxViewMode,
+  }));
   const [offlinePrompt, setOfflinePrompt] =
     useState<OfflinePromptEvent | null>(null);
   const [plannedOpen, setPlannedOpen] = useState(false);
@@ -469,18 +475,22 @@ export function AppShell() {
     [messages, selectMessage, selectedMessageId],
   );
 
-  const handleSelectAccountFilter = useCallback((accountId: string | null) => {
-    setPlannedOpen(false);
-    setCalendarOpen(false);
-    setInboxFilters((prev) => ({
-      ...prev,
-      accountId,
-      mailboxId: null,
-      mailboxRole: null,
-      localOnly: false,
-      snoozedOnly: false,
-    }));
-  }, []);
+  const handleSelectAccountFilter = useCallback(
+    (accountId: string | null) => {
+      setPlannedOpen(false);
+      setCalendarOpen(false);
+      setInboxFilters((prev) => ({
+        ...prev,
+        accountId,
+        mailboxId: null,
+        mailboxRole: null,
+        localOnly: false,
+        snoozedOnly: false,
+        viewMode: inboxViewMode,
+      }));
+    },
+    [inboxViewMode],
+  );
 
   const handleSelectMailbox = useCallback(
     (accountId: string, mailboxId: string) => {
@@ -494,9 +504,10 @@ export function AppShell() {
         mailboxRole: null,
         localOnly: false,
         snoozedOnly: false,
+        viewMode: inboxViewMode,
       }));
     },
-    [selectMessage],
+    [inboxViewMode, selectMessage],
   );
 
   const handleSelectDrafts = useCallback(() => {
@@ -555,6 +566,22 @@ export function AppShell() {
     }));
     refreshPlannedSummary();
   }, [refreshPlannedSummary, selectMessage]);
+
+  const handleInboxFiltersChange = useCallback(
+    (next: InboxFilters) => {
+      setInboxFilters(next);
+      // Persist user preference only when choosing flat/threads in normal mail.
+      if (
+        !next.mailboxRole &&
+        !next.localOnly &&
+        !next.snoozedOnly &&
+        next.viewMode !== inboxViewMode
+      ) {
+        setInboxViewMode(next.viewMode);
+      }
+    },
+    [inboxViewMode, setInboxViewMode],
+  );
 
   const handleSelectCalendar = useCallback(() => {
     selectMessage(null);
@@ -1093,7 +1120,7 @@ export function AppShell() {
                 }}
                 total={listTotal}
                 filters={inboxFilters}
-                onFiltersChange={setInboxFilters}
+                onFiltersChange={handleInboxFiltersChange}
                 accounts={accounts}
                 mailboxes={mailboxes}
               />
@@ -1103,6 +1130,7 @@ export function AppShell() {
                 message={messageQuery.data}
                 aiEnabled={aiReplyEnabled}
                 inSpamFolder={inboxFilters.mailboxRole === "junk"}
+                onOpenFocus={() => setMessageFocusOpen(true)}
                 onDelete={() => {
                   void handleDelete();
                 }}
@@ -1110,6 +1138,7 @@ export function AppShell() {
                   void handleArchive();
                 }}
                 onReply={() => {
+                  setMessageFocusOpen(false);
                   setComposerBody("");
                   if (messageQuery.data) {
                     setReplyTo(messageQuery.data);
@@ -1119,6 +1148,7 @@ export function AppShell() {
                   }
                 }}
                 onForward={() => {
+                  setMessageFocusOpen(false);
                   void handleForward();
                 }}
                 onToggleStar={() => {
@@ -1163,6 +1193,7 @@ export function AppShell() {
                           status: created.status ?? "confirmed",
                         });
                       }
+                      setMessageFocusOpen(false);
                       setCalendarOpen(true);
                       setPlannedOpen(false);
                       setSyncStatus(t("eventCreated"));
@@ -1179,6 +1210,7 @@ export function AppShell() {
                       Math.floor(Date.now() / 1000) + 86400,
                     )
                     .then(() => {
+                      setMessageFocusOpen(false);
                       setCalendarOpen(true);
                       setPlannedOpen(false);
                       setSyncStatus(t("taskCreated"));
@@ -1244,6 +1276,51 @@ export function AppShell() {
         onAddToContacts={(prefill) => {
           setContactPrefill(prefill);
           setContactsOpen(true);
+        }}
+      />
+      <MessageFocusDialog
+        open={messageFocusOpen && Boolean(messageQuery.data)}
+        message={messageQuery.data}
+        aiEnabled={aiReplyEnabled}
+        inSpamFolder={inboxFilters.mailboxRole === "junk"}
+        onClose={() => setMessageFocusOpen(false)}
+        onDelete={() => {
+          setMessageFocusOpen(false);
+          void handleDelete();
+        }}
+        onArchive={() => {
+          setMessageFocusOpen(false);
+          void handleArchive();
+        }}
+        onReply={() => {
+          setMessageFocusOpen(false);
+          setComposerBody("");
+          if (messageQuery.data) {
+            setReplyTo(messageQuery.data);
+            setEditingDraft(null);
+            setComposerSubject(undefined);
+            setComposerOpen(true);
+          }
+        }}
+        onForward={() => {
+          setMessageFocusOpen(false);
+          void handleForward();
+        }}
+        onToggleStar={() => {
+          void handleToggleStar();
+        }}
+        onMarkSpam={() => {
+          void handleMarkSpam();
+        }}
+        onMarkNotSpam={() => {
+          void handleMarkNotSpam();
+        }}
+        onSnooze={(preset) => {
+          setMessageFocusOpen(false);
+          void handleSnooze(preset);
+        }}
+        onReplySent={() => {
+          void refresh();
         }}
       />
       <SettingsDialog

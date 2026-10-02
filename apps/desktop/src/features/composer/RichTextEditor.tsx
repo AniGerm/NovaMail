@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Bold,
   Indent,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Select } from "@novamail/ui";
 
+import { SpellSuggestBar } from "@/features/composer/SpellSuggestBar";
 import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 
@@ -63,6 +64,15 @@ function runCommand(command: string, value?: string) {
   document.execCommand(command, false, value);
 }
 
+function caretPlainOffset(root: HTMLElement): number {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return htmlToPlain(root.innerHTML).length;
+  const range = sel.getRangeAt(0).cloneRange();
+  range.selectNodeContents(root);
+  range.setEnd(sel.focusNode ?? root, sel.focusOffset);
+  return range.toString().replace(/\u00a0/g, " ").length;
+}
+
 export function RichTextEditor({
   valueHtml,
   onChange,
@@ -72,6 +82,8 @@ export function RichTextEditor({
   const spellcheckLang = useUiStore((s) => s.spellcheckLang);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
+  const [plain, setPlain] = useState("");
+  const [caret, setCaret] = useState(0);
 
   useEffect(() => {
     const el = editorRef.current;
@@ -79,6 +91,7 @@ export function RichTextEditor({
     if (valueHtml === lastHtml.current) return;
     el.innerHTML = valueHtml || "<p><br></p>";
     lastHtml.current = el.innerHTML;
+    setPlain(htmlToPlain(el.innerHTML));
   }, [valueHtml]);
 
   function emitChange() {
@@ -86,7 +99,33 @@ export function RichTextEditor({
     if (!el) return;
     const html = el.innerHTML;
     lastHtml.current = html;
-    onChange(html, htmlToPlain(html));
+    const nextPlain = htmlToPlain(html);
+    setPlain(nextPlain);
+    setCaret(caretPlainOffset(el));
+    onChange(html, nextPlain);
+  }
+
+  function applyPlainReplacement(from: number, to: number, replacement: string) {
+    const el = editorRef.current;
+    if (!el) return;
+    const current = htmlToPlain(el.innerHTML);
+    const next = current.slice(0, from) + replacement + current.slice(to);
+    const html = plainToHtml(next);
+    el.innerHTML = html;
+    lastHtml.current = el.innerHTML;
+    setPlain(next);
+    const caretPos = from + replacement.length;
+    setCaret(caretPos);
+    onChange(el.innerHTML, next);
+    // Place caret at end of inserted suggestion (best-effort).
+    el.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
   }
 
   function withFocus(action: () => void) {
@@ -188,6 +227,12 @@ export function RichTextEditor({
           </label>
         </div>
 
+        <SpellSuggestBar
+          className="flex flex-wrap items-center gap-1.5 border-b border-[var(--nova-border)] bg-[var(--nova-surface-2)] px-2 py-1.5"
+          text={plain}
+          caret={caret}
+          onApply={applyPlainReplacement}
+        />
         <div
           ref={editorRef}
           role="textbox"
@@ -200,6 +245,11 @@ export function RichTextEditor({
           lang={spellcheckLang.replace("_", "-")}
           className="nova-rich-editor min-h-[220px] max-h-[420px] overflow-y-auto px-3 py-2 text-[var(--nova-ink)] outline-none"
           onInput={emitChange}
+          onKeyUp={emitChange}
+          onClick={() => {
+            const el = editorRef.current;
+            if (el) setCaret(caretPlainOffset(el));
+          }}
           onBlur={emitChange}
           // Help WebKit keep spellcheck language attached after focus changes.
           onFocus={(e) => {

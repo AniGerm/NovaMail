@@ -234,6 +234,7 @@ pub fn run() {
             commands::spellcheck_status,
             commands::spellcheck_install,
             commands::spellcheck_ensure_for_locale,
+            commands::spellcheck_suggest,
             commands::contacts_upsert,
             commands::contacts_delete,
             commands::carddav_start,

@@ -10,10 +10,22 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use novamail_ipc::{SpellDictionaryDto, SpellcheckStatus};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+
+use novamail_ipc::{SpellDictionaryDto, SpellSuggestResult, SpellcheckStatus};
 use tracing::info;
 
 use crate::{CoreError, CoreResult};
+
+struct DictCache {
+    code: String,
+    words: HashSet<String>,
+    /// lowercase → original casing from dictionary
+    lower_index: HashMap<String, String>,
+}
+
+static DICT_CACHE: OnceLock<Mutex<Option<DictCache>>> = OnceLock::new();
 
 const LO_RAW: &str =
     "https://raw.githubusercontent.com/LibreOffice/dictionaries/master";
@@ -260,4 +272,180 @@ async fn download(url: &str) -> CoreResult<Vec<u8>> {
         .await
         .map(|b| b.to_vec())
         .map_err(|e| CoreError::Message(format!("download body failed: {e}")))
+}
+
+fn resolve_dic_path(code: &str) -> Option<PathBuf> {
+    let user = user_hunspell_dir();
+    let candidates = [
+        user.join(format!("{code}.dic")),
+        user.join(format!("{}.dic", code.split('_').next().unwrap_or(code))),
+    ];
+    for path in candidates {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    for dir in system_hunspell_dirs() {
+        let full = dir.join(format!("{code}.dic"));
+        if full.is_file() {
+            return Some(full);
+        }
+        let short = dir.join(format!("{}.dic", code.split('_').next().unwrap_or(code)));
+        if short.is_file() {
+            return Some(short);
+        }
+    }
+    None
+}
+
+fn load_dict(code: &str) -> CoreResult<DictCache> {
+    let path = resolve_dic_path(code).ok_or_else(|| {
+        CoreError::Message(format!("no dictionary installed for {code}"))
+    })?;
+    let raw = fs::read_to_string(&path)
+        .map_err(|e| CoreError::Message(format!("read {}: {e}", path.display())))?;
+    let mut words = HashSet::new();
+    let mut lower_index = HashMap::new();
+    for (i, line) in raw.lines().enumerate() {
+        if i == 0 && line.chars().all(|c| c.is_ascii_digit()) {
+            continue; // word count header
+        }
+        let word = line.split('/').next().unwrap_or("").trim();
+        if word.is_empty() || word.len() > 48 {
+            continue;
+        }
+        words.insert(word.to_string());
+        lower_index
+            .entry(word.to_lowercase())
+            .or_insert_with(|| word.to_string());
+    }
+    Ok(DictCache {
+        code: code.to_string(),
+        words,
+        lower_index,
+    })
+}
+
+fn with_dict<R>(code: &str, f: impl FnOnce(&DictCache) -> R) -> CoreResult<R> {
+    let lock = DICT_CACHE.get_or_init(|| Mutex::new(None));
+    let mut guard = lock
+        .lock()
+        .map_err(|_| CoreError::Message("spellcheck cache lock poisoned".into()))?;
+    let needs_load = guard
+        .as_ref()
+        .map(|c| c.code != code)
+        .unwrap_or(true);
+    if needs_load {
+        *guard = Some(load_dict(code)?);
+    }
+    let cache = guard.as_ref().expect("dict just loaded");
+    Ok(f(cache))
+}
+
+fn edit_distance_le2(a: &str, b: &str) -> Option<u8> {
+    let ac: Vec<char> = a.chars().collect();
+    let bc: Vec<char> = b.chars().collect();
+    let (al, bl) = (ac.len(), bc.len());
+    if al.abs_diff(bl) > 2 {
+        return None;
+    }
+    // Banded DP for distances ≤ 2.
+    let mut prev = (0..=bl).collect::<Vec<_>>();
+    let mut cur = vec![0; bl + 1];
+    for i in 1..=al {
+        cur[0] = i;
+        let mut row_min = cur[0];
+        let j_start = i.saturating_sub(2);
+        let j_end = (i + 2).min(bl);
+        for j in 1..=bl {
+            if j < j_start || j > j_end {
+                cur[j] = 99;
+                continue;
+            }
+            let cost = if ac[i - 1] == bc[j - 1] { 0 } else { 1 };
+            let mut best = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+            if i > 1
+                && j > 1
+                && ac[i - 1] == bc[j - 2]
+                && ac[i - 2] == bc[j - 1]
+            {
+                best = best.min(prev[j - 2] + 1); // approximate transpose via prev row
+            }
+            cur[j] = best;
+            row_min = row_min.min(best);
+        }
+        if row_min > 2 {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    let d = prev[bl];
+    if d <= 2 {
+        Some(d as u8)
+    } else {
+        None
+    }
+}
+
+/// Check a word and return inline suggestions for the composer UI.
+pub fn spellcheck_suggest(word: &str, lang: &str) -> CoreResult<SpellSuggestResult> {
+    let trimmed = word.trim();
+    if trimmed.is_empty() {
+        return Ok(SpellSuggestResult {
+            word: trimmed.into(),
+            correct: true,
+            suggestions: vec![],
+        });
+    }
+    // Skip all-caps acronyms / numbers.
+    if trimmed.chars().all(|c| !c.is_alphabetic())
+        || (trimmed.len() <= 4 && trimmed.chars().all(|c| c.is_ascii_uppercase()))
+    {
+        return Ok(SpellSuggestResult {
+            word: trimmed.into(),
+            correct: true,
+            suggestions: vec![],
+        });
+    }
+    let code = if lang.contains('_') {
+        lang.to_string()
+    } else if lang == "de" {
+        "de_DE".into()
+    } else if lang == "en" {
+        "en_US".into()
+    } else {
+        lang.to_string()
+    };
+
+    with_dict(&code, |dict| {
+        let lower = trimmed.to_lowercase();
+        if dict.words.contains(trimmed) || dict.lower_index.contains_key(&lower) {
+            return SpellSuggestResult {
+                word: trimmed.into(),
+                correct: true,
+                suggestions: vec![],
+            };
+        }
+        let prefix: String = lower.chars().take(2).collect();
+        let mut scored: Vec<(u8, String)> = Vec::new();
+        for (cand_lower, original) in &dict.lower_index {
+            if cand_lower.len().abs_diff(lower.len()) > 2 {
+                continue;
+            }
+            if !prefix.is_empty() && !cand_lower.starts_with(&prefix) {
+                continue;
+            }
+            if let Some(d) = edit_distance_le2(&lower, cand_lower) {
+                scored.push((d, original.clone()));
+            }
+        }
+        scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.len().cmp(&b.1.len())));
+        scored.dedup_by(|a, b| a.1.eq_ignore_ascii_case(&b.1));
+        let suggestions = scored.into_iter().take(5).map(|(_, w)| w).collect();
+        SpellSuggestResult {
+            word: trimmed.into(),
+            correct: false,
+            suggestions,
+        }
+    })
 }

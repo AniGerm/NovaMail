@@ -156,6 +156,10 @@ export const en: Translations = {
   send: "Send",
   sending: "Sending…",
   messageSent: "Message sent.",
+  aiReplyGenerating: "AI reply is being prepared…",
+  openFullscreen: "Open message fullscreen",
+  spellSuggestions: "Spelling suggestions",
+  spellSuggestionsFor: "Suggestions for “{word}”",
   closeToTray: "Close to system tray",
   closeToTrayHint:
     "Closing the window hides NovaMail; restore it from the tray icon.",

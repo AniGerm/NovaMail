@@ -17,3 +17,11 @@ pub struct SpellcheckStatus {
     pub dictionaries: Vec<SpellDictionaryDto>,
     pub user_dict_dir: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpellSuggestResult {
+    pub word: String,
+    pub correct: bool,
+    pub suggestions: Vec<String>,
+}

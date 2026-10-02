@@ -181,4 +181,7 @@ pub struct MessageAiInsights {
     #[serde(default)]
     pub event_suggestions: Vec<EventSuggestionDto>,
     pub provider: Option<String>,
+    /// True while background generation still has missing pieces.
+    #[serde(default)]
+    pub incomplete: bool,
 }

@@ -1094,6 +1094,14 @@ impl AppState {
         crate::spellcheck::spellcheck_ensure_for_locale(&locale).await
     }
 
+    pub fn spellcheck_suggest(
+        &self,
+        word: String,
+        lang: String,
+    ) -> CoreResult<novamail_ipc::SpellSuggestResult> {
+        crate::spellcheck::spellcheck_suggest(&word, &lang)
+    }
+
     pub fn upsert_contact(&self, request: UpsertContactRequest) -> CoreResult<ContactDto> {
         let id = request.id.unwrap_or_else(Uuid::new_v4);
         let record = novamail_db::models::ContactRecord {
@@ -1765,13 +1773,13 @@ impl AppState {
 
     pub fn get_message_ai_insights(&self, message_id: Uuid) -> CoreResult<MessageAiInsights> {
         let summary = insight_text(&self.db, message_id, "summary")?;
-        // v2 keys: old reply_* were often written from the sender's perspective.
-        let reply_a = insight_text(&self.db, message_id, "reply_as_a")?;
-        let reply_b = insight_text(&self.db, message_id, "reply_as_b")?;
+        // v3 keys: greet the From contact; never copy body salutations / invent titles.
+        let reply_a = insight_text(&self.db, message_id, "reply_v3_a")?;
+        let reply_b = insight_text(&self.db, message_id, "reply_v3_b")?;
         let event_suggestions = insight_event_suggestions(&self.db, message_id)?;
         let provider = insight_provider(&self.db, message_id, "summary")?
             .or(insight_provider(&self.db, message_id, "event_suggestions")?)
-            .or(insight_provider(&self.db, message_id, "reply_as_a")?);
+            .or(insight_provider(&self.db, message_id, "reply_v3_a")?);
         let incomplete = summary.is_none()
             || reply_a.is_none()
             || reply_b.is_none()
@@ -1788,6 +1796,7 @@ impl AppState {
             reply_b,
             event_suggestions,
             provider,
+            incomplete,
         })
     }
 
@@ -1821,8 +1830,8 @@ impl AppState {
                 .db
                 .has_ai_insight(msg.id, "summary")
                 .unwrap_or(false);
-            let has_replies = self.db.has_ai_insight(msg.id, "reply_as_a").unwrap_or(false)
-                && self.db.has_ai_insight(msg.id, "reply_as_b").unwrap_or(false);
+            let has_replies = self.db.has_ai_insight(msg.id, "reply_v3_a").unwrap_or(false)
+                && self.db.has_ai_insight(msg.id, "reply_v3_b").unwrap_or(false);
             let has_events =
                 insight_event_suggestions_current(&self.db, msg.id).unwrap_or(false);
             if !(has_summary && has_replies && has_events) {
@@ -1898,17 +1907,26 @@ impl AppState {
         ai: &dyn AiProvider,
         message_id: Uuid,
     ) -> CoreResult<()> {
-        let has_replies = db.has_ai_insight(message_id, "reply_as_a")?
-            && db.has_ai_insight(message_id, "reply_as_b")?;
+        let has_replies = db.has_ai_insight(message_id, "reply_v3_a")?
+            && db.has_ai_insight(message_id, "reply_v3_b")?;
         let has_events = insight_event_suggestions_current(db, message_id)?;
         if db.has_ai_insight(message_id, "summary")? && has_replies && has_events {
             return Ok(());
         }
         let detail = db.get_message(message_id)?;
-        let account_email = db
-            .get_account(detail.summary.account_id)
-            .map(|a| a.email)
+        let account = db.get_account(detail.summary.account_id).ok();
+        let account_email = account
+            .as_ref()
+            .map(|a| a.email.clone())
             .unwrap_or_default();
+        let account_name = account.as_ref().and_then(|a| {
+            let n = a.name.trim();
+            if n.is_empty() {
+                None
+            } else {
+                Some(n.to_string())
+            }
+        });
         let body = detail
             .body_text
             .clone()
@@ -1977,7 +1995,9 @@ impl AppState {
                 subject: detail.summary.subject.clone(),
                 body_text: body,
                 from_email: detail.summary.from.email.clone(),
+                from_name: detail.summary.from.name.clone(),
                 reply_as_email: Some(account_email),
+                reply_as_name: account_name,
                 facts: None,
                 style: None,
                 preferred_language: None,
@@ -1991,14 +2011,14 @@ impl AppState {
                     "text": a,
                     "provider": result.provider,
                 });
-                db.upsert_ai_insight(message_id, "reply_as_a", &payload.to_string())?;
+                db.upsert_ai_insight(message_id, "reply_v3_a", &payload.to_string())?;
             }
             if let Some(b) = result.variants.get(1) {
                 let payload = serde_json::json!({
                     "text": b,
                     "provider": result.provider,
                 });
-                db.upsert_ai_insight(message_id, "reply_as_b", &payload.to_string())?;
+                db.upsert_ai_insight(message_id, "reply_v3_b", &payload.to_string())?;
             }
         }
         Ok(())
@@ -2100,12 +2120,12 @@ impl AppState {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
 
-        // Use cache only when no custom facts were requested (v2 recipient-perspective keys).
+        // Use cache only when no custom facts were requested (v3 greeting keys).
         if facts.is_none() {
-            let a = insight_text(&self.db, request.message_id, "reply_as_a")?;
-            let b = insight_text(&self.db, request.message_id, "reply_as_b")?;
+            let a = insight_text(&self.db, request.message_id, "reply_v3_a")?;
+            let b = insight_text(&self.db, request.message_id, "reply_v3_b")?;
             if let (Some(a), Some(b)) = (a, b) {
-                let provider = insight_provider(&self.db, request.message_id, "reply_as_a")?
+                let provider = insight_provider(&self.db, request.message_id, "reply_v3_a")?
                     .unwrap_or_else(|| "cache".into());
                 return Ok(SuggestRepliesMessageResponse {
                     message_id: request.message_id,
@@ -2116,11 +2136,19 @@ impl AppState {
         }
 
         let detail = self.get_message(request.message_id)?;
-        let account_email = self
-            .db
-            .get_account(detail.summary.account_id)
-            .map(|a| a.email)
+        let account = self.db.get_account(detail.summary.account_id).ok();
+        let account_email = account
+            .as_ref()
+            .map(|a| a.email.clone())
             .unwrap_or_default();
+        let account_name = account.as_ref().and_then(|a| {
+            let n = a.name.trim();
+            if n.is_empty() {
+                None
+            } else {
+                Some(n.to_string())
+            }
+        });
         let body = detail
             .body_text
             .clone()
@@ -2129,7 +2157,9 @@ impl AppState {
             subject: detail.summary.subject.clone(),
             body_text: body,
             from_email: detail.summary.from.email.clone(),
+            from_name: detail.summary.from.name.clone(),
             reply_as_email: Some(account_email),
+            reply_as_name: account_name,
             facts: facts.clone(),
             style: None,
             preferred_language: request.preferred_language.clone(),
@@ -2153,7 +2183,7 @@ impl AppState {
                 });
                 let _ = self
                     .db
-                    .upsert_ai_insight(request.message_id, "reply_as_a", &payload.to_string());
+                    .upsert_ai_insight(request.message_id, "reply_v3_a", &payload.to_string());
             }
             if let Some(b) = result.variants.get(1) {
                 let payload = serde_json::json!({
@@ -2162,7 +2192,7 @@ impl AppState {
                 });
                 let _ = self
                     .db
-                    .upsert_ai_insight(request.message_id, "reply_as_b", &payload.to_string());
+                    .upsert_ai_insight(request.message_id, "reply_v3_b", &payload.to_string());
             }
         }
 

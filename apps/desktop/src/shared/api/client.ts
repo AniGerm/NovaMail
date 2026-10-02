@@ -237,6 +237,11 @@ export const api = {
   recipientsSuggest: (query: string, limit = 12) =>
     call<RecipientSuggestion[]>("recipients_suggest", { query, limit }),
   spellcheckStatus: () => call<SpellcheckStatus>("spellcheck_status"),
+  spellcheckSuggest: (word: string, lang: string) =>
+    call<{ word: string; correct: boolean; suggestions: string[] }>(
+      "spellcheck_suggest",
+      { word, lang },
+    ),
   spellcheckInstall: (code: string) =>
     call<SpellDictionaryDto>("spellcheck_install", { code }),
   spellcheckEnsureForLocale: (locale: string) =>

@@ -11,9 +11,12 @@ import {
   Clock3,
   Trash2,
   Archive,
+  Maximize2,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
+import { SpellSuggestBar } from "@/features/composer/SpellSuggestBar";
+import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 import { api } from "@/shared/api/client";
 import type {
   AppError,
@@ -25,7 +28,6 @@ import type {
 import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
-import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 
 type ReplyVariant = "a" | "b" | "own";
 
@@ -33,6 +35,8 @@ interface ReadingPaneProps {
   message?: MessageDetailDto | null;
   aiEnabled?: boolean;
   inSpamFolder?: boolean;
+  /** Hide chrome duplicated by the focus dialog header. */
+  focusMode?: boolean;
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
@@ -44,12 +48,14 @@ interface ReadingPaneProps {
   onCreateEvent?: (suggestion?: EventSuggestionDto) => void;
   onCreateTask?: () => void;
   onReplySent?: () => void;
+  onOpenFocus?: () => void;
 }
 
 export function ReadingPane({
   message,
   aiEnabled = true,
   inSpamFolder = false,
+  focusMode = false,
   onReply,
   onForward,
   onToggleStar,
@@ -61,9 +67,11 @@ export function ReadingPane({
   onCreateEvent,
   onCreateTask,
   onReplySent,
+  onOpenFocus,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
   const [summary, setSummary] = useState<string | null>(null);
   const [eventSuggestions, setEventSuggestions] = useState<
     EventSuggestionDto[]
@@ -73,7 +81,9 @@ export function ReadingPane({
   const [variantB, setVariantB] = useState<string | null>(null);
   const [activeVariant, setActiveVariant] = useState<ReplyVariant>("a");
   const [draft, setDraft] = useState("");
+  const [draftCaret, setDraftCaret] = useState(0);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
@@ -91,6 +101,8 @@ export function ReadingPane({
     setPgpResult(null);
     setEventSuggestions([]);
     setInvitePending(false);
+    setAiGenerating(false);
+    setDraftCaret(0);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
@@ -139,12 +151,16 @@ export function ReadingPane({
             const b = insights.replyB ?? null;
             setVariantA(a);
             setVariantB(b);
-            if (a) {
+            if (a && !draftRef.current?.matches(":focus")) {
               setActiveVariant("a");
               setDraft(a);
             }
+            const done =
+              !insights.incomplete && Boolean(insights.summary && a && b);
+            setAiGenerating(!done);
             polls += 1;
-            return Boolean(insights.summary && a && b) || polls >= 3;
+            // Keep polling while incomplete; stop after ~2 min max.
+            return done || polls >= 24;
           })
           .catch(() => true);
       void loadInsights();
@@ -282,10 +298,19 @@ export function ReadingPane({
     >
       <header className="border-b border-[var(--nova-border)] px-8 py-5">
         <div className="mb-3 flex items-start justify-between gap-4">
-          <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
-            {current.summary.subject || t("noSubject")}
-          </h2>
+          {focusMode ? (
+            <div className="min-w-0 flex-1" />
+          ) : (
+            <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
+              {current.summary.subject || t("noSubject")}
+            </h2>
+          )}
           <div className="relative flex items-center gap-1">
+            {onOpenFocus && !focusMode ? (
+              <IconButton label={t("openFullscreen")} onClick={onOpenFocus}>
+                <Maximize2 />
+              </IconButton>
+            ) : null}
             <IconButton label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
@@ -485,6 +510,15 @@ export function ReadingPane({
                 </Button>
               ) : null}
             </div>
+            {aiGenerating ? (
+              <div
+                className="mb-3 flex items-center gap-2 rounded-[var(--nova-radius-sm)] border border-dashed border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2 text-xs text-[var(--nova-ink-muted)]"
+                role="status"
+              >
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--nova-accent)]" />
+                {t("aiReplyGenerating")}
+              </div>
+            ) : null}
             {summary ? (
               <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
                 <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
@@ -548,11 +582,45 @@ export function ReadingPane({
             </div>
             <label className="grid gap-1.5">
               <span className="sr-only">{t("replyDraftPlaceholder")}</span>
+              <SpellSuggestBar
+                text={draft}
+                caret={draftCaret}
+                onApply={(from, to, replacement) => {
+                  const next = draft.slice(0, from) + replacement + draft.slice(to);
+                  setDraft(next);
+                  const caret = from + replacement.length;
+                  setDraftCaret(caret);
+                  requestAnimationFrame(() => {
+                    const el = draftRef.current;
+                    if (!el) return;
+                    el.focus();
+                    el.setSelectionRange(caret, caret);
+                  });
+                }}
+              />
               <textarea
                 ref={draftRef}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={t("replyDraftPlaceholder")}
+                spellCheck
+                lang={spellcheckLang.replace("_", "-")}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setDraftCaret(e.target.selectionStart ?? e.target.value.length);
+                }}
+                onSelect={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                onKeyUp={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                onClick={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                placeholder={
+                  aiGenerating && !draft.trim()
+                    ? t("aiReplyGenerating")
+                    : t("replyDraftPlaceholder")
+                }
                 rows={6}
                 className="w-full resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2.5 text-[15px] leading-6 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--nova-accent)_25%,transparent)]"
               />

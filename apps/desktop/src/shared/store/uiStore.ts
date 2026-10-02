@@ -6,6 +6,7 @@ import type { ColorSchemeId } from "@/shared/theme/schemes";
 import type { ThemeMode } from "@/shared/theme/resolveTheme";
 
 type Density = "comfortable" | "compact";
+export type InboxViewModePref = "threads" | "flat";
 
 export type { ThemeMode };
 
@@ -22,6 +23,8 @@ interface UiState {
   highContrast: boolean;
   density: Density;
   autoCheckUpdates: boolean;
+  /** Persist flat vs conversation list preference. */
+  inboxViewMode: InboxViewModePref;
   selectedMessageId: string | null;
   composerOpen: boolean;
   accountSetupOpen: boolean;
@@ -38,6 +41,7 @@ interface UiState {
   setHighContrast: (value: boolean) => void;
   setDensity: (density: Density) => void;
   setAutoCheckUpdates: (value: boolean) => void;
+  setInboxViewMode: (mode: InboxViewModePref) => void;
   selectMessage: (id: string | null) => void;
   setComposerOpen: (open: boolean) => void;
   setAccountSetupOpen: (open: boolean) => void;
@@ -59,6 +63,7 @@ export const useUiStore = create<UiState>()(
       highContrast: false,
       density: "comfortable",
       autoCheckUpdates: true,
+      inboxViewMode: "threads",
       selectedMessageId: null,
       composerOpen: false,
       accountSetupOpen: false,
@@ -76,6 +81,7 @@ export const useUiStore = create<UiState>()(
       setHighContrast: (highContrast) => set({ highContrast }),
       setDensity: (density) => set({ density }),
       setAutoCheckUpdates: (autoCheckUpdates) => set({ autoCheckUpdates }),
+      setInboxViewMode: (inboxViewMode) => set({ inboxViewMode }),
       selectMessage: (selectedMessageId) => set({ selectedMessageId }),
       setComposerOpen: (composerOpen) => set({ composerOpen }),
       setAccountSetupOpen: (accountSetupOpen) => set({ accountSetupOpen }),
@@ -96,6 +102,7 @@ export const useUiStore = create<UiState>()(
         highContrast: state.highContrast,
         density: state.density,
         autoCheckUpdates: state.autoCheckUpdates,
+        inboxViewMode: state.inboxViewMode,
       }),
     },
   ),

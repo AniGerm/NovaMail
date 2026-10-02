@@ -18,7 +18,8 @@ use novamail_ipc::{
     RespondInvitationRequest, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
     SendLaterRequest, SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest,
     SetMessageLabelsRequest, SignatureDto, SnoozeRequest, SnoozedMessageDto, SpamScoreDto,
-    SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus, SuggestRepliesMessageRequest,
+    SpamSettingsDto, SpellDictionaryDto, SpellSuggestResult, SpellcheckStatus,
+    SuggestRepliesMessageRequest,
     SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
     UpsertCalendarAccountRequest, UpsertCalendarCollectionRequest, UpsertCalendarEventRequest,
@@ -352,6 +353,15 @@ pub fn spellcheck_set_languages(
     let _ = app;
     let _ = languages;
     Ok(())
+}
+
+#[tauri::command]
+pub fn spellcheck_suggest(
+    state: State<'_, DesktopState>,
+    word: String,
+    lang: String,
+) -> Result<SpellSuggestResult, AppError> {
+    state.app.spellcheck_suggest(word, lang).map_err(map_err)
 }
 
 #[tauri::command]

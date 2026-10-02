@@ -154,6 +154,10 @@ export const de = {
   send: "Senden",
   sending: "Wird gesendet…",
   messageSent: "Nachricht gesendet.",
+  aiReplyGenerating: "KI-Antwort wird erstellt…",
+  openFullscreen: "Nachricht im Vollbild öffnen",
+  spellSuggestions: "Rechtschreibvorschläge",
+  spellSuggestionsFor: "Vorschläge für „{word}“",
   closeToTray: "Beim Schließen in den Infobereich legen",
   closeToTrayHint:
     "Fenster schließen blendet NovaMail nur aus; über das Tablett-Symbol wieder öffnen.",

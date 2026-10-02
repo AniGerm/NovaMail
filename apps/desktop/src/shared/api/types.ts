@@ -664,6 +664,7 @@ export interface MessageAiInsights {
   replySuggestion?: string | null;
   eventSuggestions?: EventSuggestionDto[];
   provider?: string | null;
+  incomplete?: boolean;
 }
 
 export interface AiSettings {
