@@ -94,72 +94,72 @@ export function ReadingPane({
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
-    // Avoid scanning huge HTML bodies — text + attachment names are enough.
-    const inviteProbe = `${message?.bodyText ?? ""}\n${(message?.attachments ?? [])
-      .map((a) => a.filename)
-      .join("\n")}`;
-    const looksLikeInvite =
-      (/BEGIN:VCALENDAR/i.test(inviteProbe) && /METHOD:REQUEST/i.test(inviteProbe)) ||
-      (message?.attachments ?? []).some((a) =>
-        /\.ics$/i.test(a.filename) || /calendar/i.test(a.mime),
-      );
-    if (looksLikeInvite) {
-      setInvitePending(true);
-    }
-    void api
-      .calendarInvitationsList(true)
-      .then((invites) => {
-        if (!cancelled) {
-          setInvitePending(
-            looksLikeInvite || invites.some((i) => i.messageId === id),
-          );
-        }
-      })
-      .catch(() => undefined);
-    void api
-      .pgpInspectMessage(id)
-      .then((result) => {
-        if (!cancelled && result) setPgpResult(result);
-      })
-      .catch(() => undefined);
-    if (!aiEnabled) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    let polls = 0;
-    const loadInsights = () =>
-      api
-        .aiMessageInsights(id)
-        .then((insights) => {
-          if (cancelled) return true;
-          if (insights.summary) setSummary(insights.summary);
-          setEventSuggestions(insights.eventSuggestions ?? []);
-          const a = insights.replyA ?? insights.replySuggestion ?? null;
-          const b = insights.replyB ?? null;
-          setVariantA(a);
-          setVariantB(b);
-          if (a) {
-            setActiveVariant("a");
-            setDraft(a);
+    let timer: number | undefined;
+    // Defer secondary work so opening a message never blocks first paint.
+    const start = window.setTimeout(() => {
+      if (cancelled) return;
+      const inviteProbe = `${(message?.bodyText ?? "").slice(0, 8000)}\n${(
+        message?.attachments ?? []
+      )
+        .map((a) => a.filename)
+        .join("\n")}`;
+      const looksLikeInvite =
+        (/BEGIN:VCALENDAR/i.test(inviteProbe) &&
+          /METHOD:REQUEST/i.test(inviteProbe)) ||
+        (message?.attachments ?? []).some(
+          (a) => /\.ics$/i.test(a.filename) || /calendar/i.test(a.mime),
+        );
+      if (looksLikeInvite) setInvitePending(true);
+      void api
+        .calendarInvitationsList(true)
+        .then((invites) => {
+          if (!cancelled) {
+            setInvitePending(
+              looksLikeInvite || invites.some((i) => i.messageId === id),
+            );
           }
-          polls += 1;
-          // Stop after a few tries so large mailboxes don't keep hammering AI.
-          return Boolean(insights.summary && a && b) || polls >= 4;
         })
-        .catch(() => true);
-
-    void loadInsights();
-    const timer = window.setInterval(() => {
-      void loadInsights().then((done) => {
-        if (done) window.clearInterval(timer);
-      });
-    }, 4000);
+        .catch(() => undefined);
+      void api
+        .pgpInspectMessage(id)
+        .then((result) => {
+          if (!cancelled && result) setPgpResult(result);
+        })
+        .catch(() => undefined);
+      if (!aiEnabled) return;
+      let polls = 0;
+      const loadInsights = () =>
+        api
+          .aiMessageInsights(id)
+          .then((insights) => {
+            if (cancelled) return true;
+            if (insights.summary) setSummary(insights.summary);
+            setEventSuggestions(insights.eventSuggestions ?? []);
+            const a = insights.replyA ?? insights.replySuggestion ?? null;
+            const b = insights.replyB ?? null;
+            setVariantA(a);
+            setVariantB(b);
+            if (a) {
+              setActiveVariant("a");
+              setDraft(a);
+            }
+            polls += 1;
+            return Boolean(insights.summary && a && b) || polls >= 3;
+          })
+          .catch(() => true);
+      void loadInsights();
+      timer = window.setInterval(() => {
+        void loadInsights().then((done) => {
+          if (done && timer != null) window.clearInterval(timer);
+        });
+      }, 5000);
+    }, 50);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(start);
+      if (timer != null) window.clearInterval(timer);
     };
-  }, [aiEnabled, message?.summary.id]);
+  }, [aiEnabled, message?.attachments, message?.bodyText, message?.summary.id]);
 
   if (!message) {
     return (
