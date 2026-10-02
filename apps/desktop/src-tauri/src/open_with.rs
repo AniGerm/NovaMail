@@ -25,6 +25,18 @@ pub fn list_apps_for_mime(mime: &str) -> Vec<OpenWithApp> {
         return Vec::new();
     };
     let text = String::from_utf8_lossy(&output.stdout);
+    parse_gio_mime_output(&text)
+        .into_iter()
+        .map(|(id, is_default)| OpenWithApp {
+            name: desktop_display_name(&id).unwrap_or_else(|| id.replace(".desktop", "")),
+            id,
+            is_default,
+        })
+        .collect()
+}
+
+/// Parse `gio mime <type>` stdout → `(desktop_id, is_default)` in display order.
+fn parse_gio_mime_output(text: &str) -> Vec<(String, bool)> {
     let mut default_id: Option<String> = None;
     let mut ids: Vec<String> = Vec::new();
     let mut in_registered = false;
@@ -81,13 +93,8 @@ pub fn list_apps_for_mime(mime: &str) -> Vec<OpenWithApp> {
         if seen.insert(id.clone(), ()).is_some() {
             continue;
         }
-        let name = desktop_display_name(&id).unwrap_or_else(|| id.replace(".desktop", ""));
         let is_default = default_id.as_deref() == Some(id.as_str());
-        out.push(OpenWithApp {
-            id,
-            name,
-            is_default,
-        });
+        out.push((id, is_default));
     }
     out
 }
@@ -160,7 +167,20 @@ mod tests {
 
     #[test]
     fn parses_gio_mime_sample() {
-        // Smoke: empty mime yields empty list without panicking.
         assert!(list_apps_for_mime("").is_empty());
+        let sample = "\
+Default application for “application/pdf”: org.gnome.Evince.desktop
+Registered applications:
+\torg.gnome.Evince.desktop
+\torg.gnome.Papers.desktop
+Recommended applications:
+\tfirefox.desktop
+";
+        let apps = parse_gio_mime_output(sample);
+        assert_eq!(apps.len(), 3);
+        assert_eq!(apps[0].0, "org.gnome.Evince.desktop");
+        assert!(apps[0].1);
+        assert_eq!(apps[1].0, "org.gnome.Papers.desktop");
+        assert_eq!(apps[2].0, "firefox.desktop");
     }
 }
