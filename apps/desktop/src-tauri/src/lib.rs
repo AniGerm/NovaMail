@@ -1,6 +1,7 @@
 mod commands;
 mod shell_prefs;
 mod state;
+mod tray_badge;
 mod updater;
 
 use std::fs::OpenOptions;
@@ -12,11 +13,17 @@ use std::time::Duration;
 
 use novamail_mail::SyncScheduler;
 use state::DesktopState;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
+
+const TRAY_ID: &str = "nova-tray";
+
+/// Base tray icon RGBA kept so we can re-badge without decoding PNG each time.
+struct TrayBaseIcon(Mutex<Option<Image<'static>>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -41,11 +48,11 @@ pub fn run() {
         .setup(|app| {
             let state = DesktopState::new()?;
             let _ = shell_prefs::load();
-            // System tray: close-to-tray + restore on click.
+            // System tray: close-to-tray + restore on click + unread badge.
             let show_i = MenuItem::with_id(app, "show", "NovaMail anzeigen", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-            let mut tray = TrayIconBuilder::new()
+            let mut tray = TrayIconBuilder::with_id(TRAY_ID)
                 .menu(&menu)
                 .tooltip("NovaMail")
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -76,19 +83,23 @@ pub fn run() {
                         }
                     }
                 });
-            if let Some(icon) = app.default_window_icon() {
+            let base_icon = app.default_window_icon().map(|icon| {
+                Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height())
+            });
+            if let Some(ref icon) = base_icon {
                 tray = tray.icon(icon.clone());
             }
             let _tray = tray.build(app)?;
+            app.manage(TrayBaseIcon(Mutex::new(base_icon)));
             // WebKitGTK spellcheck is off by default — HTML spellCheck alone is a no-op.
             #[cfg(target_os = "linux")]
             enable_webkit_spellcheck(app, &["de_DE", "de", "en_US", "en"]);
-            // Poll IMAP frequently so new mail appears without a manual Sync click.
+            // Incremental IMAP poll — cycles are cheap once the mailbox is warm.
             let scheduler = SyncScheduler::new(
                 state.app.db().clone(),
                 state.app.secrets().clone(),
                 state.app.paths.blobs_dir.clone(),
-                Duration::from_secs(20),
+                Duration::from_secs(12),
             );
             let handle = app.handle().clone();
             let handle_offline = app.handle().clone();
@@ -145,11 +156,12 @@ pub fn run() {
                     app_for_ai.on_new_messages_synced(&new_ids);
                     if count > 0 {
                         let _ = handle_new_mail.emit("mail://new", &count);
+                        update_unread_badge(&handle_new_mail);
                         use tauri_plugin_notification::NotificationExt;
                         let body = if count == 1 {
-                            "1 new message".to_string()
+                            "1 neue Nachricht".to_string()
                         } else {
-                            format!("{count} new messages")
+                            format!("{count} neue Nachrichten")
                         };
                         let _ = handle_new_mail
                             .notification()
@@ -183,10 +195,12 @@ pub fn run() {
                 move || {
                     // Always refresh UI after a scheduled cycle (even if no "new" UIDs).
                     let _ = handle_cycle.emit("sync://cycle", &true);
+                    update_unread_badge(&handle_cycle);
                     app_for_backfill.enqueue_missing_ai_insights(40);
                 },
             );
             app.manage(state);
+            update_unread_badge(&app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -429,6 +443,38 @@ impl Write for TeeGuard {
             }
         }
         Ok(())
+    }
+}
+
+/// Update tray icon badge + window taskbar badge with inbox unread count.
+pub fn update_unread_badge(app: &AppHandle) {
+    let count = app
+        .try_state::<DesktopState>()
+        .and_then(|state| state.app.total_inbox_unread().ok())
+        .unwrap_or(0);
+
+    if let Some(base_state) = app.try_state::<TrayBaseIcon>() {
+        if let Ok(guard) = base_state.0.lock() {
+            if let Some(base) = guard.as_ref() {
+                let icon = tray_badge::icon_with_badge(base, count);
+                if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                    let _ = tray.set_icon(Some(icon));
+                    let tip = if count == 0 {
+                        "NovaMail".to_string()
+                    } else if count == 1 {
+                        "NovaMail — 1 ungelesen".to_string()
+                    } else {
+                        format!("NovaMail — {count} ungelesen")
+                    };
+                    let _ = tray.set_tooltip(Some(tip));
+                }
+            }
+        }
+    }
+
+    if let Some(win) = app.get_webview_window("main") {
+        let badge = if count > 0 { Some(count as i64) } else { None };
+        let _ = win.set_badge_count(badge);
     }
 }
 

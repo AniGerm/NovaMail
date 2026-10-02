@@ -1182,6 +1182,72 @@ impl Database {
         .map_err(Into::into)
     }
 
+    /// Highest IMAP UID stored for a mailbox (ignores local-only rows without UID).
+    pub fn max_message_uid(&self, mailbox_id: Uuid) -> DbResult<Option<u32>> {
+        let conn = self.conn.lock();
+        let max: Option<i64> = conn.query_row(
+            "SELECT MAX(uid) FROM messages WHERE mailbox_id = ?1 AND uid IS NOT NULL",
+            params![mailbox_id.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok(max.map(|u| u as u32))
+    }
+
+    /// Sum of unread counts across inbox-role mailboxes (tray / taskbar badge).
+    pub fn total_inbox_unread(&self) -> DbResult<u32> {
+        let conn = self.conn.lock();
+        let count: i64 = conn.query_row(
+            r#"
+            SELECT COALESCE(SUM(unread_count), 0)
+            FROM mailboxes
+            WHERE role = 'inbox' OR lower(name) = 'inbox' OR name = 'INBOX'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as u32)
+    }
+
+    /// Apply IMAP FLAGS for a known UID without rewriting the message body.
+    pub fn set_flags_by_uid(
+        &self,
+        mailbox_id: Uuid,
+        uid: u32,
+        seen: bool,
+        starred: bool,
+    ) -> DbResult<bool> {
+        let conn = self.conn.lock();
+        let Some((id, flags)): Option<(String, i64)> = conn
+            .query_row(
+                "SELECT id, flags FROM messages WHERE mailbox_id = ?1 AND uid = ?2",
+                params![mailbox_id.to_string(), uid as i64],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(false);
+        };
+        let mut next = flags;
+        if seen {
+            next |= FLAG_SEEN;
+        } else {
+            next &= !FLAG_SEEN;
+        }
+        if starred {
+            next |= FLAG_STARRED;
+        } else {
+            next &= !FLAG_STARRED;
+        }
+        if next == flags {
+            return Ok(false);
+        }
+        conn.execute(
+            "UPDATE messages SET flags = ?1 WHERE id = ?2",
+            params![next, id],
+        )?;
+        Ok(true)
+    }
+
     pub fn replace_attachments(
         &self,
         message_id: Uuid,

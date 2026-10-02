@@ -231,10 +231,26 @@ export const api = {
     call<SendMessageRequest>("messages_forward_draft", { messageId }),
   attachmentsList: (messageId: string) =>
     call<AttachmentDto[]>("attachments_list", { messageId }),
-  attachmentsOpenPath: (attachmentId: string) =>
-    call<string>("attachments_open_path", { attachmentId }),
-  attachmentsReveal: (attachmentId: string) =>
-    call<string>("attachments_reveal", { attachmentId }),
+  attachmentsOpenPath: (
+    attachmentId: string,
+    messageId?: string | null,
+    filename?: string | null,
+  ) =>
+    call<string>("attachments_open_path", {
+      attachmentId,
+      messageId: messageId ?? null,
+      filename: filename ?? null,
+    }),
+  attachmentsReveal: (
+    attachmentId: string,
+    messageId?: string | null,
+    filename?: string | null,
+  ) =>
+    call<string>("attachments_reveal", {
+      attachmentId,
+      messageId: messageId ?? null,
+      filename: filename ?? null,
+    }),
   messagesExportPdf: (messageId: string) =>
     call<string>("messages_export_pdf", { messageId }),
   messagesExportHtml: (messageId: string) =>
