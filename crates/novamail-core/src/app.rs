@@ -49,7 +49,8 @@ use novamail_ipc::{
 use novamail_mail::{
     append_sent_remote, archive_remote, delete_remote, execute_delete_remote, move_remote,
     offload_message_remote, plan_delete_remote, probe_account_quota, refetch_message_content,
-    save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
+    save_draft_remote, set_flags_remote, set_flags_remote_batch, OAuthConfig, Pop3Client,
+    SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -456,6 +457,10 @@ impl AppState {
         Ok(ListMessagesResponse { messages, total })
     }
 
+    pub fn list_message_ids(&self, request: ListMessagesRequest) -> CoreResult<Vec<Uuid>> {
+        Ok(self.db.list_message_ids(&request)?)
+    }
+
     pub fn list_threads(&self, request: ListMessagesRequest) -> CoreResult<ListThreadsResponse> {
         Ok(self.db.list_threads(&request)?)
     }
@@ -506,6 +511,28 @@ impl AppState {
         spawn_background(async move {
             if let Err(err) = set_flags_remote(&db, &secrets, message_id, unread, starred).await {
                 tracing::warn!(error = %err, "IMAP flag sync failed; local flags kept");
+            }
+        });
+        Ok(())
+    }
+
+    /// Bulk flag updates with one IMAP session per mailbox (Yahoo-friendly).
+    pub async fn set_flags_many(
+        &self,
+        message_ids: Vec<Uuid>,
+        unread: Option<bool>,
+        starred: Option<bool>,
+    ) -> CoreResult<()> {
+        for message_id in &message_ids {
+            self.db.set_flags(*message_id, unread, starred)?;
+        }
+        let db = self.db.clone();
+        let secrets = self.secrets.clone();
+        spawn_background(async move {
+            if let Err(err) =
+                set_flags_remote_batch(&db, &secrets, &message_ids, unread, starred).await
+            {
+                tracing::warn!(error = %err, "IMAP batch flag sync failed; local flags kept");
             }
         });
         Ok(())
@@ -1065,7 +1092,11 @@ impl AppState {
             Err(err) => return Err(err.into()),
         };
         let path = std::path::PathBuf::from(&attachment.path);
-        if path.is_file() {
+        let file_ok = path.is_file()
+            && std::fs::metadata(&path)
+                .map(|m| m.len() > 0 || attachment.size == 0)
+                .unwrap_or(false);
+        if file_ok {
             tracing::info!(
                 attachment_id = %attachment.id,
                 path = %path.display(),
@@ -1080,7 +1111,8 @@ impl AppState {
             attachment_id = %attachment.id,
             message_id = %attachment.message_id,
             path = %attachment.path,
-            "attachment missing; refetching message from IMAP"
+            expected_size = attachment.size,
+            "attachment missing or empty; refetching message from IMAP"
         );
         let filename = attachment.filename.clone();
         let message_id = attachment.message_id;
@@ -1163,6 +1195,58 @@ impl AppState {
             return Ok(Some(rows.into_iter().next().unwrap()));
         }
         Ok(None)
+    }
+
+    /// Stage attachment under a clean original filename for the OS opener.
+    pub async fn stage_attachment_for_open(
+        &self,
+        attachment_id: Uuid,
+        message_id: Option<Uuid>,
+        filename: Option<String>,
+    ) -> CoreResult<String> {
+        let blob = self
+            .ensure_attachment_path(attachment_id, message_id.clone(), filename.clone())
+            .await?;
+        let display_name = filename
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                self.db
+                    .get_attachment(attachment_id)
+                    .ok()
+                    .map(|a| a.filename)
+            })
+            .or_else(|| {
+                message_id.and_then(|mid| {
+                    self.db
+                        .list_attachments(mid)
+                        .ok()
+                        .and_then(|rows| rows.into_iter().next().map(|a| a.filename))
+                })
+            })
+            .unwrap_or_else(|| "attachment.bin".into());
+        let safe: String = display_name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(160)
+            .collect();
+        let safe = if safe.trim().is_empty() {
+            "attachment.bin".into()
+        } else {
+            safe
+        };
+        let stage_dir = self.paths.data_dir.join("open");
+        std::fs::create_dir_all(&stage_dir)
+            .map_err(|e| CoreError::Message(format!("cannot create open dir: {e}")))?;
+        let staged = stage_dir.join(format!("{attachment_id}_{safe}"));
+        std::fs::copy(&blob, &staged)
+            .map_err(|e| CoreError::Message(format!("cannot stage attachment: {e}")))?;
+        Ok(staged.to_string_lossy().into_owned())
     }
 
     /// Reveal the attachment's folder in the system file manager.

@@ -99,6 +99,14 @@ pub fn messages_list(
 }
 
 #[tauri::command]
+pub fn messages_list_ids(
+    state: State<'_, DesktopState>,
+    request: ListMessagesRequest,
+) -> Result<Vec<Uuid>, AppError> {
+    state.app.list_message_ids(request).map_err(map_err)
+}
+
+#[tauri::command]
 pub fn threads_list(
     state: State<'_, DesktopState>,
     request: ListMessagesRequest,
@@ -132,6 +140,23 @@ pub async fn messages_set_flags(
     request: SetFlagsRequest,
 ) -> Result<(), AppError> {
     state.app.set_flags(request).await.map_err(map_err)?;
+    crate::update_unread_badge(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn messages_set_flags_many(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    message_ids: Vec<Uuid>,
+    unread: Option<bool>,
+    starred: Option<bool>,
+) -> Result<(), AppError> {
+    state
+        .app
+        .set_flags_many(message_ids, unread, starred)
+        .await
+        .map_err(map_err)?;
     crate::update_unread_badge(&app);
     Ok(())
 }
@@ -290,11 +315,15 @@ pub async fn attachments_open_path(
     message_id: Option<Uuid>,
     filename: Option<String>,
 ) -> Result<String, AppError> {
-    state
+    let staged = state
         .app
-        .ensure_attachment_path(attachment_id, message_id, filename)
+        .stage_attachment_for_open(attachment_id, message_id, filename)
         .await
-        .map_err(map_err)
+        .map_err(map_err)?;
+    // Open from Rust — more reliable on Linux than returning a path for the
+    // frontend shell plugin (xdg-open + original filename).
+    open::that(&staged).map_err(|e| AppError::new("open", format!("cannot open attachment: {e}")))?;
+    Ok(staged)
 }
 
 #[tauri::command]
@@ -304,11 +333,15 @@ pub async fn attachments_reveal(
     message_id: Option<Uuid>,
     filename: Option<String>,
 ) -> Result<String, AppError> {
-    state
+    let folder = state
         .app
         .reveal_attachment(attachment_id, message_id, filename)
         .await
-        .map_err(map_err)
+        .map_err(map_err)?;
+    open::that(&folder).map_err(|e| {
+        AppError::new("open", format!("cannot open attachment folder: {e}"))
+    })?;
+    Ok(folder)
 }
 
 #[tauri::command]

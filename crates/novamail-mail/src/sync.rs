@@ -174,6 +174,7 @@ impl SyncEngine {
                         row.uid,
                         row.flags_seen,
                         row.flags_flagged,
+                        false, // never demote local SEEN from slow Yahoo STORE
                     )? {
                         changed = true;
                     }
@@ -212,6 +213,7 @@ impl SyncEngine {
                     fetched.uid,
                     fetched.flags_seen,
                     fetched.flags_flagged,
+                    false,
                 )?;
                 count += 1;
                 continue;

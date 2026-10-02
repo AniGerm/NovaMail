@@ -53,6 +53,8 @@ interface ReadingPaneProps {
   onCreateTask?: () => void;
   onReplySent?: () => void;
   onOpenFocus?: () => void;
+  /** Double-click preview ↔ fullscreen. */
+  onToggleFocus?: () => void;
 }
 
 export function ReadingPane({
@@ -72,6 +74,7 @@ export function ReadingPane({
   onCreateTask,
   onReplySent,
   onOpenFocus,
+  onToggleFocus,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -295,12 +298,12 @@ export function ReadingPane({
     filename: string;
   }) {
     try {
-      const path = await api.attachmentsOpenPath(
+      // Rust stages + opens via xdg-open; no frontend shell open needed.
+      await api.attachmentsOpen(
         attachment.id,
         current.summary.id,
         attachment.filename,
       );
-      await openPath(path);
       setAttachMenuId(null);
     } catch (error) {
       setAiError((error as AppError).message || t("openAttachmentFailed"));
@@ -312,12 +315,11 @@ export function ReadingPane({
     filename: string;
   }) {
     try {
-      const folder = await api.attachmentsReveal(
+      await api.attachmentsReveal(
         attachment.id,
         current.summary.id,
         attachment.filename,
       );
-      await openPath(folder);
       setAttachMenuId(null);
     } catch (error) {
       setAiError((error as AppError).message || t("revealAttachmentFailed"));
@@ -406,6 +408,24 @@ export function ReadingPane({
     <article
       aria-label={t("readingPane")}
       className="nova-fade-in flex h-full min-w-0 flex-col"
+      onDoubleClick={(event) => {
+        // Ignore double-clicks on interactive controls (buttons, links, inputs).
+        const target = event.target as HTMLElement | null;
+        if (
+          target?.closest(
+            "button, a, input, textarea, select, [role='menuitem'], [role='menu']",
+          )
+        ) {
+          return;
+        }
+        if (onToggleFocus) {
+          onToggleFocus();
+        } else if (focusMode) {
+          // Focus dialog closes via onOpenFocus parent wiring when absent.
+        } else {
+          onOpenFocus?.();
+        }
+      }}
     >
       <header className="border-b border-[var(--nova-border)] px-8 py-5">
         <div className="mb-3 flex items-start justify-between gap-4">

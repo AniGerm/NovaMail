@@ -57,6 +57,7 @@ export function MessageFocusDialog({
           inSpamFolder={inSpamFolder}
           focusMode
           {...paneProps}
+          onToggleFocus={onClose}
         />
       </div>
     </Dialog>

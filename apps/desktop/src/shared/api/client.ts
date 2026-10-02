@@ -154,6 +154,8 @@ export const api = {
     call<MailboxDto[]>("mailboxes_list", { accountId: accountId ?? null }),
   messagesList: (request: ListMessagesRequest) =>
     call<ListMessagesResponse>("messages_list", { request }),
+  messagesListIds: (request: ListMessagesRequest) =>
+    call<string[]>("messages_list_ids", { request }),
   threadsList: (request: ListMessagesRequest) =>
     call<ListThreadsResponse>("threads_list", { request }),
   messagesListByThread: (threadId: string) =>
@@ -162,6 +164,15 @@ export const api = {
     call<MessageDetailDto>("messages_get", { messageId }),
   messagesSetFlags: (request: SetFlagsRequest) =>
     call<void>("messages_set_flags", { request }),
+  messagesSetFlagsMany: (
+    messageIds: string[],
+    flags: { unread?: boolean; starred?: boolean },
+  ) =>
+    call<void>("messages_set_flags_many", {
+      messageIds,
+      unread: flags.unread ?? null,
+      starred: flags.starred ?? null,
+    }),
   messagesSend: (request: SendMessageRequest) =>
     call<void>("messages_send", { request }),
   messagesSaveDraft: (request: SaveDraftRequest) =>
@@ -232,6 +243,17 @@ export const api = {
   attachmentsList: (messageId: string) =>
     call<AttachmentDto[]>("attachments_list", { messageId }),
   attachmentsOpenPath: (
+    attachmentId: string,
+    messageId?: string | null,
+    filename?: string | null,
+  ) =>
+    call<string>("attachments_open_path", {
+      attachmentId,
+      messageId: messageId ?? null,
+      filename: filename ?? null,
+    }),
+  /** Opens the attachment with the system handler (Rust-side xdg-open). */
+  attachmentsOpen: (
     attachmentId: string,
     messageId?: string | null,
     filename?: string | null,

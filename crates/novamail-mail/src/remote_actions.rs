@@ -25,31 +25,68 @@ pub async fn set_flags_remote(
     unread: Option<bool>,
     starred: Option<bool>,
 ) -> MailResult<()> {
-    let Some(locator) = load_locator(db, message_id)? else {
+    set_flags_remote_batch(db, secrets, &[message_id], unread, starred).await
+}
+
+/// Apply the same flag change to many messages, grouping by IMAP mailbox so Yahoo
+/// gets one connection + one UID STORE set instead of N logins.
+pub async fn set_flags_remote_batch(
+    db: &Database,
+    secrets: &SecretStore,
+    message_ids: &[Uuid],
+    unread: Option<bool>,
+    starred: Option<bool>,
+) -> MailResult<()> {
+    if message_ids.is_empty() || (unread.is_none() && starred.is_none()) {
         return Ok(());
-    };
-    let account = db.get_account(locator.account_id)?;
-    let credentials = ensure_fresh_credentials(&account, secrets).await?;
-    let mut imap = LiveImap::connect(&account, &credentials).await?;
-    imap.select(&locator.mailbox_name).await?;
-    let uid = locator.uid.to_string();
-    if let Some(unread) = unread {
-        let query = if unread {
-            "-FLAGS (\\Seen)"
-        } else {
-            "+FLAGS (\\Seen)"
-        };
-        imap.uid_store(&uid, query).await?;
     }
-    if let Some(starred) = starred {
-        let query = if starred {
-            "+FLAGS (\\Flagged)"
-        } else {
-            "-FLAGS (\\Flagged)"
+    use std::collections::HashMap;
+    let mut by_mailbox: HashMap<(Uuid, String), Vec<u32>> = HashMap::new();
+    for message_id in message_ids {
+        let Some(locator) = load_locator(db, *message_id)? else {
+            continue;
         };
-        imap.uid_store(&uid, query).await?;
+        by_mailbox
+            .entry((locator.account_id, locator.mailbox_name))
+            .or_default()
+            .push(locator.uid);
     }
-    let _ = imap.logout().await;
+    for ((account_id, mailbox_name), mut uids) in by_mailbox {
+        uids.sort_unstable();
+        uids.dedup();
+        if uids.is_empty() {
+            continue;
+        }
+        let account = db.get_account(account_id)?;
+        let credentials = ensure_fresh_credentials(&account, secrets).await?;
+        let mut imap = LiveImap::connect(&account, &credentials).await?;
+        imap.select(&mailbox_name).await?;
+        // Chunk UID sets to stay under provider command-length limits.
+        for chunk in uids.chunks(80) {
+            let set = chunk
+                .iter()
+                .map(|u| u.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            if let Some(unread) = unread {
+                let query = if unread {
+                    "-FLAGS (\\Seen)"
+                } else {
+                    "+FLAGS (\\Seen)"
+                };
+                imap.uid_store(&set, query).await?;
+            }
+            if let Some(starred) = starred {
+                let query = if starred {
+                    "+FLAGS (\\Flagged)"
+                } else {
+                    "-FLAGS (\\Flagged)"
+                };
+                imap.uid_store(&set, query).await?;
+            }
+        }
+        let _ = imap.logout().await;
+    }
     Ok(())
 }
 

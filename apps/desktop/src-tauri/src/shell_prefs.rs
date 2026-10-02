@@ -1,4 +1,4 @@
-//! Desktop shell preferences: close-to-tray and Linux autostart.
+//! Desktop shell preferences: close-to-tray, Linux autostart, window geometry.
 
 use std::fs;
 use std::path::PathBuf;
@@ -10,16 +10,37 @@ static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WindowGeometry {
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShellPrefs {
     pub close_to_tray: bool,
     pub autostart: bool,
     /// UI locale (`de` / `en`) — used to localize WebKit/GTK context menus.
     #[serde(default = "default_ui_locale")]
     pub ui_locale: String,
+    /// First launch maximizes; after the user unmaximizes/resizes we remember it.
+    #[serde(default = "default_true")]
+    pub start_maximized: bool,
+    /// Restored when `start_maximized` is false.
+    #[serde(default)]
+    pub window: Option<WindowGeometry>,
 }
 
 fn default_ui_locale() -> String {
     "de".into()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ShellPrefs {
@@ -28,6 +49,8 @@ impl Default for ShellPrefs {
             close_to_tray: true,
             autostart: false,
             ui_locale: default_ui_locale(),
+            start_maximized: true,
+            window: None,
         }
     }
 }
@@ -97,6 +120,46 @@ pub fn set_ui_locale(locale: &str) -> Result<ShellPrefs, String> {
     };
     save(&prefs)?;
     Ok(prefs)
+}
+
+/// Persist whether the main window should open maximized, plus last normal size.
+pub fn set_window_state(
+    maximized: bool,
+    width: f64,
+    height: f64,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<ShellPrefs, String> {
+    let mut prefs = load();
+    prefs.start_maximized = maximized;
+    if !maximized {
+        let w = width.max(960.0);
+        let h = height.max(640.0);
+        prefs.window = Some(WindowGeometry {
+            width: w,
+            height: h,
+            x,
+            y,
+        });
+    }
+    save(&prefs)?;
+    Ok(prefs)
+}
+
+/// Apply saved maximize / geometry to the main window on startup.
+pub fn apply_window_startup(window: &tauri::WebviewWindow) {
+    let prefs = load();
+    if prefs.start_maximized {
+        let _ = window.maximize();
+        return;
+    }
+    if let Some(geo) = prefs.window {
+        let size = tauri::LogicalSize::new(geo.width.max(960.0), geo.height.max(640.0));
+        let _ = window.set_size(tauri::Size::Logical(size));
+        if let (Some(x), Some(y)) = (geo.x, geo.y) {
+            let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+        }
+    }
 }
 
 /// Apply gettext locale for WebKit/GTK menus before the toolkit initializes.
