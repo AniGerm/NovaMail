@@ -17,6 +17,7 @@ novamail-core = { workspace = true }
 novamail-ipc = { workspace = true }
 novamail-mail = { workspace = true }
 dirs = { workspace = true }
+open = "5"
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

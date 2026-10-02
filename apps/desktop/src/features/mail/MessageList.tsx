@@ -65,6 +65,8 @@ interface MessageListProps {
   onFiltersChange: (next: InboxFilters) => void;
   accounts: AccountDto[];
   mailboxes: MailboxDto[];
+  /** Used by select-all to load every matching mailbox id (not just the page). */
+  searchQuery?: string;
 }
 
 type FlatRow =
@@ -93,6 +95,7 @@ export function MessageList({
   onFiltersChange,
   accounts,
   mailboxes,
+  searchQuery = "",
 }: MessageListProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -219,6 +222,21 @@ export function MessageList({
   };
 
   const selectAllVisible = async () => {
+    // Entire mailbox matching current filters — not just the visible page (~200).
+    try {
+      const request: ListMessagesRequest = {
+        ...buildListRequest(filters, searchQuery),
+        limit: 20000,
+        offset: 0,
+      };
+      const ids = await api.messagesListIds(request);
+      if (ids.length > 0) {
+        setCheckedIds(new Set(ids));
+        return;
+      }
+    } catch {
+      /* fall back to visible rows */
+    }
     if (filters.viewMode === "flat") {
       setCheckedIds(new Set(messages.map((m) => m.id)));
       return;

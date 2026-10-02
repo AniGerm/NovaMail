@@ -187,6 +187,11 @@ export function AppShell() {
     queryFn: () => api.messagesGet(selectedMessageId!),
   });
 
+  const messages = messagesQuery.data?.messages ?? [];
+  const threads = threadsQuery.data?.threads ?? [];
+  const accounts = accountsQuery.data ?? [];
+  const mailboxes = mailboxesQuery.data ?? [];
+
   const aiSettingsQuery = useQuery({
     queryKey: ["ai-settings"],
     enabled: desktop,
@@ -282,10 +287,7 @@ export function AppShell() {
     void api.shellSetUiLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
 
-  // After "mark unread", open-to-read must not flip it back until the user
-  // re-clicks the message (same row again, or leave and open it again).
-  const suppressAutoReadRef = useRef<Set<string>>(new Set());
-
+  // Preview may stay unread (blue dot). Mark read only on re-click or fullscreen.
   const markMessageReadLocally = useCallback(
     (id: string, mailboxId?: string | null) => {
       queryClient.setQueryData(
@@ -333,51 +335,73 @@ export function AppShell() {
     [queryClient],
   );
 
+  const markSelectedReadIfNeeded = useCallback(() => {
+    const detail = messageQuery.data;
+    if (!detail || detail.summary.id !== selectedMessageId) return;
+    if (!detail.summary.unread) return;
+    markMessageReadLocally(detail.summary.id, detail.summary.mailboxId);
+  }, [markMessageReadLocally, messageQuery.data, selectedMessageId]);
+
   const handleSelectMessage = useCallback(
     (id: string | null) => {
-      if (id) {
-        const wasSuppressed = suppressAutoReadRef.current.delete(id);
-        // Re-clicking the already-open unread message clears the lock and marks read.
-        if (
-          wasSuppressed &&
-          id === selectedMessageId &&
-          messageQuery.data?.summary.id === id &&
-          messageQuery.data.summary.unread
-        ) {
-          markMessageReadLocally(id, messageQuery.data.summary.mailboxId);
-        }
+      if (id && id === selectedMessageId) {
+        // Re-click already previewed mail → clear blue unread dot.
+        markSelectedReadIfNeeded();
       }
       selectMessage(id);
     },
-    [
-      markMessageReadLocally,
-      messageQuery.data?.summary.id,
-      messageQuery.data?.summary.mailboxId,
-      messageQuery.data?.summary.unread,
-      selectMessage,
-      selectedMessageId,
-    ],
+    [markSelectedReadIfNeeded, selectMessage, selectedMessageId],
   );
 
-  // Opening a message marks it read — optimistic cache update, no full list refetch.
-  const openedUnread =
-    messageQuery.data?.summary.id === selectedMessageId &&
-    messageQuery.data?.summary.unread === true;
-  const openedMailboxId = messageQuery.data?.summary.mailboxId;
+  const openFocusForMessage = useCallback(
+    (id: string) => {
+      selectMessage(id);
+      // Fullscreen counts as "opened for real" → clear unread blue dot.
+      const detail = messageQuery.data;
+      if (detail?.summary.id === id) {
+        if (detail.summary.unread) {
+          markMessageReadLocally(id, detail.summary.mailboxId);
+        }
+      } else {
+        // Detail not loaded yet for this id — persist SEEN remotely + refresh.
+        void api.messagesSetFlags({ messageId: id, unread: false }).then(() => {
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          void queryClient.invalidateQueries({ queryKey: ["message", id] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        });
+      }
+      setMessageFocusOpen(true);
+    },
+    [markMessageReadLocally, messageQuery.data, queryClient, selectMessage],
+  );
+
+  // Preselect first mail so preview shows with unread dot still visible.
   useEffect(() => {
-    if (!desktop || !selectedMessageId || !openedUnread || !openedMailboxId) {
+    if (!desktop || selectedMessageId) return;
+    if (inboxFilters.viewMode === "flat" && messages[0]?.id) {
+      selectMessage(messages[0].id);
       return;
     }
-    if (suppressAutoReadRef.current.has(selectedMessageId)) {
-      return;
+    if (inboxFilters.viewMode === "threads" && threads[0]?.id) {
+      let cancelled = false;
+      void api
+        .messagesListByThread(threads[0].id)
+        .then((items) => {
+          if (cancelled || !items[0]?.id) return;
+          selectMessage(items[0].id);
+        })
+        .catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
     }
-    markMessageReadLocally(selectedMessageId, openedMailboxId);
   }, [
     desktop,
-    markMessageReadLocally,
-    openedMailboxId,
-    openedUnread,
+    inboxFilters.viewMode,
+    messages,
+    selectMessage,
     selectedMessageId,
+    threads,
   ]);
 
   useEffect(() => {
@@ -499,25 +523,17 @@ export function AppShell() {
       if (!desktop || messageIds.length === 0) return;
       const flags =
         action === "read"
-          ? { unread: false }
+          ? { unread: false as boolean | undefined, starred: undefined as boolean | undefined }
           : action === "unread"
-            ? { unread: true }
+            ? { unread: true as boolean | undefined, starred: undefined as boolean | undefined }
             : action === "star"
-              ? { starred: true }
-              : { starred: false };
-      if (action === "unread") {
-        for (const messageId of messageIds) {
-          suppressAutoReadRef.current.add(messageId);
-        }
-      } else if (action === "read") {
-        for (const messageId of messageIds) {
-          suppressAutoReadRef.current.delete(messageId);
-        }
-      }
-      // Sequential to keep IMAP remote flag updates orderly.
-      for (const messageId of messageIds) {
-        await api.messagesSetFlags({ messageId, ...flags });
-      }
+              ? { unread: undefined as boolean | undefined, starred: true as boolean | undefined }
+              : { unread: undefined as boolean | undefined, starred: false as boolean | undefined };
+      // One batched IMAP STORE per mailbox — Yahoo-friendly.
+      await api.messagesSetFlagsMany(messageIds, {
+        unread: flags.unread,
+        starred: flags.starred,
+      });
       await queryClient.invalidateQueries({ queryKey: ["messages"] });
       await queryClient.invalidateQueries({ queryKey: ["threads"] });
       await queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
@@ -563,10 +579,6 @@ export function AppShell() {
     setComposerOpen(true);
   }, [desktop, selectedMessageId, setComposerOpen]);
 
-  const messages = messagesQuery.data?.messages ?? [];
-  const threads = threadsQuery.data?.threads ?? [];
-  const accounts = accountsQuery.data ?? [];
-  const mailboxes = mailboxesQuery.data ?? [];
   const listTotal =
     inboxFilters.viewMode === "threads"
       ? (threadsQuery.data?.total ?? threads.length)
@@ -1236,8 +1248,7 @@ export function AppShell() {
                   }
                 }}
                 onOpenFocus={(id) => {
-                  handleSelectMessage(id);
-                  setMessageFocusOpen(true);
+                  openFocusForMessage(id);
                 }}
                 onToggleStar={(messageId, starred) => {
                   void handleToggleStar(messageId, starred);
@@ -1250,6 +1261,7 @@ export function AppShell() {
                 onFiltersChange={handleInboxFiltersChange}
                 accounts={accounts}
                 mailboxes={mailboxes}
+                searchQuery={searchQuery}
               />
             </div>
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
@@ -1257,7 +1269,17 @@ export function AppShell() {
                 message={messageQuery.data}
                 aiEnabled={aiReplyEnabled}
                 inSpamFolder={inboxFilters.mailboxRole === "junk"}
-                onOpenFocus={() => setMessageFocusOpen(true)}
+                onOpenFocus={() => {
+                  if (selectedMessageId) openFocusForMessage(selectedMessageId);
+                  else setMessageFocusOpen(true);
+                }}
+                onToggleFocus={() => {
+                  if (messageFocusOpen) {
+                    setMessageFocusOpen(false);
+                  } else if (selectedMessageId) {
+                    openFocusForMessage(selectedMessageId);
+                  }
+                }}
                 onDelete={() => {
                   void handleDelete();
                 }}

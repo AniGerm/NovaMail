@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -201,14 +202,24 @@ pub fn run() {
             );
             app.manage(state);
             update_unread_badge(&app.handle());
+            if let Some(win) = app.get_webview_window("main") {
+                shell_prefs::apply_window_startup(&win);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if shell_prefs::close_to_tray_enabled() {
-                    api.prevent_close();
-                    let _ = window.hide();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    persist_window_geometry(window);
+                    if shell_prefs::close_to_tray_enabled() {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
+                WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                    persist_window_geometry_debounced(window);
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -220,10 +231,12 @@ pub fn run() {
             commands::accounts_update,
             commands::mailboxes_list,
             commands::messages_list,
+            commands::messages_list_ids,
             commands::threads_list,
             commands::messages_list_by_thread,
             commands::messages_get,
             commands::messages_set_flags,
+            commands::messages_set_flags_many,
             commands::messages_search,
             commands::messages_send,
             commands::messages_save_draft,
@@ -444,6 +457,40 @@ impl Write for TeeGuard {
         }
         Ok(())
     }
+}
+
+fn persist_window_geometry(window: &tauri::Window) {
+    let maximized = window.is_maximized().unwrap_or(false);
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let width = f64::from(size.width) / scale;
+    let height = f64::from(size.height) / scale;
+    let (x, y) = match window.outer_position() {
+        Ok(pos) => (
+            Some(f64::from(pos.x) / scale),
+            Some(f64::from(pos.y) / scale),
+        ),
+        Err(_) => (None, None),
+    };
+    let _ = shell_prefs::set_window_state(maximized, width, height, x, y);
+}
+
+fn persist_window_geometry_debounced(window: &tauri::Window) {
+    use std::sync::atomic::AtomicBool;
+    static PENDING: AtomicBool = AtomicBool::new(false);
+    if PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(450));
+        PENDING.store(false, Ordering::SeqCst);
+        persist_window_geometry(&window);
+    });
 }
 
 /// Update tray icon badge + window taskbar badge with inbox unread count.

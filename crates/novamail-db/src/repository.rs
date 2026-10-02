@@ -1209,12 +1209,16 @@ impl Database {
     }
 
     /// Apply IMAP FLAGS for a known UID without rewriting the message body.
+    ///
+    /// When `allow_unseen` is false, a remote missing `\Seen` never clears a
+    /// local read mark (avoids Yahoo/slow STORE races flipping mail unread).
     pub fn set_flags_by_uid(
         &self,
         mailbox_id: Uuid,
         uid: u32,
         seen: bool,
         starred: bool,
+        allow_unseen: bool,
     ) -> DbResult<bool> {
         let conn = self.conn.lock();
         let Some((id, flags)): Option<(String, i64)> = conn
@@ -1230,7 +1234,7 @@ impl Database {
         let mut next = flags;
         if seen {
             next |= FLAG_SEEN;
-        } else {
+        } else if allow_unseen {
             next &= !FLAG_SEEN;
         }
         if starred {
@@ -1253,12 +1257,32 @@ impl Database {
         message_id: Uuid,
         attachments: &[AttachmentRecord],
     ) -> DbResult<()> {
+        // Preserve stable IDs when filename / content-id still match so the UI
+        // does not hold stale attachment UUIDs across refetch/sync.
+        let existing = self.list_attachments(message_id)?;
+        let mut stable: Vec<AttachmentRecord> = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            let reuse = existing.iter().find(|old| {
+                (attachment.content_id.is_some()
+                    && old.content_id == attachment.content_id)
+                    || old.filename == attachment.filename
+            });
+            let mut row = attachment.clone();
+            if let Some(old) = reuse {
+                row.id = old.id;
+                // Drop previous blob if path changed.
+                if old.path != row.path {
+                    let _ = std::fs::remove_file(&old.path);
+                }
+            }
+            stable.push(row);
+        }
         let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM attachments WHERE message_id = ?1",
             params![message_id.to_string()],
         )?;
-        for attachment in attachments {
+        for attachment in &stable {
             conn.execute(
                 r#"
                 INSERT INTO attachments (id, message_id, filename, mime, size, path, content_id)
@@ -1276,6 +1300,39 @@ impl Database {
             )?;
         }
         Ok(())
+    }
+
+    /// All message IDs matching the list filters (for select-all across the mailbox).
+    pub fn list_message_ids(&self, req: &ListMessagesRequest) -> DbResult<Vec<Uuid>> {
+        let conn = self.conn.lock();
+        let (where_sql, bind_ids) = message_filters_sql(req);
+        let order_sql = message_order_sql(&req.sort_by, &req.sort_dir);
+        let sql = format!(
+            r#"
+            SELECT m.id
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            {where_sql}
+            ORDER BY {order_sql}
+            LIMIT 20000
+            "#
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut out = Vec::new();
+        if bind_ids.is_empty() {
+            let rows = stmt.query_map([], |row| Ok(parse_uuid(row.get::<_, String>(0)?)?))?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let rows = stmt.query_map(params![bind_ids[0]], |row| {
+                Ok(parse_uuid(row.get::<_, String>(0)?)?)
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
     }
 
     pub fn list_attachments(&self, message_id: Uuid) -> DbResult<Vec<AttachmentDto>> {
@@ -4103,5 +4160,276 @@ mod tests {
         assert_eq!(due, vec![message_id]);
         db.unsnooze_message(message_id).unwrap();
         assert_eq!(db.count_active_snoozes().unwrap(), 0);
+    }
+
+    #[test]
+    fn flags_catchup_does_not_demote_local_seen() {
+        let db = Database::open_in_memory().unwrap();
+        let account = sample_account();
+        db.insert_account(&account).unwrap();
+        let mailbox = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id: account.id,
+            name: "INBOX".into(),
+            role: Some("inbox".into()),
+            uidvalidity: Some(1),
+            uidnext: Some(2),
+            unread_count: 0,
+            total_count: 0,
+        };
+        db.upsert_mailbox(&mailbox).unwrap();
+        let thread_id = Uuid::new_v4();
+        db.upsert_thread(&ThreadRecord {
+            id: thread_id,
+            account_id: account.id,
+            subject: "Seen".into(),
+            last_message_at: 100,
+            message_count: 1,
+            unread_count: 0,
+            participants: vec![AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            }],
+            snippet: "Seen".into(),
+        })
+        .unwrap();
+        let message_id = Uuid::new_v4();
+        db.insert_message(&MessageRecord {
+            id: message_id,
+            account_id: account.id,
+            mailbox_id: mailbox.id,
+            thread_id,
+            uid: Some(42),
+            message_id: Some("<seen@example.com>".into()),
+            in_reply_to: None,
+            references: vec![],
+            subject: "Seen".into(),
+            from: AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            },
+            to: vec![AddressDto {
+                name: None,
+                email: account.email.clone(),
+            }],
+            cc: vec![],
+            date: 100,
+            flags: FLAG_SEEN,
+            snippet: "Seen".into(),
+            body_text: Some("Seen".into()),
+            body_html: None,
+            has_attachments: false,
+            raw_path: None,
+            local_only: false,
+            offline_at: None,
+            size_bytes: None,
+        })
+        .unwrap();
+
+        // Remote still missing \Seen — must not clear local read mark.
+        let changed = db
+            .set_flags_by_uid(mailbox.id, 42, false, false, false)
+            .unwrap();
+        assert!(!changed);
+        assert!(!db.get_message(message_id).unwrap().summary.unread);
+
+        // Explicit allow_unseen can demote.
+        let changed = db
+            .set_flags_by_uid(mailbox.id, 42, false, false, true)
+            .unwrap();
+        assert!(changed);
+        assert!(db.get_message(message_id).unwrap().summary.unread);
+    }
+
+    #[test]
+    fn list_message_ids_returns_all_matching() {
+        let db = Database::open_in_memory().unwrap();
+        let account = sample_account();
+        db.insert_account(&account).unwrap();
+        let mailbox = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id: account.id,
+            name: "INBOX".into(),
+            role: Some("inbox".into()),
+            uidvalidity: Some(1),
+            uidnext: Some(10),
+            unread_count: 0,
+            total_count: 0,
+        };
+        db.upsert_mailbox(&mailbox).unwrap();
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let thread_id = Uuid::new_v4();
+            db.upsert_thread(&ThreadRecord {
+                id: thread_id,
+                account_id: account.id,
+                subject: format!("M{i}"),
+                last_message_at: 100 + i,
+                message_count: 1,
+                unread_count: 1,
+                participants: vec![AddressDto {
+                    name: None,
+                    email: "a@example.com".into(),
+                }],
+                snippet: format!("M{i}"),
+            })
+            .unwrap();
+            let message_id = Uuid::new_v4();
+            ids.push(message_id);
+            db.insert_message(&MessageRecord {
+                id: message_id,
+                account_id: account.id,
+                mailbox_id: mailbox.id,
+                thread_id,
+                uid: Some(i as u32 + 1),
+                message_id: Some(format!("<m{i}@example.com>")),
+                in_reply_to: None,
+                references: vec![],
+                subject: format!("M{i}"),
+                from: AddressDto {
+                    name: None,
+                    email: "a@example.com".into(),
+                },
+                to: vec![AddressDto {
+                    name: None,
+                    email: account.email.clone(),
+                }],
+                cc: vec![],
+                date: 100 + i,
+                flags: 0,
+                snippet: format!("M{i}"),
+                body_text: Some(format!("M{i}")),
+                body_html: None,
+                has_attachments: false,
+                raw_path: None,
+                local_only: false,
+                offline_at: None,
+                size_bytes: None,
+            })
+            .unwrap();
+        }
+        let listed = db
+            .list_message_ids(&ListMessagesRequest {
+                mailbox_id: Some(mailbox.id),
+                account_id: None,
+                unified: false,
+                mailbox_role: None,
+                local_only: false,
+                snoozed_only: false,
+                limit: 2,
+                offset: 0,
+                query: None,
+                unread_only: false,
+                starred_only: false,
+                has_attachments: false,
+                sort_by: MessageSortBy::Date,
+                sort_dir: SortDirection::Asc,
+            })
+            .unwrap();
+        assert_eq!(listed.len(), 5);
+        assert_eq!(listed, ids);
+    }
+
+    #[test]
+    fn replace_attachments_preserves_stable_ids() {
+        use crate::models::AttachmentRecord;
+        let db = Database::open_in_memory().unwrap();
+        let account = sample_account();
+        db.insert_account(&account).unwrap();
+        let mailbox = MailboxRecord {
+            id: Uuid::new_v4(),
+            account_id: account.id,
+            name: "INBOX".into(),
+            role: Some("inbox".into()),
+            uidvalidity: Some(1),
+            uidnext: Some(2),
+            unread_count: 0,
+            total_count: 0,
+        };
+        db.upsert_mailbox(&mailbox).unwrap();
+        let thread_id = Uuid::new_v4();
+        db.upsert_thread(&ThreadRecord {
+            id: thread_id,
+            account_id: account.id,
+            subject: "Att".into(),
+            last_message_at: 100,
+            message_count: 1,
+            unread_count: 0,
+            participants: vec![AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            }],
+            snippet: "Att".into(),
+        })
+        .unwrap();
+        let message_id = Uuid::new_v4();
+        db.insert_message(&MessageRecord {
+            id: message_id,
+            account_id: account.id,
+            mailbox_id: mailbox.id,
+            thread_id,
+            uid: Some(1),
+            message_id: Some("<att@example.com>".into()),
+            in_reply_to: None,
+            references: vec![],
+            subject: "Att".into(),
+            from: AddressDto {
+                name: None,
+                email: "a@example.com".into(),
+            },
+            to: vec![AddressDto {
+                name: None,
+                email: account.email.clone(),
+            }],
+            cc: vec![],
+            date: 100,
+            flags: FLAG_SEEN,
+            snippet: "Att".into(),
+            body_text: Some("Att".into()),
+            body_html: None,
+            has_attachments: true,
+            raw_path: None,
+            local_only: false,
+            offline_at: None,
+            size_bytes: None,
+        })
+        .unwrap();
+        let att_id = Uuid::new_v4();
+        let dir = tempfile::tempdir().unwrap();
+        let path1 = dir.path().join("a.pdf");
+        std::fs::write(&path1, b"pdf1").unwrap();
+        db.replace_attachments(
+            message_id,
+            &[AttachmentRecord {
+                id: att_id,
+                message_id,
+                filename: "a.pdf".into(),
+                mime: "application/pdf".into(),
+                size: 4,
+                path: path1.to_string_lossy().into_owned(),
+                content_id: None,
+            }],
+        )
+        .unwrap();
+        let path2 = dir.path().join("a2.pdf");
+        std::fs::write(&path2, b"pdf2").unwrap();
+        let new_id = Uuid::new_v4();
+        db.replace_attachments(
+            message_id,
+            &[AttachmentRecord {
+                id: new_id,
+                message_id,
+                filename: "a.pdf".into(),
+                mime: "application/pdf".into(),
+                size: 4,
+                path: path2.to_string_lossy().into_owned(),
+                content_id: None,
+            }],
+        )
+        .unwrap();
+        let rows = db.list_attachments(message_id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, att_id);
+        assert_eq!(rows[0].path, path2.to_string_lossy());
     }
 }
