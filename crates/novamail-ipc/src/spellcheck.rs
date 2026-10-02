@@ -24,4 +24,7 @@ pub struct SpellSuggestResult {
     pub word: String,
     pub correct: bool,
     pub suggestions: Vec<String>,
+    /// High-confidence replacement for automatic correction on word boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autocorrect: Option<String>,
 }

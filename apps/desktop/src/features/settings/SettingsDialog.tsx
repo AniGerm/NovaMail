@@ -551,6 +551,7 @@ export function SettingsDialog({
               const next = e.target.value as Locale;
               setLocale(next);
               if (isDesktopShell()) {
+                void api.shellSetUiLocale(next).catch(() => undefined);
                 void api
                   .spellcheckEnsureForLocale(next)
                   .then(() => refreshSpellcheck())
@@ -579,7 +580,7 @@ export function SettingsDialog({
                 const short = code.split("_")[0] ?? code;
                 if (isDesktopShell()) {
                   void api
-                    .spellcheckSetLanguages([code, short, "en_US", "en"])
+                    .spellcheckSetLanguages([code, short])
                     .catch(() => undefined);
                 }
               }}

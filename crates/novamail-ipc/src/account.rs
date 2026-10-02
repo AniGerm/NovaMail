@@ -24,6 +24,9 @@ pub enum MailProvider {
 pub struct AccountDto {
     pub id: Uuid,
     pub name: String,
+    /// Optional sidebar nickname (e.g. "Yahoo Mail", "dienstlich"). Empty → use `name`.
+    #[serde(default)]
+    pub label: String,
     pub email: String,
     pub provider: MailProvider,
     pub auth_type: AuthType,
@@ -40,6 +43,8 @@ pub struct AccountDto {
 #[serde(rename_all = "camelCase")]
 pub struct AddAccountPasswordRequest {
     pub name: String,
+    #[serde(default)]
+    pub label: String,
     pub email: String,
     pub password: String,
     pub provider: MailProvider,
@@ -55,6 +60,8 @@ pub struct AddAccountPasswordRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AddAccountOAuthRequest {
     pub name: String,
+    #[serde(default)]
+    pub label: String,
     pub email: String,
     pub provider: MailProvider,
     pub access_token: String,
@@ -74,6 +81,8 @@ pub struct AddAccountOAuthRequest {
 pub struct UpdateAccountRequest {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub label: String,
     pub email: String,
     pub provider: MailProvider,
     pub imap_host: String,

@@ -20,6 +20,9 @@ use tracing_subscriber::fmt::MakeWriter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Localize WebKit/GTK spellcheck context menus (Learn / Ignore / …).
+    shell_prefs::apply_process_locale();
+
     let log_path = default_log_path();
     if let Some(parent) = log_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -229,12 +232,16 @@ pub fn run() {
             commands::messages_forward_draft,
             commands::attachments_list,
             commands::attachments_open_path,
+            commands::attachments_reveal,
+            commands::messages_export_pdf,
+            commands::messages_export_html,
             commands::contacts_list,
             commands::recipients_suggest,
             commands::spellcheck_status,
             commands::spellcheck_install,
             commands::spellcheck_ensure_for_locale,
             commands::spellcheck_suggest,
+            commands::spellcheck_learn_word,
             commands::contacts_upsert,
             commands::contacts_delete,
             commands::carddav_start,
@@ -311,6 +318,7 @@ pub fn run() {
             commands::calendar_collections_list,
             commands::calendar_collections_upsert,
             commands::calendar_collections_set_default,
+            commands::calendar_collections_delete,
             commands::calendar_invitations_list,
             commands::calendar_invitations_respond,
             commands::app_version,
@@ -318,6 +326,7 @@ pub fn run() {
             commands::shell_get_prefs,
             commands::shell_set_close_to_tray,
             commands::shell_set_autostart,
+            commands::shell_set_ui_locale,
             commands::updates_check,
             commands::updates_download,
             commands::updates_install,

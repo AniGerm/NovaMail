@@ -13,6 +13,13 @@ static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
 pub struct ShellPrefs {
     pub close_to_tray: bool,
     pub autostart: bool,
+    /// UI locale (`de` / `en`) — used to localize WebKit/GTK context menus.
+    #[serde(default = "default_ui_locale")]
+    pub ui_locale: String,
+}
+
+fn default_ui_locale() -> String {
+    "de".into()
 }
 
 impl Default for ShellPrefs {
@@ -20,6 +27,7 @@ impl Default for ShellPrefs {
         Self {
             close_to_tray: true,
             autostart: false,
+            ui_locale: default_ui_locale(),
         }
     }
 }
@@ -79,6 +87,31 @@ pub fn set_autostart(enabled: bool) -> Result<ShellPrefs, String> {
     prefs.autostart = enabled;
     save(&prefs)?;
     Ok(prefs)
+}
+
+pub fn set_ui_locale(locale: &str) -> Result<ShellPrefs, String> {
+    let mut prefs = load();
+    prefs.ui_locale = match locale {
+        "en" | "en_US" | "en-US" => "en".into(),
+        _ => "de".into(),
+    };
+    save(&prefs)?;
+    Ok(prefs)
+}
+
+/// Apply gettext locale for WebKit/GTK menus before the toolkit initializes.
+pub fn apply_process_locale() {
+    let locale = load().ui_locale;
+    let (lang, messages) = if locale.starts_with("en") {
+        ("en_US:en", "en_US.UTF-8")
+    } else {
+        ("de_DE:de", "de_DE.UTF-8")
+    };
+    // Prefer LANGUAGE for gettext lookups without forcing the whole process locale.
+    std::env::set_var("LANGUAGE", lang);
+    if std::env::var_os("LC_MESSAGES").is_none() {
+        std::env::set_var("LC_MESSAGES", messages);
+    }
 }
 
 fn autostart_enabled() -> bool {

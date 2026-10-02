@@ -26,6 +26,8 @@ pub struct BackupAccountCredentials {
 pub struct BackupAccount {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub label: String,
     pub email: String,
     pub provider: MailProvider,
     pub auth_type: AuthType,
@@ -147,6 +149,7 @@ impl From<&AccountDto> for BackupAccount {
         Self {
             id: a.id,
             name: a.name.clone(),
+            label: a.label.clone(),
             email: a.email.clone(),
             provider: a.provider.clone(),
             auth_type: a.auth_type.clone(),

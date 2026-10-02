@@ -61,14 +61,15 @@ impl Database {
         conn.execute(
             r#"
             INSERT INTO accounts (
-              id, name, email, provider, auth_type,
+              id, name, label, email, provider, auth_type,
               imap_host, imap_port, imap_tls,
               smtp_host, smtp_port, smtp_tls, created_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
             "#,
             params![
                 account.id.to_string(),
                 account.name,
+                account.label,
                 account.email,
                 provider_to_str(&account.provider),
                 auth_to_str(&account.auth_type),
@@ -88,7 +89,7 @@ impl Database {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, email, provider, auth_type,
+            SELECT id, name, label, email, provider, auth_type,
                    imap_host, imap_port, imap_tls,
                    smtp_host, smtp_port, smtp_tls, created_at
             FROM accounts
@@ -99,16 +100,17 @@ impl Database {
             Ok(AccountDto {
                 id: parse_uuid(row.get::<_, String>(0)?)?,
                 name: row.get(1)?,
-                email: row.get(2)?,
-                provider: parse_provider(&row.get::<_, String>(3)?),
-                auth_type: parse_auth(&row.get::<_, String>(4)?),
-                imap_host: row.get(5)?,
-                imap_port: row.get::<_, i64>(6)? as u16,
-                imap_tls: row.get::<_, i64>(7)? != 0,
-                smtp_host: row.get(8)?,
-                smtp_port: row.get::<_, i64>(9)? as u16,
-                smtp_tls: row.get::<_, i64>(10)? != 0,
-                created_at: row.get(11)?,
+                label: row.get(2)?,
+                email: row.get(3)?,
+                provider: parse_provider(&row.get::<_, String>(4)?),
+                auth_type: parse_auth(&row.get::<_, String>(5)?),
+                imap_host: row.get(6)?,
+                imap_port: row.get::<_, i64>(7)? as u16,
+                imap_tls: row.get::<_, i64>(8)? != 0,
+                smtp_host: row.get(9)?,
+                smtp_port: row.get::<_, i64>(10)? as u16,
+                smtp_tls: row.get::<_, i64>(11)? != 0,
+                created_at: row.get(12)?,
             })
         })?;
         let mut out = Vec::new();
@@ -122,7 +124,7 @@ impl Database {
         let conn = self.conn.lock();
         conn.query_row(
             r#"
-            SELECT id, name, email, provider, auth_type,
+            SELECT id, name, label, email, provider, auth_type,
                    imap_host, imap_port, imap_tls,
                    smtp_host, smtp_port, smtp_tls, created_at
             FROM accounts WHERE id = ?1
@@ -132,16 +134,17 @@ impl Database {
                 Ok(AccountRecord {
                     id: parse_uuid(row.get::<_, String>(0)?)?,
                     name: row.get(1)?,
-                    email: row.get(2)?,
-                    provider: parse_provider(&row.get::<_, String>(3)?),
-                    auth_type: parse_auth(&row.get::<_, String>(4)?),
-                    imap_host: row.get(5)?,
-                    imap_port: row.get::<_, i64>(6)? as u16,
-                    imap_tls: row.get::<_, i64>(7)? != 0,
-                    smtp_host: row.get(8)?,
-                    smtp_port: row.get::<_, i64>(9)? as u16,
-                    smtp_tls: row.get::<_, i64>(10)? != 0,
-                    created_at: row.get(11)?,
+                    label: row.get(2)?,
+                    email: row.get(3)?,
+                    provider: parse_provider(&row.get::<_, String>(4)?),
+                    auth_type: parse_auth(&row.get::<_, String>(5)?),
+                    imap_host: row.get(6)?,
+                    imap_port: row.get::<_, i64>(7)? as u16,
+                    imap_tls: row.get::<_, i64>(8)? != 0,
+                    smtp_host: row.get(9)?,
+                    smtp_port: row.get::<_, i64>(10)? as u16,
+                    smtp_tls: row.get::<_, i64>(11)? != 0,
+                    created_at: row.get(12)?,
                 })
             },
         )
@@ -162,7 +165,7 @@ impl Database {
         let conn = self.conn.lock();
         conn.query_row(
             r#"
-            SELECT id, name, email, provider, auth_type,
+            SELECT id, name, label, email, provider, auth_type,
                    imap_host, imap_port, imap_tls,
                    smtp_host, smtp_port, smtp_tls, created_at
             FROM accounts WHERE lower(email) = lower(?1)
@@ -172,16 +175,17 @@ impl Database {
                 Ok(AccountRecord {
                     id: parse_uuid(row.get::<_, String>(0)?)?,
                     name: row.get(1)?,
-                    email: row.get(2)?,
-                    provider: parse_provider(&row.get::<_, String>(3)?),
-                    auth_type: parse_auth(&row.get::<_, String>(4)?),
-                    imap_host: row.get(5)?,
-                    imap_port: row.get::<_, i64>(6)? as u16,
-                    imap_tls: row.get::<_, i64>(7)? != 0,
-                    smtp_host: row.get(8)?,
-                    smtp_port: row.get::<_, i64>(9)? as u16,
-                    smtp_tls: row.get::<_, i64>(10)? != 0,
-                    created_at: row.get(11)?,
+                    label: row.get(2)?,
+                    email: row.get(3)?,
+                    provider: parse_provider(&row.get::<_, String>(4)?),
+                    auth_type: parse_auth(&row.get::<_, String>(5)?),
+                    imap_host: row.get(6)?,
+                    imap_port: row.get::<_, i64>(7)? as u16,
+                    imap_tls: row.get::<_, i64>(8)? != 0,
+                    smtp_host: row.get(9)?,
+                    smtp_port: row.get::<_, i64>(10)? as u16,
+                    smtp_tls: row.get::<_, i64>(11)? != 0,
+                    created_at: row.get(12)?,
                 })
             },
         )
@@ -195,20 +199,22 @@ impl Database {
             r#"
             UPDATE accounts SET
               name = ?2,
-              email = ?3,
-              provider = ?4,
-              auth_type = ?5,
-              imap_host = ?6,
-              imap_port = ?7,
-              imap_tls = ?8,
-              smtp_host = ?9,
-              smtp_port = ?10,
-              smtp_tls = ?11
+              label = ?3,
+              email = ?4,
+              provider = ?5,
+              auth_type = ?6,
+              imap_host = ?7,
+              imap_port = ?8,
+              imap_tls = ?9,
+              smtp_host = ?10,
+              smtp_port = ?11,
+              smtp_tls = ?12
             WHERE id = ?1
             "#,
             params![
                 account.id.to_string(),
                 account.name,
+                account.label,
                 account.email,
                 provider_to_str(&account.provider),
                 auth_to_str(&account.auth_type),
@@ -2377,6 +2383,44 @@ impl Database {
         Ok(())
     }
 
+    /// Delete a calendar collection and its local events.
+    /// Refuses to delete the last remaining calendar.
+    pub fn delete_calendar_collection(&self, id: Uuid) -> DbResult<()> {
+        let collections = self.list_calendar_collections()?;
+        let Some(target) = collections.iter().find(|c| c.id == id) else {
+            return Err(DbError::NotFound(format!("calendar collection {id}")));
+        };
+        if collections.len() <= 1 {
+            return Err(DbError::Invalid(
+                "cannot delete the last calendar".into(),
+            ));
+        }
+        let was_default = target.is_default;
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM calendar_events WHERE collection_id = ?1",
+            params![id.to_string()],
+        )?;
+        let changed = conn.execute(
+            "DELETE FROM calendar_collections WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("calendar collection {id}")));
+        }
+        drop(conn);
+        if was_default {
+            if let Some(next) = self
+                .list_calendar_collections()?
+                .into_iter()
+                .next()
+            {
+                self.set_default_calendar_collection(next.id)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn list_calendar_collections(&self) -> DbResult<Vec<CalendarCollectionDto>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
@@ -3635,6 +3679,7 @@ mod tests {
         AccountRecord {
             id: Uuid::new_v4(),
             name: "Work".into(),
+            label: String::new(),
             email: "user@example.com".into(),
             provider: MailProvider::Generic,
             auth_type: AuthType::Password,

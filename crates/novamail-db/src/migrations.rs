@@ -337,6 +337,10 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_attachments_content_id
       ON attachments(message_id, content_id);
     "#,
+    // v11 — optional sidebar nickname for accounts
+    r#"
+    ALTER TABLE accounts ADD COLUMN label TEXT NOT NULL DEFAULT '';
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> DbResult<()> {
@@ -389,7 +393,7 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 10);
+        assert_eq!(count, 11);
         let attachments: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'",

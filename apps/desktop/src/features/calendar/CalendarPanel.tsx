@@ -20,7 +20,7 @@ import { useT } from "@/shared/i18n/useT";
 import { useUiStore } from "@/shared/store/uiStore";
 
 type ViewMode = "month" | "week" | "day";
-type PanelTab = "schedule" | "inbox" | "manage";
+type PanelTab = "schedule" | "inbox" | "tasks" | "manage";
 
 const REMINDER_OPTIONS = [0, 5, 15, 30, 60] as const;
 const COLOR_PALETTE = [
@@ -64,6 +64,8 @@ export function CalendarPanel() {
     { href: string; displayName: string }[]
   >([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTaskTitle, setEditingTaskTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [draft, setDraft] = useState<EventDraft | null>(null);
@@ -260,6 +262,80 @@ export function CalendarPanel() {
     }
   };
 
+  const createTask = async () => {
+    const title = newTaskTitle.trim();
+    if (!title) return;
+    try {
+      await api.calendarTasksUpsert({
+        title,
+        dueAt: Math.floor(Date.now() / 1000) + 86400,
+      });
+      setNewTaskTitle("");
+      setStatus(t("calendarTaskSaved"));
+      await refresh();
+    } catch (err) {
+      setError((err as AppError).message);
+    }
+  };
+
+  const toggleTaskCompleted = async (task: CalendarTaskDto) => {
+    try {
+      await api.calendarTasksUpsert({
+        id: task.id,
+        title: task.title,
+        dueAt: task.dueAt,
+        completed: !task.completed,
+        notes: task.notes,
+      });
+      await refresh();
+    } catch (err) {
+      setError((err as AppError).message);
+    }
+  };
+
+  const beginRenameTask = (task: CalendarTaskDto) => {
+    setEditingTaskId(task.id);
+    setEditingTaskTitle(task.title);
+  };
+
+  const saveRenameTask = async (task: CalendarTaskDto) => {
+    const title = editingTaskTitle.trim();
+    if (!title || title === task.title) {
+      setEditingTaskId(null);
+      setEditingTaskTitle("");
+      return;
+    }
+    try {
+      await api.calendarTasksUpsert({
+        id: task.id,
+        title,
+        dueAt: task.dueAt,
+        completed: task.completed,
+        notes: task.notes,
+      });
+      setEditingTaskId(null);
+      setEditingTaskTitle("");
+      setStatus(t("calendarTaskSaved"));
+      await refresh();
+    } catch (err) {
+      setError((err as AppError).message);
+    }
+  };
+
+  const deleteTask = async (id: string) => {
+    try {
+      await api.calendarTasksDelete(id);
+      if (editingTaskId === id) {
+        setEditingTaskId(null);
+        setEditingTaskTitle("");
+      }
+      setStatus(t("calendarTaskDeleted"));
+      await refresh();
+    } catch (err) {
+      setError((err as AppError).message);
+    }
+  };
+
   const [conflictPrompt, setConflictPrompt] = useState<{
     primary: TimedCommit;
     push: Array<{ id: string; startsAt: number; endsAt: number; title: string }>;
@@ -371,6 +447,12 @@ export function CalendarPanel() {
                       ? `${t("calendarInbox")} · ${invites.length}`
                       : t("calendarInbox"),
                   ],
+                  [
+                    "tasks",
+                    tasks.filter((task) => !task.completed).length
+                      ? `${t("calendarTasksTitle")} · ${tasks.filter((task) => !task.completed).length}`
+                      : t("calendarTasksTitle"),
+                  ],
                   ["manage", t("calendarManage")],
                 ] as const
               ).map(([key, label]) => (
@@ -457,7 +539,7 @@ export function CalendarPanel() {
         {tab === "schedule" ? (
           <div
             key={`${view}-${range.from}`}
-            className="nova-fade-in grid gap-6 xl:grid-cols-[1fr_240px]"
+            className={`nova-fade-in grid gap-6 ${collections.some((c) => c.isVisible) ? "xl:grid-cols-[1fr_220px]" : ""}`}
           >
             <div className="min-w-0">
               {view === "month" ? (
@@ -647,92 +729,8 @@ export function CalendarPanel() {
               ) : null}
             </div>
 
-            <aside className="space-y-4">
-              <section>
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--nova-ink-muted)]">
-                  {t("calendarTasksTitle")}
-                </h2>
-                <div className="mb-2 flex gap-2">
-                  <Input
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder={t("taskTitle")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newTaskTitle.trim()) {
-                        void api
-                          .calendarTasksUpsert({
-                            title: newTaskTitle.trim(),
-                            dueAt: Math.floor(Date.now() / 1000) + 86400,
-                          })
-                          .then(() => {
-                            setNewTaskTitle("");
-                            return refresh();
-                          })
-                          .catch((err) =>
-                            setError((err as AppError).message),
-                          );
-                      }
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      if (!newTaskTitle.trim()) return;
-                      void api
-                        .calendarTasksUpsert({
-                          title: newTaskTitle.trim(),
-                          dueAt: Math.floor(Date.now() / 1000) + 86400,
-                        })
-                        .then(() => {
-                          setNewTaskTitle("");
-                          return refresh();
-                        })
-                        .catch((err) => setError((err as AppError).message));
-                    }}
-                  >
-                    {t("add")}
-                  </Button>
-                </div>
-                <ul className="space-y-1.5">
-                  {tasks.slice(0, 12).map((task) => (
-                    <li
-                      key={task.id}
-                      className="flex items-start gap-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={task.completed}
-                        onChange={() => {
-                          void api
-                            .calendarTasksUpsert({
-                              id: task.id,
-                              title: task.title,
-                              dueAt: task.dueAt,
-                              completed: !task.completed,
-                              notes: task.notes,
-                            })
-                            .then(refresh)
-                            .catch((err) =>
-                              setError((err as AppError).message),
-                            );
-                        }}
-                      />
-                      <span
-                        className={
-                          task.completed
-                            ? "text-[var(--nova-ink-muted)] line-through"
-                            : undefined
-                        }
-                      >
-                        {task.title}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-              {collections.length > 0 ? (
+            {collections.some((c) => c.isVisible) ? (
+              <aside className="space-y-4">
                 <section>
                   <h2 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--nova-ink-muted)]">
                     {t("calendarManageTitle")}
@@ -759,8 +757,8 @@ export function CalendarPanel() {
                       ))}
                   </ul>
                 </section>
-              ) : null}
-            </aside>
+              </aside>
+            ) : null}
           </div>
         ) : null}
 
@@ -818,6 +816,118 @@ export function CalendarPanel() {
                   </div>
                 </article>
               ))
+            )}
+          </div>
+        ) : null}
+
+        {tab === "tasks" ? (
+          <div className="nova-slide-in mx-auto max-w-xl space-y-4">
+            <div>
+              <h2 className="font-[family-name:var(--nova-font-display)] text-2xl tracking-tight">
+                {t("calendarTasksTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">
+                {t("calendarTasksHint")}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder={t("taskTitle")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createTask();
+                }}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void createTask()}
+              >
+                {t("add")}
+              </Button>
+            </div>
+            {tasks.length === 0 ? (
+              <p className="text-sm text-[var(--nova-ink-muted)]">
+                {t("calendarTasksEmpty")}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {tasks.map((task) => {
+                  const renaming = editingTaskId === task.id;
+                  return (
+                    <li
+                      key={task.id}
+                      className="flex items-start gap-3 rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_90%,transparent)] px-4 py-3"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1.5"
+                        checked={task.completed}
+                        onChange={() => void toggleTaskCompleted(task)}
+                        aria-label={task.title}
+                      />
+                      <div className="min-w-0 flex-1">
+                        {renaming ? (
+                          <Input
+                            autoFocus
+                            value={editingTaskTitle}
+                            onChange={(e) =>
+                              setEditingTaskTitle(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveRenameTask(task);
+                              } else if (e.key === "Escape") {
+                                setEditingTaskId(null);
+                                setEditingTaskTitle("");
+                              }
+                            }}
+                            onBlur={() => void saveRenameTask(task)}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className={`block w-full truncate text-left text-sm ${
+                              task.completed
+                                ? "text-[var(--nova-ink-muted)] line-through"
+                                : "text-[var(--nova-ink)]"
+                            }`}
+                            onClick={() => beginRenameTask(task)}
+                            title={t("calendarTaskRename")}
+                          >
+                            {task.title}
+                          </button>
+                        )}
+                        {task.dueAt != null ? (
+                          <p className="mt-1 text-xs text-[var(--nova-ink-muted)]">
+                            {formatDateTime(task.dueAt, locale)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        {!renaming ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => beginRenameTask(task)}
+                          >
+                            {t("calendarTaskRename")}
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void deleteTask(task.id)}
+                        >
+                          {t("delete")}
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         ) : null}
@@ -908,6 +1018,33 @@ export function CalendarPanel() {
                         {t("calendarSetMain")}
                       </Button>
                     ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={collections.length <= 1}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            t("calendarDeleteConfirm", {
+                              name: col.displayName,
+                            }),
+                          )
+                        ) {
+                          return;
+                        }
+                        void api
+                          .calendarCollectionsDelete(col.id)
+                          .then(() => {
+                            setStatus(t("calendarDeleted"));
+                            return refresh();
+                          })
+                          .catch((err) =>
+                            setError((err as AppError).message),
+                          );
+                      }}
+                    >
+                      {t("delete")}
+                    </Button>
                   </li>
                 ))}
               </ul>

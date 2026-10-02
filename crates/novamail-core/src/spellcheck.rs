@@ -142,6 +142,135 @@ fn user_hunspell_dir() -> PathBuf {
         .join("hunspell")
 }
 
+fn user_enchant_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("enchant")
+}
+
+/// Enchant personal word list path (`~/.config/enchant/<lang>.dic`).
+fn personal_dict_path(code: &str) -> PathBuf {
+    user_enchant_dir().join(format!("{code}.dic"))
+}
+
+fn normalize_lang_code(lang: &str) -> String {
+    if lang.contains('_') {
+        lang.to_string()
+    } else if lang == "de" {
+        "de_DE".into()
+    } else if lang == "en" {
+        "en_US".into()
+    } else {
+        lang.to_string()
+    }
+}
+
+/// Ensure Enchant personal dictionaries exist so WebKit "Learn" can write.
+pub fn ensure_personal_dictionaries(languages: &[String]) -> CoreResult<()> {
+    let dir = user_enchant_dir();
+    fs::create_dir_all(&dir)
+        .map_err(|e| CoreError::Message(format!("cannot create enchant dir: {e}")))?;
+    // Also ensure hunspell dir exists for installed packs.
+    fs::create_dir_all(user_hunspell_dir())
+        .map_err(|e| CoreError::Message(format!("cannot create hunspell dir: {e}")))?;
+    let mut codes = HashSet::new();
+    for lang in languages {
+        let code = normalize_lang_code(lang);
+        codes.insert(code.clone());
+        let short = code.split('_').next().unwrap_or(&code).to_string();
+        if short != code {
+            codes.insert(short);
+        }
+    }
+    for code in codes {
+        let path = personal_dict_path(&code);
+        if !path.exists() {
+            fs::write(&path, b"").map_err(|e| {
+                CoreError::Message(format!("cannot create personal dict {}: {e}", path.display()))
+            })?;
+            info!(path = %path.display(), "created Enchant personal dictionary");
+        }
+        // Make sure the file is writable (Learn is disabled when PWL is read-only).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(&path) {
+                let mut perms = meta.permissions();
+                let mode = perms.mode();
+                if mode & 0o200 == 0 {
+                    perms.set_mode(mode | 0o600);
+                    let _ = fs::set_permissions(&path, perms);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Add a word to the Enchant personal dictionary and in-memory cache.
+pub fn spellcheck_learn_word(word: &str, lang: &str) -> CoreResult<()> {
+    let trimmed = word.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_whitespace()) {
+        return Err(CoreError::Message("invalid word for dictionary".into()));
+    }
+    let code = normalize_lang_code(lang);
+    ensure_personal_dictionaries(&[code.clone()])?;
+    let path = personal_dict_path(&code);
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let already = existing.lines().any(|line| line.trim() == trimmed);
+    if !already {
+        let mut out = existing;
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(trimmed);
+        out.push('\n');
+        fs::write(&path, out)
+            .map_err(|e| CoreError::Message(format!("write personal dict failed: {e}")))?;
+    }
+    // Keep short-code PWL in sync (some Enchant backends look up `de.dic`).
+    let short = code.split('_').next().unwrap_or(&code);
+    if short != code {
+        let short_path = personal_dict_path(short);
+        let short_existing = fs::read_to_string(&short_path).unwrap_or_default();
+        if !short_existing.lines().any(|line| line.trim() == trimmed) {
+            let mut out = short_existing;
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+            out.push('\n');
+            let _ = fs::write(&short_path, out);
+        }
+    }
+    // Invalidate cache so suggest/correct pick up the new word.
+    if let Some(lock) = DICT_CACHE.get() {
+        if let Ok(mut guard) = lock.lock() {
+            *guard = None;
+        }
+    }
+    info!(word = %trimmed, code = %code, "learned spelling word");
+    Ok(())
+}
+
+fn load_personal_words(code: &str) -> HashSet<String> {
+    let mut words = HashSet::new();
+    for path in [
+        personal_dict_path(code),
+        personal_dict_path(code.split('_').next().unwrap_or(code)),
+    ] {
+        if let Ok(raw) = fs::read_to_string(&path) {
+            for line in raw.lines() {
+                let w = line.trim();
+                if !w.is_empty() && w.len() <= 48 {
+                    words.insert(w.to_string());
+                }
+            }
+        }
+    }
+    words
+}
+
 fn system_hunspell_dirs() -> Vec<PathBuf> {
     vec![
         PathBuf::from("/usr/share/hunspell"),
@@ -319,6 +448,12 @@ fn load_dict(code: &str) -> CoreResult<DictCache> {
             .entry(word.to_lowercase())
             .or_insert_with(|| word.to_string());
     }
+    for word in load_personal_words(code) {
+        words.insert(word.clone());
+        lower_index
+            .entry(word.to_lowercase())
+            .or_insert(word);
+    }
     Ok(DictCache {
         code: code.to_string(),
         words,
@@ -395,6 +530,7 @@ pub fn spellcheck_suggest(word: &str, lang: &str) -> CoreResult<SpellSuggestResu
             word: trimmed.into(),
             correct: true,
             suggestions: vec![],
+            autocorrect: None,
         });
     }
     // Skip all-caps acronyms / numbers.
@@ -405,17 +541,10 @@ pub fn spellcheck_suggest(word: &str, lang: &str) -> CoreResult<SpellSuggestResu
             word: trimmed.into(),
             correct: true,
             suggestions: vec![],
+            autocorrect: None,
         });
     }
-    let code = if lang.contains('_') {
-        lang.to_string()
-    } else if lang == "de" {
-        "de_DE".into()
-    } else if lang == "en" {
-        "en_US".into()
-    } else {
-        lang.to_string()
-    };
+    let code = normalize_lang_code(lang);
 
     with_dict(&code, |dict| {
         let lower = trimmed.to_lowercase();
@@ -424,6 +553,7 @@ pub fn spellcheck_suggest(word: &str, lang: &str) -> CoreResult<SpellSuggestResu
                 word: trimmed.into(),
                 correct: true,
                 suggestions: vec![],
+                autocorrect: None,
             };
         }
         let prefix: String = lower.chars().take(2).collect();
@@ -441,11 +571,18 @@ pub fn spellcheck_suggest(word: &str, lang: &str) -> CoreResult<SpellSuggestResu
         }
         scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.len().cmp(&b.1.len())));
         scored.dedup_by(|a, b| a.1.eq_ignore_ascii_case(&b.1));
-        let suggestions = scored.into_iter().take(5).map(|(_, w)| w).collect();
+        let best_distance = scored.first().map(|(d, _)| *d);
+        let suggestions: Vec<String> = scored.into_iter().take(5).map(|(_, w)| w).collect();
+        // Autocorrect only for high-confidence single-edit mistakes on longer words.
+        let autocorrect = match (best_distance, suggestions.first()) {
+            (Some(1), Some(best)) if trimmed.chars().count() >= 4 => Some(best.clone()),
+            _ => None,
+        };
         SpellSuggestResult {
             word: trimmed.into(),
             correct: false,
             suggestions,
+            autocorrect,
         }
     })
 }

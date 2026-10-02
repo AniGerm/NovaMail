@@ -23,6 +23,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [provider, setProvider] = useState<MailProvider>("generic");
   const [name, setName] = useState("");
+  const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [imapHost, setImapHost] = useState("");
@@ -87,6 +88,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
     setError(null);
     const request: AddAccountPasswordRequest = {
       name: name || email,
+      label: label.trim(),
       email,
       password,
       provider,
@@ -127,6 +129,7 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
       const tokens = await api.oauthExchangeCode(provider, callback.code);
       await api.accountsAddOAuth({
         name: name || email,
+        label: label.trim(),
         email,
         provider,
         accessToken: tokens.tokens.accessToken,
@@ -193,6 +196,18 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           <label className="grid gap-1 text-sm">
             <span>{t("displayName")}</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+
+          <label className="grid gap-1 text-sm">
+            <span>{t("sidebarName")}</span>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={t("sidebarNameHint")}
+            />
+            <span className="text-xs text-[var(--nova-ink-muted)]">
+              {t("sidebarNameHint")}
+            </span>
           </label>
 
           <label className="grid gap-1 text-sm">

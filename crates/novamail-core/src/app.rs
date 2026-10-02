@@ -48,8 +48,8 @@ use novamail_ipc::{
 };
 use novamail_mail::{
     append_sent_remote, archive_remote, delete_remote, execute_delete_remote, move_remote,
-    offload_message_remote, plan_delete_remote, probe_account_quota, save_draft_remote,
-    set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
+    offload_message_remote, plan_delete_remote, probe_account_quota, refetch_message_content,
+    save_draft_remote, set_flags_remote, OAuthConfig, Pop3Client, SmtpClient, SyncEngine,
 };
 use novamail_rules::{evaluate_rules, Action, RuleDefinition, RuleMatchContext};
 use novamail_search::SearchService;
@@ -322,6 +322,7 @@ impl AppState {
         let account = AccountRecord {
             id,
             name: request.name,
+            label: request.label,
             email: request.email,
             provider: request.provider,
             auth_type: novamail_ipc::AuthType::Password,
@@ -343,20 +344,7 @@ impl AppState {
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
 
-        Ok(AccountDto {
-            id: account.id,
-            name: account.name,
-            email: account.email,
-            provider: account.provider,
-            auth_type: account.auth_type,
-            imap_host: account.imap_host,
-            imap_port: account.imap_port,
-            imap_tls: account.imap_tls,
-            smtp_host: account.smtp_host,
-            smtp_port: account.smtp_port,
-            smtp_tls: account.smtp_tls,
-            created_at: account.created_at,
-        })
+        Ok(account_to_dto(&account))
     }
 
     pub async fn add_account_oauth(
@@ -367,6 +355,7 @@ impl AppState {
         let account = AccountRecord {
             id,
             name: request.name,
+            label: request.label,
             email: request.email,
             provider: request.provider,
             auth_type: novamail_ipc::AuthType::OAuth2,
@@ -392,26 +381,14 @@ impl AppState {
         self.secrets.store_credentials(id, &credentials)?;
         self.db.insert_account(&account)?;
 
-        Ok(AccountDto {
-            id: account.id,
-            name: account.name,
-            email: account.email,
-            provider: account.provider,
-            auth_type: account.auth_type,
-            imap_host: account.imap_host,
-            imap_port: account.imap_port,
-            imap_tls: account.imap_tls,
-            smtp_host: account.smtp_host,
-            smtp_port: account.smtp_port,
-            smtp_tls: account.smtp_tls,
-            created_at: account.created_at,
-        })
+        Ok(account_to_dto(&account))
     }
 
     pub async fn update_account(&self, request: UpdateAccountRequest) -> CoreResult<AccountDto> {
         let existing = self.db.get_account(request.id)?;
         let mut account = existing.clone();
         account.name = request.name;
+        account.label = request.label;
         account.email = request.email;
         account.provider = request.provider;
         account.imap_host = request.imap_host;
@@ -461,20 +438,7 @@ impl AppState {
         }
         self.db.update_account(&account)?;
 
-        Ok(AccountDto {
-            id: account.id,
-            name: account.name,
-            email: account.email,
-            provider: account.provider,
-            auth_type: account.auth_type,
-            imap_host: account.imap_host,
-            imap_port: account.imap_port,
-            imap_tls: account.imap_tls,
-            smtp_host: account.smtp_host,
-            smtp_port: account.smtp_port,
-            smtp_tls: account.smtp_tls,
-            created_at: account.created_at,
-        })
+        Ok(account_to_dto(&account))
     }
 
     pub fn remove_account(&self, account_id: Uuid) -> CoreResult<()> {
@@ -1059,7 +1023,174 @@ impl AppState {
 
     pub fn open_attachment_path(&self, attachment_id: Uuid) -> CoreResult<String> {
         let attachment = self.db.get_attachment(attachment_id)?;
-        Ok(attachment.path)
+        let path = std::path::PathBuf::from(&attachment.path);
+        if path.is_file() {
+            return Ok(std::fs::canonicalize(&path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned());
+        }
+        Err(CoreError::Message(format!(
+            "attachment file missing on disk: {} ({})",
+            attachment.filename, attachment.path
+        )))
+    }
+
+    /// Ensure the attachment bytes exist locally (re-fetch from IMAP if needed), then return path.
+    pub async fn ensure_attachment_path(&self, attachment_id: Uuid) -> CoreResult<String> {
+        let attachment = self.db.get_attachment(attachment_id)?;
+        let path = std::path::PathBuf::from(&attachment.path);
+        if path.is_file() {
+            tracing::info!(
+                attachment_id = %attachment_id,
+                path = %path.display(),
+                "opening attachment"
+            );
+            return Ok(std::fs::canonicalize(&path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned());
+        }
+        tracing::warn!(
+            attachment_id = %attachment_id,
+            message_id = %attachment.message_id,
+            path = %attachment.path,
+            "attachment missing; refetching message from IMAP"
+        );
+        let filename = attachment.filename.clone();
+        let message_id = attachment.message_id;
+        refetch_message_content(
+            &self.db,
+            &self.secrets,
+            &self.paths.blobs_dir,
+            message_id,
+        )
+        .await
+        .map_err(|e| CoreError::Message(format!("could not refetch attachment: {e}")))?;
+        let refreshed = self.db.list_attachments(message_id)?;
+        let found = refreshed
+            .into_iter()
+            .find(|a| a.filename == filename)
+            .ok_or_else(|| {
+                CoreError::Message(format!(
+                    "attachment '{filename}' still missing after IMAP refetch"
+                ))
+            })?;
+        let path = std::path::PathBuf::from(&found.path);
+        if !path.is_file() {
+            return Err(CoreError::Message(format!(
+                "attachment file not written: {}",
+                found.path
+            )));
+        }
+        tracing::info!(
+            attachment_id = %found.id,
+            path = %path.display(),
+            "attachment restored from IMAP"
+        );
+        Ok(std::fs::canonicalize(&path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned())
+    }
+
+    /// Reveal the attachment's folder in the system file manager.
+    pub async fn reveal_attachment(&self, attachment_id: Uuid) -> CoreResult<String> {
+        let path = self.ensure_attachment_path(attachment_id).await?;
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.clone());
+        Ok(parent)
+    }
+
+    /// Write an exported message rendering into the user's Downloads folder.
+    pub fn export_message_bytes(
+        &self,
+        message_id: Uuid,
+        format: &str,
+        bytes: Vec<u8>,
+    ) -> CoreResult<String> {
+        let detail = self.db.get_message(message_id)?;
+        let stem = sanitize_export_stem(&detail.summary.subject);
+        let ext = match format {
+            "pdf" | "jpeg" | "jpg" | "tiff" | "tif" | "html" => {
+                if format == "jpg" {
+                    "jpeg"
+                } else if format == "tif" {
+                    "tiff"
+                } else {
+                    format
+                }
+            }
+            other => {
+                return Err(CoreError::Message(format!("unsupported export format: {other}")));
+            }
+        };
+        let dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| CoreError::Message(format!("cannot create export dir: {e}")))?;
+        let path = unique_export_path(&dir, stem, ext);
+        std::fs::write(&path, bytes)
+            .map_err(|e| CoreError::Message(format!("write export failed: {e}")))?;
+        tracing::info!(path = %path.display(), %ext, "message exported");
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    /// Build a simple text PDF for the message (subject + plaintext body).
+    pub fn export_message_pdf(&self, message_id: Uuid) -> CoreResult<String> {
+        let detail = self.db.get_message(message_id)?;
+        let body = detail
+            .body_text
+            .clone()
+            .unwrap_or_else(|| {
+                detail
+                    .body_html
+                    .as_deref()
+                    .map(strip_html_rough)
+                    .unwrap_or_else(|| detail.summary.snippet.clone())
+            });
+        let pdf = build_simple_pdf(
+            &detail.summary.subject,
+            &format!(
+                "From: {}\nDate: {}\n\n{}",
+                detail.summary.from.email,
+                detail.summary.date,
+                body
+            ),
+        );
+        self.export_message_bytes(message_id, "pdf", pdf)
+    }
+
+    /// Export the message as a standalone HTML file into Downloads.
+    pub fn export_message_html(&self, message_id: Uuid) -> CoreResult<String> {
+        let detail = self.db.get_message(message_id)?;
+        let subject = html_escape_attr(&detail.summary.subject);
+        let from = html_escape_attr(&detail.summary.from.email);
+        let date = detail.summary.date;
+        let body_inner = if let Some(html) = detail.body_html.as_deref() {
+            html.to_string()
+        } else {
+            let text = detail
+                .body_text
+                .clone()
+                .unwrap_or_else(|| detail.summary.snippet.clone());
+            format!(
+                "<pre style=\"white-space:pre-wrap;font:14px/1.5 sans-serif\">{}</pre>",
+                html_escape_text(&text)
+            )
+        };
+        let doc = format!(
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{subject}</title></head>\
+             <body style=\"margin:2rem;font:15px/1.55 system-ui,sans-serif;color:#111\">\
+             <h1 style=\"font-size:1.4rem\">{subject}</h1>\
+             <p style=\"color:#555\">From: {from}<br>Date: {date}</p>\
+             <hr style=\"border:none;border-top:1px solid #ddd;margin:1.25rem 0\">\
+             {body_inner}</body></html>"
+        );
+        self.export_message_bytes(message_id, "html", doc.into_bytes())
     }
 
     pub fn list_contacts(&self, query: Option<String>) -> CoreResult<Vec<ContactDto>> {
@@ -1100,6 +1231,14 @@ impl AppState {
         lang: String,
     ) -> CoreResult<novamail_ipc::SpellSuggestResult> {
         crate::spellcheck::spellcheck_suggest(&word, &lang)
+    }
+
+    pub fn spellcheck_learn_word(&self, word: String, lang: String) -> CoreResult<()> {
+        crate::spellcheck::spellcheck_learn_word(&word, &lang)
+    }
+
+    pub fn spellcheck_ensure_personal_dicts(&self, languages: &[String]) -> CoreResult<()> {
+        crate::spellcheck::ensure_personal_dictionaries(languages)
     }
 
     pub fn upsert_contact(&self, request: UpsertContactRequest) -> CoreResult<ContactDto> {
@@ -1391,6 +1530,7 @@ impl AppState {
             let record = AccountRecord {
                 id,
                 name: account.name,
+                label: account.label,
                 email,
                 provider: account.provider,
                 auth_type: account.auth_type,
@@ -3061,6 +3201,13 @@ impl AppState {
             .ok_or_else(|| CoreError::Message("calendar collection not found".into()))
     }
 
+    pub fn delete_calendar_collection(&self, id: Uuid) -> CoreResult<()> {
+        self.db.delete_calendar_collection(id)?;
+        // Keep at least one default calendar available.
+        let _ = self.ensure_calendar_ready()?;
+        Ok(())
+    }
+
     pub async fn sync_calendar_account(&self, id: Uuid) -> CoreResult<(u32, u32)> {
         let account = self
             .db
@@ -3589,6 +3736,171 @@ impl AppState {
         })
         .await
     }
+}
+
+fn account_to_dto(account: &novamail_db::models::AccountRecord) -> AccountDto {
+    AccountDto {
+        id: account.id,
+        name: account.name.clone(),
+        label: account.label.clone(),
+        email: account.email.clone(),
+        provider: account.provider.clone(),
+        auth_type: account.auth_type.clone(),
+        imap_host: account.imap_host.clone(),
+        imap_port: account.imap_port,
+        imap_tls: account.imap_tls,
+        smtp_host: account.smtp_host.clone(),
+        smtp_port: account.smtp_port,
+        smtp_tls: account.smtp_tls,
+        created_at: account.created_at,
+    }
+}
+
+fn html_escape_text(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn html_escape_attr(s: &str) -> String {
+    html_escape_text(s).replace('"', "&quot;")
+}
+
+fn sanitize_export_stem(subject: &str) -> String {
+    let trimmed = subject.trim();
+    let base = if trimmed.is_empty() {
+        "message"
+    } else {
+        trimmed
+    };
+    let mut out = String::with_capacity(base.len().min(80));
+    for ch in base.chars().take(80) {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch.is_whitespace() || ch == '.' || ch == ',' {
+            if !out.ends_with('_') {
+                out.push('_');
+            }
+        }
+    }
+    let stem = out.trim_matches('_').to_string();
+    if stem.is_empty() {
+        "message".into()
+    } else {
+        stem
+    }
+}
+
+fn unique_export_path(dir: &std::path::Path, stem: String, ext: &str) -> std::path::PathBuf {
+    let mut path = dir.join(format!("{stem}.{ext}"));
+    if !path.exists() {
+        return path;
+    }
+    for i in 2..10_000 {
+        path = dir.join(format!("{stem}-{i}.{ext}"));
+        if !path.exists() {
+            return path;
+        }
+    }
+    dir.join(format!(
+        "{stem}-{}.{ext}",
+        chrono::Utc::now().timestamp_millis()
+    ))
+}
+
+fn strip_html_rough(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Minimal single-page PDF with Helvetica text (ASCII-safe body).
+fn build_simple_pdf(title: &str, body: &str) -> Vec<u8> {
+    fn pdf_escape(s: &str) -> String {
+        s.chars()
+            .map(|c| match c {
+                '\\' => "\\\\".to_string(),
+                '(' => "\\(".to_string(),
+                ')' => "\\)".to_string(),
+                c if c.is_ascii() && !c.is_control() => c.to_string(),
+                c => format!("\\{:03o}", (c as u32).min(255)),
+            })
+            .collect()
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(title.chars().take(90).collect());
+    for paragraph in body.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            if current.is_empty() {
+                current = word.to_string();
+            } else if current.len() + 1 + word.len() <= 90 {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                lines.push(current);
+                current = word.to_string();
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+        if lines.len() >= 48 {
+            break;
+        }
+    }
+    if lines.len() > 48 {
+        lines.truncate(48);
+    }
+
+    let mut content = String::from("BT\n/F1 11 Tf\n14 TL\n50 780 Td\n");
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            content.push_str("T*\n");
+        }
+        content.push_str(&format!("({}) Tj\n", pdf_escape(line)));
+    }
+    content.push_str("ET");
+
+    let objects: Vec<String> = vec![
+        "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n".into(),
+        "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n".into(),
+        "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n".into(),
+        format!(
+            "4 0 obj<< /Length {} >>stream\n{}\nendstream\nendobj\n",
+            content.len(),
+            content
+        ),
+        "5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n".into(),
+    ];
+
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = vec![0usize];
+    for obj in &objects {
+        offsets.push(pdf.len());
+        pdf.push_str(obj);
+    }
+    let xref_pos = pdf.len();
+    pdf.push_str(&format!("xref\n0 {}\n", objects.len() + 1));
+    pdf.push_str("0000000000 65535 f \n");
+    for off in offsets.iter().skip(1) {
+        pdf.push_str(&format!("{off:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+        objects.len() + 1,
+        xref_pos
+    ));
+    pdf.into_bytes()
 }
 
 fn resolve_snooze_wake(preset: SnoozePreset, custom: Option<i64>) -> CoreResult<i64> {

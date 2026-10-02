@@ -14,17 +14,43 @@ interface SpellSuggestBarProps {
   className?: string;
 }
 
-function currentWord(text: string, caret: number): { word: string; from: number; to: number } | null {
+function isWordChar(ch: string) {
+  return /[\p{L}\p{N}'’-]/u.test(ch);
+}
+
+function currentWord(
+  text: string,
+  caret: number,
+): { word: string; from: number; to: number } | null {
   if (!text) return null;
   const safe = Math.max(0, Math.min(caret, text.length));
   let from = safe;
   let to = safe;
-  const isWord = (ch: string) => /[\p{L}\p{N}'’-]/u.test(ch);
-  while (from > 0 && isWord(text[from - 1] ?? "")) from -= 1;
-  while (to < text.length && isWord(text[to] ?? "")) to += 1;
+  while (from > 0 && isWordChar(text[from - 1] ?? "")) from -= 1;
+  while (to < text.length && isWordChar(text[to] ?? "")) to += 1;
   const word = text.slice(from, to);
   if (word.length < 2) return null;
-  // Don't suggest mid-word if user is still typing a short prefix without pause — handled by debounce.
+  return { word, from, to };
+}
+
+/** Word immediately before caret when caret sits on a boundary (space/punct). */
+function completedWordBeforeCaret(
+  text: string,
+  caret: number,
+): { word: string; from: number; to: number } | null {
+  if (!text || caret <= 0) return null;
+  const safe = Math.max(0, Math.min(caret, text.length));
+  const boundary = text[safe - 1] ?? "";
+  if (isWordChar(boundary)) return null;
+  let to = safe - 1;
+  while (to > 0 && !isWordChar(text[to - 1] ?? "") && !isWordChar(text[to] ?? "")) {
+    to -= 1;
+  }
+  if (to <= 0 || !isWordChar(text[to - 1] ?? "")) return null;
+  let from = to;
+  while (from > 0 && isWordChar(text[from - 1] ?? "")) from -= 1;
+  const word = text.slice(from, to);
+  if (word.length < 3) return null;
   return { word, from, to };
 }
 
@@ -43,7 +69,33 @@ export function SpellSuggestBar({
     from: number;
     to: number;
   } | null>(null);
+  const [learning, setLearning] = useState(false);
   const seq = useRef(0);
+  const lastAutocorrect = useRef<string>("");
+
+  // Autocorrect the previous word when the user types a boundary character.
+  useEffect(() => {
+    if (!isDesktopShell()) return;
+    const completed = completedWordBeforeCaret(text, caret);
+    if (!completed) return;
+    const key = `${completed.from}:${completed.word}`;
+    if (lastAutocorrect.current === key) return;
+    const id = ++seq.current;
+    const timer = window.setTimeout(() => {
+      void api
+        .spellcheckSuggest(completed.word, spellcheckLang)
+        .then((result) => {
+          if (id !== seq.current) return;
+          if (result.correct || !result.autocorrect) return;
+          // Guard against re-applying the same correction in a loop.
+          if (result.autocorrect === completed.word) return;
+          lastAutocorrect.current = key;
+          onApply(completed.from, completed.to, result.autocorrect);
+        })
+        .catch(() => undefined);
+    }, 40);
+    return () => window.clearTimeout(timer);
+  }, [caret, onApply, spellcheckLang, text]);
 
   useEffect(() => {
     if (!isDesktopShell()) {
@@ -87,6 +139,20 @@ export function SpellSuggestBar({
     return () => window.clearTimeout(timer);
   }, [caret, spellcheckLang, text]);
 
+  async function learnWord() {
+    if (!activeWord || learning) return;
+    setLearning(true);
+    try {
+      await api.spellcheckLearnWord(activeWord.word, spellcheckLang);
+      setSuggestions([]);
+      setActiveWord(null);
+    } catch {
+      /* keep chips; user can retry */
+    } finally {
+      setLearning(false);
+    }
+  }
+
   if (!activeWord || suggestions.length === 0) return null;
 
   return (
@@ -116,6 +182,17 @@ export function SpellSuggestBar({
           {s}
         </button>
       ))}
+      <button
+        type="button"
+        className="rounded-full border border-dashed border-[var(--nova-border)] px-2.5 py-0.5 text-sm text-[var(--nova-ink-muted)] hover:border-[var(--nova-accent)] hover:text-[var(--nova-accent)] disabled:opacity-50"
+        disabled={learning}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          void learnWord();
+        }}
+      >
+        {learning ? t("spellLearnBusy") : t("spellLearn")}
+      </button>
     </div>
   );
 }

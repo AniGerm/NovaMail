@@ -27,7 +27,7 @@ interface MessageFocusDialogProps {
   onReplySent?: () => void;
 }
 
-/** Full-size modal reading surface (same chrome pattern as Settings). */
+/** Near-fullscreen reading surface with equal inset on all sides. */
 export function MessageFocusDialog({
   open,
   message,
@@ -48,7 +48,7 @@ export function MessageFocusDialog({
       onClose={onClose}
       title={title}
       description={description}
-      className="h-[min(92vh,920px)] w-[min(1100px,96vw)] max-w-none"
+      className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none p-4 sm:p-5"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ReadingPane

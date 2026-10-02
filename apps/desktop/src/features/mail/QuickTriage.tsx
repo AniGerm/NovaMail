@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Eye, EyeOff, Inbox, Paperclip, Trash2, X } from "lucide-react";
+import { Archive, Eye, EyeOff, Inbox, Paperclip, Sparkles, Trash2, X } from "lucide-react";
 import { useKeyboardShortcuts } from "@novamail/hooks";
 import { Button, IconButton } from "@novamail/ui";
 
@@ -42,6 +42,7 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
   const [preview, setPreview] = useState<MessageDetailDto | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRef = useRef(0);
   const refreshTimer = useRef<number | null>(null);
@@ -69,6 +70,7 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
     setPreview(null);
     setPreviewOpen(false);
     setAiSummary(null);
+    setAiLoading(false);
     setError(null);
     pendingRef.current = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot on open only
@@ -86,12 +88,18 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
     if (!open || !current) return;
     let cancelled = false;
     setAiSummary(null);
+    setAiLoading(true);
     void api
       .aiMessageInsights(current.id)
       .then((insights) => {
-        if (!cancelled && insights.summary) setAiSummary(insights.summary);
+        if (!cancelled) {
+          setAiSummary(insights.summary || null);
+          setAiLoading(false);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setAiLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -261,12 +269,18 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
 
                 {aiSummary ? (
                   <div className="mt-5 rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/25 bg-[var(--nova-accent-soft)] px-4 py-3">
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
+                    <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
+                      <Sparkles size={13} aria-hidden />
                       {t("aiPreviewSummary")}
                     </p>
                     <p className="text-[15px] leading-6 text-[var(--nova-ink)]">
                       {aiSummary}
                     </p>
+                  </div>
+                ) : aiLoading ? (
+                  <div className="mt-5 flex items-center gap-2 rounded-[var(--nova-radius-md)] border border-dashed border-[var(--nova-border)] px-4 py-3 text-xs text-[var(--nova-ink-muted)]">
+                    <Sparkles size={13} className="animate-pulse" aria-hidden />
+                    {t("working")}
                   </div>
                 ) : null}
 
@@ -287,16 +301,9 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
                       </p>
                     ) : null}
                     {preview ? (
-                      preview.bodyHtml ? (
-                        <div
-                          className="nova-html-body text-[14px] leading-6 text-[var(--nova-ink)]"
-                          dangerouslySetInnerHTML={{ __html: preview.bodyHtml }}
-                        />
-                      ) : (
-                        <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
-                          {previewText || current.snippet}
-                        </div>
-                      )
+                      <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
+                        {previewText || plainPreview(current.snippet)}
+                      </div>
                     ) : (
                       <p className="text-sm text-[var(--nova-ink-muted)]">
                         {t("loadingPreview")}

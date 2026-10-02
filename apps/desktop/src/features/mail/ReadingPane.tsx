@@ -12,6 +12,10 @@ import {
   Trash2,
   Archive,
   Maximize2,
+  Share2,
+  FolderOpen,
+  Printer,
+  FileDown,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
@@ -87,6 +91,8 @@ export function ReadingPane({
   const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [attachMenuId, setAttachMenuId] = useState<string | null>(null);
   const [invitePending, setInvitePending] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
@@ -98,6 +104,8 @@ export function ReadingPane({
     setDraft("");
     setAiError(null);
     setSnoozeOpen(false);
+    setShareOpen(false);
+    setAttachMenuId(null);
     setPgpResult(null);
     setEventSuggestions([]);
     setInvitePending(false);
@@ -286,9 +294,98 @@ export function ReadingPane({
     try {
       const path = await api.attachmentsOpenPath(id);
       await openPath(path);
+      setAttachMenuId(null);
     } catch (error) {
       setAiError((error as AppError).message || t("openAttachmentFailed"));
     }
+  }
+
+  async function revealAttachment(id: string) {
+    try {
+      const folder = await api.attachmentsReveal(id);
+      await openPath(folder);
+      setAttachMenuId(null);
+    } catch (error) {
+      setAiError((error as AppError).message || t("revealAttachmentFailed"));
+    }
+  }
+
+  async function exportMessage(format: "pdf" | "html") {
+    if (!current) return;
+    try {
+      const path =
+        format === "pdf"
+          ? await api.messagesExportPdf(current.summary.id)
+          : await api.messagesExportHtml(current.summary.id);
+      await openPath(path);
+      setShareOpen(false);
+      setAiError(null);
+    } catch (error) {
+      setAiError((error as AppError).message || t("exportMessageFailed"));
+    }
+  }
+
+  function printMessage() {
+    if (!current) return;
+    setShareOpen(false);
+    const title = current.summary.subject || t("noSubject");
+    const from = `${displayName(current.summary.from)} <${current.summary.from.email}>`;
+    const bodyHtml = current.bodyHtml
+      ? current.bodyHtml
+      : `<pre style="white-space:pre-wrap;font:14px/1.5 sans-serif">${(
+          current.bodyText || current.summary.snippet || ""
+        )
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</pre>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;")}</title>
+      <style>body{font:15px/1.55 system-ui,sans-serif;color:#111;margin:1.5rem} h1{font-size:1.35rem} .meta{color:#555;margin-bottom:1rem}</style>
+      </head><body><h1>${title
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")}</h1><p class="meta">${from
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")}</p>${bodyHtml}</body></html>`;
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    if (!doc) {
+      frame.remove();
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    const cleanup = () => {
+      frame.remove();
+    };
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } finally {
+        window.setTimeout(cleanup, 1000);
+      }
+    };
+    // Some WebKit builds fire print before onload; still schedule cleanup.
+    window.setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        /* ignore */
+      }
+      window.setTimeout(cleanup, 1500);
+    }, 250);
   }
 
   return (
@@ -311,6 +408,51 @@ export function ReadingPane({
                 <Maximize2 />
               </IconButton>
             ) : null}
+            <div className="relative">
+              <IconButton
+                label={t("shareMessage")}
+                onClick={() => {
+                  setSnoozeOpen(false);
+                  setShareOpen((open) => !open);
+                }}
+              >
+                <Share2 />
+              </IconButton>
+              {shareOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-20 mt-1 min-w-[12.5rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => void exportMessage("pdf")}
+                  >
+                    <FileDown size={14} />
+                    {t("exportPdf")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => void exportMessage("html")}
+                  >
+                    <FileDown size={14} />
+                    {t("exportHtml")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => printMessage()}
+                  >
+                    <Printer size={14} />
+                    {t("printMessage")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <IconButton label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
@@ -435,17 +577,46 @@ export function ReadingPane({
             </p>
             <ul className="flex flex-wrap gap-2">
               {attachments.map((attachment) => (
-                <li key={attachment.id}>
+                <li key={attachment.id} className="relative">
                   <button
                     type="button"
                     className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
-                    onClick={() => void openAttachment(attachment.id)}
+                    onClick={() =>
+                      setAttachMenuId((id) =>
+                        id === attachment.id ? null : attachment.id,
+                      )
+                    }
                   >
                     {attachment.filename}{" "}
                     <span className="text-[var(--nova-ink-muted)]">
                       ({formatBytes(attachment.size)})
                     </span>
                   </button>
+                  {attachMenuId === attachment.id ? (
+                    <div
+                      role="menu"
+                      className="absolute left-0 top-full z-20 mt-1 min-w-[11rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        onClick={() => void openAttachment(attachment.id)}
+                      >
+                        <Share2 size={14} />
+                        {t("openWithSystem")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        onClick={() => void revealAttachment(attachment.id)}
+                      >
+                        <FolderOpen size={14} />
+                        {t("revealInFolder")}
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

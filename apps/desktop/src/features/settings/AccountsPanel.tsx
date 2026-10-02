@@ -17,6 +17,7 @@ export function AccountsPanel({
   const t = useT();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
   const [provider, setProvider] = useState<MailProvider>("generic");
   const [imapHost, setImapHost] = useState("");
@@ -35,6 +36,7 @@ export function AccountsPanel({
   useEffect(() => {
     if (!editing) return;
     setName(editing.name);
+    setLabel(editing.label ?? "");
     setEmail(editing.email);
     setProvider(editing.provider);
     setImapHost(editing.imapHost);
@@ -68,6 +70,7 @@ export function AccountsPanel({
       await api.accountsUpdate({
         id: editingId,
         name: name.trim() || email.trim(),
+        label: label.trim(),
         email: email.trim(),
         provider,
         imapHost: imapHost.trim(),
@@ -132,9 +135,15 @@ export function AccountsPanel({
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{account.name}</p>
+                  <p className="truncate font-medium">
+                    {(account.label || account.name).trim() || account.email}
+                  </p>
                   <p className="truncate text-xs text-[var(--nova-ink-muted)]">
-                    {account.email} · {account.provider} · {account.authType}
+                    {account.email}
+                    {account.label && account.label !== account.name
+                      ? ` · ${account.name}`
+                      : ""}{" "}
+                    · {account.provider} · {account.authType}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -177,6 +186,17 @@ export function AccountsPanel({
           <label className="grid gap-1">
             <span>{t("displayName")}</span>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="grid gap-1">
+            <span>{t("sidebarName")}</span>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={t("sidebarNameHint")}
+            />
+            <span className="text-xs text-[var(--nova-ink-muted)]">
+              {t("sidebarNameHint")}
+            </span>
           </label>
           <label className="grid gap-1">
             <span>{t("email")}</span>

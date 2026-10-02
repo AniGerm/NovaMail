@@ -133,6 +133,7 @@ export const api = {
     call<AccountDto>("accounts_add_password", { request }),
   accountsAddOAuth: (request: {
     name: string;
+    label?: string;
     email: string;
     provider: string;
     accessToken: string;
@@ -232,16 +233,26 @@ export const api = {
     call<AttachmentDto[]>("attachments_list", { messageId }),
   attachmentsOpenPath: (attachmentId: string) =>
     call<string>("attachments_open_path", { attachmentId }),
+  attachmentsReveal: (attachmentId: string) =>
+    call<string>("attachments_reveal", { attachmentId }),
+  messagesExportPdf: (messageId: string) =>
+    call<string>("messages_export_pdf", { messageId }),
+  messagesExportHtml: (messageId: string) =>
+    call<string>("messages_export_html", { messageId }),
   contactsList: (query?: string | null) =>
     call<ContactDto[]>("contacts_list", { query: query ?? null }),
   recipientsSuggest: (query: string, limit = 12) =>
     call<RecipientSuggestion[]>("recipients_suggest", { query, limit }),
   spellcheckStatus: () => call<SpellcheckStatus>("spellcheck_status"),
   spellcheckSuggest: (word: string, lang: string) =>
-    call<{ word: string; correct: boolean; suggestions: string[] }>(
-      "spellcheck_suggest",
-      { word, lang },
-    ),
+    call<{
+      word: string;
+      correct: boolean;
+      suggestions: string[];
+      autocorrect?: string | null;
+    }>("spellcheck_suggest", { word, lang }),
+  spellcheckLearnWord: (word: string, lang: string) =>
+    call<void>("spellcheck_learn_word", { word, lang }),
   spellcheckInstall: (code: string) =>
     call<SpellDictionaryDto>("spellcheck_install", { code }),
   spellcheckEnsureForLocale: (locale: string) =>
@@ -448,6 +459,8 @@ export const api = {
   }) => call<CalendarCollectionDto>("calendar_collections_upsert", { request }),
   calendarCollectionsSetDefault: (id: string) =>
     call<CalendarCollectionDto>("calendar_collections_set_default", { id }),
+  calendarCollectionsDelete: (id: string) =>
+    call<void>("calendar_collections_delete", { id }),
   calendarEventsList: (from: number, to: number) =>
     call<CalendarEventDto[]>("calendar_events_list", { request: { from, to } }),
   calendarEventsUpsert: (request: {
@@ -507,16 +520,23 @@ export const api = {
   appVersion: () => call<AppVersionInfo>("app_version"),
   logsPath: () => call<string>("logs_path"),
   shellGetPrefs: () =>
-    call<{ closeToTray: boolean; autostart: boolean }>("shell_get_prefs"),
+    call<{ closeToTray: boolean; autostart: boolean; uiLocale: string }>(
+      "shell_get_prefs",
+    ),
   shellSetCloseToTray: (enabled: boolean) =>
-    call<{ closeToTray: boolean; autostart: boolean }>(
+    call<{ closeToTray: boolean; autostart: boolean; uiLocale: string }>(
       "shell_set_close_to_tray",
       { enabled },
     ),
   shellSetAutostart: (enabled: boolean) =>
-    call<{ closeToTray: boolean; autostart: boolean }>(
+    call<{ closeToTray: boolean; autostart: boolean; uiLocale: string }>(
       "shell_set_autostart",
       { enabled },
+    ),
+  shellSetUiLocale: (locale: string) =>
+    call<{ closeToTray: boolean; autostart: boolean; uiLocale: string }>(
+      "shell_set_ui_locale",
+      { locale },
     ),
   updatesCheck: () => call<UpdateCheckResult>("updates_check"),
   updatesDownload: () => call<UpdateActionResult>("updates_download"),

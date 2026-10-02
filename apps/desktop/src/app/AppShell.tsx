@@ -17,6 +17,7 @@ import {
   MessageList,
   buildListRequest,
   defaultInboxFilters,
+  type BulkFlagAction,
   type InboxFilters,
 } from "@/features/mail/MessageList";
 import { QuickTriage } from "@/features/mail/QuickTriage";
@@ -241,13 +242,21 @@ export function AppShell() {
     };
   }, [desktop, scheduleMailRefresh]);
 
-  // Keep WebKit spellcheck language in sync with settings.
+  // Keep WebKit spellcheck language in sync with settings (active language only).
   useEffect(() => {
     if (!desktop) return;
     const code = spellcheckLang || "de_DE";
     const short = code.split("_")[0] ?? code;
-    void api.spellcheckSetLanguages([code, short, "en_US", "en"]).catch(() => undefined);
+    const languages =
+      short === "en" ? [code, short] : [code, short];
+    void api.spellcheckSetLanguages(languages).catch(() => undefined);
   }, [desktop, spellcheckLang]);
+
+  // Persist UI locale for GTK/WebKit context-menu translations (applies on next launch).
+  useEffect(() => {
+    if (!desktop) return;
+    void api.shellSetUiLocale(locale).catch(() => undefined);
+  }, [desktop, locale]);
 
   // Opening a message marks it read — optimistic cache update, no full list refetch.
   const openedUnread =
@@ -419,6 +428,42 @@ export function AppShell() {
       await queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
     },
     [desktop, messageQuery.data, queryClient],
+  );
+
+  const handleBulkFlags = useCallback(
+    async (messageIds: string[], action: BulkFlagAction) => {
+      if (!desktop || messageIds.length === 0) return;
+      const flags =
+        action === "read"
+          ? { unread: false }
+          : action === "unread"
+            ? { unread: true }
+            : action === "star"
+              ? { starred: true }
+              : { starred: false };
+      // Sequential to keep IMAP remote flag updates orderly.
+      for (const messageId of messageIds) {
+        await api.messagesSetFlags({ messageId, ...flags });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["messages"] });
+      await queryClient.invalidateQueries({ queryKey: ["threads"] });
+      await queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      if (selectedMessageId && messageIds.includes(selectedMessageId)) {
+        await queryClient.invalidateQueries({
+          queryKey: ["message", selectedMessageId],
+        });
+      }
+      setSyncStatus(
+        action === "read"
+          ? t("bulkMarkedRead", { count: messageIds.length })
+          : action === "unread"
+            ? t("bulkMarkedUnread", { count: messageIds.length })
+            : action === "star"
+              ? t("bulkMarkedStarred", { count: messageIds.length })
+              : t("bulkMarkedUnstarred", { count: messageIds.length }),
+      );
+    },
+    [desktop, queryClient, selectedMessageId, setSyncStatus, t],
   );
 
   const handleArchive = useCallback(async () => {
@@ -913,11 +958,13 @@ export function AppShell() {
     ];
 
     for (const account of accounts) {
+      const sideLabel =
+        (account.label || account.name).trim() || account.email;
       items.push({
         id: `account-${account.id}`,
-        label: t("cmdAccount", { name: account.name }),
+        label: t("cmdAccount", { name: sideLabel }),
         group: t("cmdGroupFilters"),
-        keywords: `${account.name} ${account.email}`,
+        keywords: `${sideLabel} ${account.name} ${account.email}`,
         onSelect: () => handleSelectAccountFilter(account.id),
       });
     }
@@ -1115,9 +1162,14 @@ export function AppShell() {
                     void openDraftInComposer(id);
                   }
                 }}
+                onOpenFocus={(id) => {
+                  selectMessage(id);
+                  setMessageFocusOpen(true);
+                }}
                 onToggleStar={(messageId, starred) => {
                   void handleToggleStar(messageId, starred);
                 }}
+                onBulkFlags={(ids, action) => handleBulkFlags(ids, action)}
                 total={listTotal}
                 filters={inboxFilters}
                 onFiltersChange={handleInboxFiltersChange}
