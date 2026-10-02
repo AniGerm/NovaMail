@@ -153,6 +153,13 @@ export const de = {
   discard: "Verwerfen",
   send: "Senden",
   sending: "Wird gesendet…",
+  messageSent: "Nachricht gesendet.",
+  closeToTray: "Beim Schließen in den Infobereich legen",
+  closeToTrayHint:
+    "Fenster schließen blendet NovaMail nur aus; über das Tablett-Symbol wieder öffnen.",
+  autostart: "Beim Anmelden starten",
+  autostartHint:
+    "Legt eine Autostart-Datei unter ~/.config/autostart an (Linux).",
   remove: "Entfernen",
   addAccountTitle: "Konto hinzufügen",
   addAccountDescription:

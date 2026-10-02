@@ -155,6 +155,13 @@ export const en: Translations = {
   discard: "Discard",
   send: "Send",
   sending: "Sending…",
+  messageSent: "Message sent.",
+  closeToTray: "Close to system tray",
+  closeToTrayHint:
+    "Closing the window hides NovaMail; restore it from the tray icon.",
+  autostart: "Start on login",
+  autostartHint:
+    "Writes an autostart entry under ~/.config/autostart (Linux).",
   remove: "Remove",
   addAccountTitle: "Add account",
   addAccountDescription:

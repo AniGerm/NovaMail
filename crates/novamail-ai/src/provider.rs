@@ -35,6 +35,9 @@ pub struct SuggestReplyRequest {
     pub subject: String,
     pub body_text: String,
     pub from_email: String,
+    /// Mailbox owner who is writing the reply (perspective).
+    #[serde(default)]
+    pub reply_as_email: Option<String>,
     /// Optional facts / instructions the user wants included in the reply.
     #[serde(default)]
     pub facts: Option<String>,
@@ -373,7 +376,24 @@ fn is_quote_boundary(trimmed: &str, lower: &str, kept_lines: usize) -> bool {
 }
 
 /// Lightweight offline / fallback extractor for relative + ISO dates and times.
+/// Never panics: UTF-8 edge cases return an empty list instead of aborting AI work.
 pub fn heuristic_event_suggestions(
+    subject: &str,
+    body: &str,
+    reference_at: i64,
+) -> Vec<EventSuggestion> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        heuristic_event_suggestions_inner(subject, body, reference_at)
+    })) {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!("event heuristic panicked; returning no suggestions");
+            Vec::new()
+        }
+    }
+}
+
+fn heuristic_event_suggestions_inner(
     subject: &str,
     body: &str,
     reference_at: i64,
@@ -555,10 +575,11 @@ fn contains_word(haystack: &str, word: &str) -> bool {
 fn guess_location(lower: &str) -> Option<String> {
     for place in ["bowling", "zoom", "teams", "meet", "café", "cafe", "büro", "buero", "office"] {
         if contains_word(lower, place) {
-            let mut label = place.to_string();
-            if let Some(first) = label.get_mut(0..1) {
-                first.make_ascii_uppercase();
-            }
+            let mut chars = place.chars();
+            let label = match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => place.to_string(),
+            };
             return Some(label);
         }
     }
@@ -633,7 +654,13 @@ fn parse_hhmm_prefix(s: &str) -> Option<(u32, u32)> {
 
 fn find_time_near(lower: &str, weekday: &str) -> Option<(u32, u32)> {
     let idx = lower.find(weekday)?;
-    let window = &lower[idx..lower.len().min(idx + 48)];
+    // `find` returns a byte index — never slice with raw `idx + N` (panics on UTF-8).
+    let window = lower
+        .get(idx..)
+        .unwrap_or("")
+        .chars()
+        .take(48)
+        .collect::<String>();
     // HH:MM
     for (i, _) in window.char_indices() {
         let slice = &window[i..];
@@ -697,6 +724,18 @@ mod tests {
             .unwrap();
         assert!(!result.suggestions.is_empty());
         assert!(result.suggestions.iter().any(|s| s.label.contains("14:30") || s.starts_at > 0));
+    }
+
+    #[test]
+    fn find_time_near_handles_utf8_after_weekday() {
+        // Multi-byte chars after the weekday used to panic on idx+48 byte slices.
+        let lower = "montag 18:00 ähähähähähähähähähähähähähähähähähähähähähähähähäh";
+        let t = find_time_near(lower, "montag").expect("time");
+        assert_eq!(t, (18, 0));
+        // En-dash (U+2013, 3 bytes) — the exact panic from production logs.
+        let lower = "montag ––––––––––––––––––––––––––––––––––––––––––––––––––––";
+        assert!(find_time_near(lower, "montag").is_none());
+        let _ = heuristic_event_suggestions("Bowling am Montag – Abend", "bis später", 1_727_500_000);
     }
 
     #[test]

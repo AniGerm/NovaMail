@@ -1101,6 +1101,23 @@ pub fn app_version() -> AppVersionInfo {
 }
 
 #[tauri::command]
+pub fn shell_get_prefs() -> crate::shell_prefs::ShellPrefs {
+    crate::shell_prefs::load()
+}
+
+#[tauri::command]
+pub fn shell_set_close_to_tray(enabled: bool) -> Result<crate::shell_prefs::ShellPrefs, AppError> {
+    crate::shell_prefs::set_close_to_tray(enabled)
+        .map_err(|message| AppError::new("shell_prefs", message))
+}
+
+#[tauri::command]
+pub fn shell_set_autostart(enabled: bool) -> Result<crate::shell_prefs::ShellPrefs, AppError> {
+    crate::shell_prefs::set_autostart(enabled)
+        .map_err(|message| AppError::new("shell_prefs", message))
+}
+
+#[tauri::command]
 pub fn logs_path() -> String {
     dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))

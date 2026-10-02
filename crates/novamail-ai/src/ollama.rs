@@ -162,16 +162,29 @@ impl AiProvider for OllamaProvider {
             (Some("friendly"), _) => "warm and friendly",
             _ => "professional",
         };
+        let reply_as = request
+            .reply_as_email
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("the mailbox owner");
         let prompt = format!(
-            "You are an email assistant. Write a complete {style} email reply body \
-             with greeting, 3-6 sentences, and sign-off.\n\
-             CRITICAL: Write the entire reply ONLY in {lang_name} ({lang_native}). \
-             Do not mix languages. Do not answer in English unless the required language is English.\n\
-             Output ONLY the reply body — no Subject line, no markdown, no commentary.\
-             {facts_block}\nOriginal From: {}\nOriginal Subject: {}\n\nOriginal body:\n{}",
-            request.from_email,
-            request.subject,
-            truncate(&request.body_text, 3_500)
+            "You write email REPLIES for {reply_as}.\n\
+             ROLE: You are the RECIPIENT of the email below. Write a reply TO {from} \
+             (the original sender). You are NOT the original sender.\n\
+             Write a complete {style} reply body with greeting, 3-6 sentences, and sign-off.\n\
+             CRITICAL RULES:\n\
+             - Write ONLY in {lang_name} ({lang_native}). Do not mix languages.\n\
+             - Answer their points; do NOT rewrite, paraphrase, or replace their email.\n\
+             - Do NOT invent that you are {from}. Do NOT continue their message as them.\n\
+             - Output ONLY the reply body — no Subject line, no markdown, no commentary.\
+             {facts_block}\n\
+             --- Incoming email ---\n\
+             From: {from}\n\
+             Subject: {subject}\n\n\
+             {body}",
+            from = request.from_email,
+            subject = request.subject,
+            body = truncate(&request.body_text, 3_500),
         );
         Ok(SuggestReplyResponse {
             suggestion: self.generate_with_limit(&prompt, 240).await?,
@@ -390,6 +403,7 @@ mod live_tests {
                 subject: "Termin verschieben".into(),
                 body_text: "Hallo Team,\n\nkönnen wir das Meeting von Dienstag auf Donnerstag 14 Uhr verschieben?\n\nViele Grüße\nAnna".into(),
                 from_email: "anna@example.com".into(),
+                reply_as_email: Some("max@example.com".into()),
                 facts: None,
                 style: None,
                 preferred_language: Some("de".into()),
@@ -404,6 +418,7 @@ mod live_tests {
                 subject: "Termin verschieben".into(),
                 body_text: "Hallo Team, Termin bitte verschieben.".into(),
                 from_email: "anna@example.com".into(),
+                reply_as_email: Some("max@example.com".into()),
                 facts: Some("Donnerstag 14 Uhr passt. Bitte Zoom-Link schicken.".into()),
                 style: None,
                 preferred_language: Some("de".into()),

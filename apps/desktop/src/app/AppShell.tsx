@@ -1230,7 +1230,13 @@ export function AppShell() {
           setComposerTo(undefined);
           setEditingDraft(null);
         }}
-        onSent={async () => {
+        onSent={async (sentDraftId) => {
+          // Draft was deleted server-side — clear selection so the pane doesn't
+          // fetch a missing id and look like a blank / white screen.
+          if (sentDraftId && selectedMessageId === sentDraftId) {
+            selectMessage(null);
+          }
+          setSyncStatus(t("messageSent"));
           await refresh();
           refreshPlannedSummary();
         }}

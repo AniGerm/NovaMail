@@ -501,6 +501,18 @@ export const api = {
     }),
   appVersion: () => call<AppVersionInfo>("app_version"),
   logsPath: () => call<string>("logs_path"),
+  shellGetPrefs: () =>
+    call<{ closeToTray: boolean; autostart: boolean }>("shell_get_prefs"),
+  shellSetCloseToTray: (enabled: boolean) =>
+    call<{ closeToTray: boolean; autostart: boolean }>(
+      "shell_set_close_to_tray",
+      { enabled },
+    ),
+  shellSetAutostart: (enabled: boolean) =>
+    call<{ closeToTray: boolean; autostart: boolean }>(
+      "shell_set_autostart",
+      { enabled },
+    ),
   updatesCheck: () => call<UpdateCheckResult>("updates_check"),
   updatesDownload: () => call<UpdateActionResult>("updates_download"),
   updatesInstall: () => call<UpdateActionResult>("updates_install"),

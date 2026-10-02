@@ -25,3 +25,24 @@
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
+
+/* Contain HTML mail so author CSS cannot white-out / cover the app chrome. */
+.nova-html-body {
+  position: relative;
+  isolation: isolate;
+  contain: layout paint;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  background: transparent;
+}
+
+.nova-html-body :is(html, body) {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+}

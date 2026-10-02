@@ -1,4 +1,5 @@
 mod commands;
+mod shell_prefs;
 mod state;
 mod updater;
 
@@ -11,7 +12,9 @@ use std::time::Duration;
 
 use novamail_mail::SyncScheduler;
 use state::DesktopState;
-use tauri::{Emitter, Manager};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -34,6 +37,46 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let state = DesktopState::new()?;
+            let _ = shell_prefs::load();
+            // System tray: close-to-tray + restore on click.
+            let show_i = MenuItem::with_id(app, "show", "NovaMail anzeigen", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let mut tray = TrayIconBuilder::new()
+                .menu(&menu)
+                .tooltip("NovaMail")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    "show" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            let _tray = tray.build(app)?;
             // WebKitGTK spellcheck is off by default — HTML spellCheck alone is a no-op.
             #[cfg(target_os = "linux")]
             enable_webkit_spellcheck(app, &["de_DE", "de", "en_US", "en"]);
@@ -142,6 +185,14 @@ pub fn run() {
             );
             app.manage(state);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if shell_prefs::close_to_tray_enabled() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::provider_presets,
@@ -263,6 +314,9 @@ pub fn run() {
             commands::calendar_invitations_respond,
             commands::app_version,
             commands::logs_path,
+            commands::shell_get_prefs,
+            commands::shell_set_close_to_tray,
+            commands::shell_set_autostart,
             commands::updates_check,
             commands::updates_download,
             commands::updates_install,

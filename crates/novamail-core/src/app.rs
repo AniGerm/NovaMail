@@ -1765,14 +1765,13 @@ impl AppState {
 
     pub fn get_message_ai_insights(&self, message_id: Uuid) -> CoreResult<MessageAiInsights> {
         let summary = insight_text(&self.db, message_id, "summary")?;
-        let reply_a = insight_text(&self.db, message_id, "reply_a")?
-            .or(insight_text(&self.db, message_id, "reply")?);
-        let reply_b = insight_text(&self.db, message_id, "reply_b")?;
+        // v2 keys: old reply_* were often written from the sender's perspective.
+        let reply_a = insight_text(&self.db, message_id, "reply_as_a")?;
+        let reply_b = insight_text(&self.db, message_id, "reply_as_b")?;
         let event_suggestions = insight_event_suggestions(&self.db, message_id)?;
         let provider = insight_provider(&self.db, message_id, "summary")?
             .or(insight_provider(&self.db, message_id, "event_suggestions")?)
-            .or(insight_provider(&self.db, message_id, "reply_a")?)
-            .or(insight_provider(&self.db, message_id, "reply")?);
+            .or(insight_provider(&self.db, message_id, "reply_as_a")?);
         let incomplete = summary.is_none()
             || reply_a.is_none()
             || reply_b.is_none()
@@ -1822,8 +1821,8 @@ impl AppState {
                 .db
                 .has_ai_insight(msg.id, "summary")
                 .unwrap_or(false);
-            let has_replies = self.db.has_ai_insight(msg.id, "reply_a").unwrap_or(false)
-                && self.db.has_ai_insight(msg.id, "reply_b").unwrap_or(false);
+            let has_replies = self.db.has_ai_insight(msg.id, "reply_as_a").unwrap_or(false)
+                && self.db.has_ai_insight(msg.id, "reply_as_b").unwrap_or(false);
             let has_events =
                 insight_event_suggestions_current(&self.db, msg.id).unwrap_or(false);
             if !(has_summary && has_replies && has_events) {
@@ -1899,13 +1898,17 @@ impl AppState {
         ai: &dyn AiProvider,
         message_id: Uuid,
     ) -> CoreResult<()> {
-        let has_replies = db.has_ai_insight(message_id, "reply_a")?
-            && db.has_ai_insight(message_id, "reply_b")?;
+        let has_replies = db.has_ai_insight(message_id, "reply_as_a")?
+            && db.has_ai_insight(message_id, "reply_as_b")?;
         let has_events = insight_event_suggestions_current(db, message_id)?;
         if db.has_ai_insight(message_id, "summary")? && has_replies && has_events {
             return Ok(());
         }
         let detail = db.get_message(message_id)?;
+        let account_email = db
+            .get_account(detail.summary.account_id)
+            .map(|a| a.email)
+            .unwrap_or_default();
         let body = detail
             .body_text
             .clone()
@@ -1974,6 +1977,7 @@ impl AppState {
                 subject: detail.summary.subject.clone(),
                 body_text: body,
                 from_email: detail.summary.from.email.clone(),
+                reply_as_email: Some(account_email),
                 facts: None,
                 style: None,
                 preferred_language: None,
@@ -1987,15 +1991,14 @@ impl AppState {
                     "text": a,
                     "provider": result.provider,
                 });
-                db.upsert_ai_insight(message_id, "reply_a", &payload.to_string())?;
-                db.upsert_ai_insight(message_id, "reply", &payload.to_string())?;
+                db.upsert_ai_insight(message_id, "reply_as_a", &payload.to_string())?;
             }
             if let Some(b) = result.variants.get(1) {
                 let payload = serde_json::json!({
                     "text": b,
                     "provider": result.provider,
                 });
-                db.upsert_ai_insight(message_id, "reply_b", &payload.to_string())?;
+                db.upsert_ai_insight(message_id, "reply_as_b", &payload.to_string())?;
             }
         }
         Ok(())
@@ -2097,13 +2100,12 @@ impl AppState {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
 
-        // Use cache only when no custom facts were requested.
+        // Use cache only when no custom facts were requested (v2 recipient-perspective keys).
         if facts.is_none() {
-            let a = insight_text(&self.db, request.message_id, "reply_a")?
-                .or(insight_text(&self.db, request.message_id, "reply")?);
-            let b = insight_text(&self.db, request.message_id, "reply_b")?;
+            let a = insight_text(&self.db, request.message_id, "reply_as_a")?;
+            let b = insight_text(&self.db, request.message_id, "reply_as_b")?;
             if let (Some(a), Some(b)) = (a, b) {
-                let provider = insight_provider(&self.db, request.message_id, "reply_a")?
+                let provider = insight_provider(&self.db, request.message_id, "reply_as_a")?
                     .unwrap_or_else(|| "cache".into());
                 return Ok(SuggestRepliesMessageResponse {
                     message_id: request.message_id,
@@ -2114,6 +2116,11 @@ impl AppState {
         }
 
         let detail = self.get_message(request.message_id)?;
+        let account_email = self
+            .db
+            .get_account(detail.summary.account_id)
+            .map(|a| a.email)
+            .unwrap_or_default();
         let body = detail
             .body_text
             .clone()
@@ -2122,6 +2129,7 @@ impl AppState {
             subject: detail.summary.subject.clone(),
             body_text: body,
             from_email: detail.summary.from.email.clone(),
+            reply_as_email: Some(account_email),
             facts: facts.clone(),
             style: None,
             preferred_language: request.preferred_language.clone(),
@@ -2145,10 +2153,7 @@ impl AppState {
                 });
                 let _ = self
                     .db
-                    .upsert_ai_insight(request.message_id, "reply_a", &payload.to_string());
-                let _ = self
-                    .db
-                    .upsert_ai_insight(request.message_id, "reply", &payload.to_string());
+                    .upsert_ai_insight(request.message_id, "reply_as_a", &payload.to_string());
             }
             if let Some(b) = result.variants.get(1) {
                 let payload = serde_json::json!({
@@ -2157,7 +2162,7 @@ impl AppState {
                 });
                 let _ = self
                     .db
-                    .upsert_ai_insight(request.message_id, "reply_b", &payload.to_string());
+                    .upsert_ai_insight(request.message_id, "reply_as_b", &payload.to_string());
             }
         }
 
