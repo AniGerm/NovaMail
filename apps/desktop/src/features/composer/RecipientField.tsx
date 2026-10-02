@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BookPlus } from "lucide-react";
-import { Input } from "@novamail/ui";
+import { Button, Input } from "@novamail/ui";
 
 import { api, isDesktopShell } from "@/shared/api/client";
 import type { ContactPrefill, RecipientSuggestion } from "@/shared/api/types";
@@ -9,10 +9,12 @@ import { useT } from "@/shared/i18n/useT";
 interface RecipientFieldProps {
   value: string;
   onChange: (value: string) => void;
-  onAddToContacts?: (prefill: ContactPrefill) => void;
+  onAddToContacts?: (prefill: ContactPrefill | ContactPrefill[]) => void;
 }
 
-function parseNameEmail(token: string): { name?: string; email: string } {
+type ParsedRecipient = { name?: string; email: string };
+
+function parseNameEmail(token: string): ParsedRecipient {
   const trimmed = token.trim();
   const match = trimmed.match(/^(.*?)\s*<([^>]+)>$/);
   if (match) {
@@ -31,6 +33,19 @@ function formatRecipient(suggestion: RecipientSuggestion): string {
   return suggestion.email;
 }
 
+function toPrefill(recipient: ParsedRecipient): ContactPrefill {
+  const name =
+    recipient.name || recipient.email.split("@")[0] || recipient.email;
+  const parts = name.trim().split(/\s+/);
+  return {
+    displayName: name,
+    givenName: parts[0] ?? "",
+    familyName: parts.slice(1).join(" "),
+    emails: [recipient.email],
+    notes: "",
+  };
+}
+
 export function RecipientField({
   value,
   onChange,
@@ -38,21 +53,41 @@ export function RecipientField({
 }: RecipientFieldProps) {
   const t = useT();
   const listId = useId();
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const blurTimer = useRef<number | null>(null);
   const [suggestions, setSuggestions] = useState<RecipientSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [resolved, setResolved] = useState<RecipientSuggestion | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** email → known contact status (true = already in book) */
+  const [contactStatus, setContactStatus] = useState<Record<string, boolean>>(
+    {},
+  );
 
-  const tokens = value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
   const lastToken = value.includes(",")
     ? value.slice(value.lastIndexOf(",") + 1).trimStart()
     : value;
-  const completed = tokens.map(parseNameEmail).filter((t) => t.email.includes("@"));
-  const primary = completed[completed.length - 1] ?? null;
+  const completed = useMemo(() => {
+    return value
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map(parseNameEmail)
+      .filter((item) => item.email.includes("@"));
+  }, [value]);
+
+  const missingRecipients = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ParsedRecipient[] = [];
+    for (const item of completed) {
+      if (seen.has(item.email)) continue;
+      seen.add(item.email);
+      if (contactStatus[item.email] === false) out.push(item);
+      // Unknown status: treat as candidate until proven in contacts.
+      if (contactStatus[item.email] === undefined) out.push(item);
+    }
+    return out;
+  }, [completed, contactStatus]);
 
   useEffect(() => {
     if (!isDesktopShell()) return;
@@ -85,61 +120,66 @@ export function RecipientField({
     };
   }, [lastToken]);
 
+  // Resolve contact-book status for every completed recipient.
   useEffect(() => {
-    if (!primary || !isDesktopShell()) {
-      setResolved(null);
+    if (!isDesktopShell() || completed.length === 0) {
+      setContactStatus({});
       return;
     }
     let cancelled = false;
-    void api
-      .recipientsSuggest(primary.email, 8)
-      .then((items) => {
-        if (cancelled) return;
-        const hit =
-          items.find(
-            (item) => item.email.toLowerCase() === primary.email.toLowerCase(),
-          ) ?? null;
-        setResolved(
-          hit ?? {
-            email: primary.email,
-            name: primary.name ?? null,
-            source: "typed",
-            inContacts: false,
-            contactId: null,
-          },
-        );
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setResolved({
-            email: primary.email,
-            name: primary.name ?? null,
-            source: "typed",
-            inContacts: false,
-            contactId: null,
-          });
+    void Promise.all(
+      completed.map(async (item) => {
+        try {
+          const items = await api.recipientsSuggest(item.email, 8);
+          const hit = items.find(
+            (s) => s.email.toLowerCase() === item.email.toLowerCase(),
+          );
+          return [item.email, Boolean(hit?.inContacts)] as const;
+        } catch {
+          return [item.email, false] as const;
         }
-      });
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, boolean> = {};
+      for (const [email, inContacts] of entries) next[email] = inContacts;
+      setContactStatus(next);
+    });
     return () => {
       cancelled = true;
     };
-  }, [primary?.email, primary?.name]);
+  }, [completed.map((c) => c.email).join("|")]);
 
   function applySuggestion(suggestion: RecipientSuggestion) {
     const before = value.includes(",")
-      ? value.slice(0, value.lastIndexOf(",") + 1).trimEnd() + " "
+      ? `${value.slice(0, value.lastIndexOf(",") + 1).trimEnd()} `
       : "";
-    onChange(`${before}${formatRecipient(suggestion)}`);
+    // Trailing comma so the next recipient can be typed immediately.
+    const next = `${before}${formatRecipient(suggestion)}, `;
+    onChange(next);
     setOpen(false);
     setSuggestions([]);
-    setResolved(suggestion);
+    window.requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      const end = next.length;
+      el.setSelectionRange(end, end);
+    });
+  }
+
+  function addPrefills(prefills: ContactPrefill[]) {
+    if (!onAddToContacts || prefills.length === 0) return;
+    setPickerOpen(false);
+    onAddToContacts(prefills.length === 1 ? prefills[0]! : prefills);
   }
 
   const showAdd =
-    Boolean(primary?.email.includes("@")) &&
-    resolved != null &&
-    !resolved.inContacts &&
+    missingRecipients.some((r) => contactStatus[r.email] !== true) &&
     Boolean(onAddToContacts);
+  const candidates = missingRecipients.filter(
+    (r) => contactStatus[r.email] !== true,
+  );
 
   return (
     <label className="relative grid gap-1 text-sm">
@@ -147,6 +187,7 @@ export function RecipientField({
       <div className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
           <Input
+            ref={inputRef}
             required
             role="combobox"
             aria-expanded={open}
@@ -224,26 +265,72 @@ export function RecipientField({
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] text-[var(--nova-accent)] hover:bg-[var(--nova-accent-soft)]"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
-              if (!primary) return;
-              const name =
-                resolved?.name ||
-                primary.name ||
-                primary.email.split("@")[0] ||
-                primary.email;
-              const parts = name.trim().split(/\s+/);
-              onAddToContacts?.({
-                displayName: name,
-                givenName: parts[0] ?? "",
-                familyName: parts.slice(1).join(" "),
-                emails: [primary.email],
-                notes: "",
-              });
+              if (candidates.length <= 1) {
+                const only = candidates[0];
+                if (only) addPrefills([toPrefill(only)]);
+                return;
+              }
+              setPickerOpen(true);
             }}
           >
             <BookPlus size={18} />
           </button>
         ) : null}
       </div>
+
+      {pickerOpen && candidates.length > 1 ? (
+        <div
+          className="absolute right-0 top-[calc(100%+6px)] z-30 w-[min(100%,20rem)] rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-3 shadow-[var(--nova-shadow)]"
+          role="dialog"
+          aria-label={t("addRecipientPickerTitle")}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <p className="text-sm font-medium text-[var(--nova-ink)]">
+            {t("addRecipientPickerTitle")}
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--nova-ink-muted)]">
+            {t("addRecipientPickerHint")}
+          </p>
+          <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+            {candidates.map((item) => (
+              <li key={item.email}>
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start rounded-[var(--nova-radius-md)] px-2.5 py-2 text-left hover:bg-[var(--nova-accent-soft)]"
+                  onClick={() => addPrefills([toPrefill(item)])}
+                >
+                  <span className="text-sm font-medium">
+                    {item.name || item.email}
+                  </span>
+                  {item.name ? (
+                    <span className="text-xs text-[var(--nova-ink-muted)]">
+                      {item.email}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex gap-2 border-t border-[var(--nova-border)] pt-2">
+            <Button
+              type="button"
+              size="sm"
+              className="flex-1"
+              onClick={() => addPrefills(candidates.map(toPrefill))}
+            >
+              {t("addAllRecipientsToContacts")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setPickerOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </label>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useKeyboardShortcuts } from "@novamail/hooks";
 import {
@@ -84,10 +84,32 @@ export function AppShell() {
   const [contactPrefill, setContactPrefill] = useState<ContactPrefill | null>(
     null,
   );
+  const contactQueueRef = useRef<ContactPrefill[]>([]);
   const [messageFocusOpen, setMessageFocusOpen] = useState(false);
   const [paletteLabels, setPaletteLabels] = useState<LabelDto[]>([]);
   const [palettePeople, setPalettePeople] = useState<RecipientSuggestion[]>([]);
   const clearContactPrefill = useCallback(() => setContactPrefill(null), []);
+  const openContactPrefills = useCallback(
+    (prefill: ContactPrefill | ContactPrefill[]) => {
+      const list = (Array.isArray(prefill) ? prefill : [prefill]).filter(
+        (item) => (item.emails?.length ?? 0) > 0 || Boolean(item.displayName),
+      );
+      if (list.length === 0) return;
+      contactQueueRef.current = list.slice(1);
+      setContactPrefill(list[0] ?? null);
+      setContactsOpen(true);
+    },
+    [setContactsOpen],
+  );
+  const advanceContactQueue = useCallback(() => {
+    const queue = contactQueueRef.current;
+    if (queue.length === 0) return;
+    const [next, ...rest] = queue;
+    contactQueueRef.current = rest;
+    window.setTimeout(() => {
+      setContactPrefill(next ?? null);
+    }, 0);
+  }, []);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>(() => ({
     ...defaultInboxFilters,
     viewMode: useUiStore.getState().inboxViewMode,
@@ -1325,10 +1347,7 @@ export function AppShell() {
           refreshPlannedSummary();
         }}
         onDraftSaved={refresh}
-        onAddToContacts={(prefill) => {
-          setContactPrefill(prefill);
-          setContactsOpen(true);
-        }}
+        onAddToContacts={openContactPrefills}
       />
       <MessageFocusDialog
         open={messageFocusOpen && Boolean(messageQuery.data)}
@@ -1395,9 +1414,11 @@ export function AppShell() {
         open={contactsOpen}
         prefill={contactPrefill}
         onPrefillConsumed={clearContactPrefill}
+        onContactSaved={advanceContactQueue}
         onClose={() => {
           setContactsOpen(false);
           setContactPrefill(null);
+          contactQueueRef.current = [];
         }}
       />
       <QuickTriage

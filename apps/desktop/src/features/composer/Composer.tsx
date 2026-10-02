@@ -34,7 +34,7 @@ interface ComposerProps {
   /** Called after a successful send; `sentDraftId` is set when a draft was consumed. */
   onSent: (sentDraftId?: string | null) => void | Promise<void>;
   onDraftSaved?: () => void;
-  onAddToContacts?: (prefill: ContactPrefill) => void;
+  onAddToContacts?: (prefill: ContactPrefill | ContactPrefill[]) => void;
 }
 
 function formatAddress(addr: AddressDto): string {

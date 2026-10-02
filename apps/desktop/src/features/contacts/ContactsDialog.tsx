@@ -201,11 +201,14 @@ export function ContactsDialog({
   onClose,
   prefill = null,
   onPrefillConsumed,
+  onContactSaved,
 }: {
   open: boolean;
   onClose: () => void;
   prefill?: ContactPrefill | null;
   onPrefillConsumed?: () => void;
+  /** Fired after a successful save (e.g. advance multi-recipient queue). */
+  onContactSaved?: () => void;
 }) {
   const t = useT();
   const [panel, setPanel] = useState<Panel>("main");
@@ -344,6 +347,7 @@ export function ContactsDialog({
       setDraft(contactToDraft(saved));
       await refresh();
       setStatusInfo(t("contactSaved"));
+      onContactSaved?.();
     } catch (err) {
       setError((err as AppError).message);
     } finally {
