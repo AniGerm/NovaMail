@@ -75,7 +75,15 @@ impl SyncScheduler {
                 };
                 runtime.block_on(async move {
                     // Immediate first sync, then wait between cycles.
+                    // After a "quiet" incremental cycle, poll again sooner so new
+                    // mail feels live without hammering the server on heavy pulls.
+                    let mut next_wait = Duration::from_secs(0);
                     loop {
+                        if !next_wait.is_zero() {
+                            tokio::time::sleep(next_wait).await;
+                        }
+                        let mut had_new = false;
+                        let mut ran = false;
                         {
                             let mut guard = self.running.lock().await;
                             if *guard {
@@ -83,6 +91,7 @@ impl SyncScheduler {
                             } else {
                                 *guard = true;
                                 drop(guard);
+                                ran = true;
                                 let engine = SyncEngine::new(
                                     self.db.clone(),
                                     self.secrets.clone(),
@@ -94,7 +103,7 @@ impl SyncScheduler {
                                         warn!(error = %err, "scheduler failed to list accounts");
                                         *self.running.lock().await = false;
                                         on_cycle_done();
-                                        tokio::time::sleep(self.interval).await;
+                                        next_wait = self.interval;
                                         continue;
                                     }
                                 };
@@ -107,6 +116,9 @@ impl SyncScheduler {
                                         .await
                                     {
                                         Ok(report) => {
+                                            if !report.new_message_ids.is_empty() {
+                                                had_new = true;
+                                            }
                                             new_ids.extend(report.new_message_ids);
                                             synced_accounts.push(account.id);
                                         }
@@ -129,7 +141,14 @@ impl SyncScheduler {
                                 on_cycle_done();
                             }
                         }
-                        tokio::time::sleep(self.interval).await;
+                        next_wait = if !ran {
+                            Duration::from_secs(2)
+                        } else if had_new {
+                            // Burst briefly after new mail so follow-ups land quickly.
+                            Duration::from_secs(5).min(self.interval)
+                        } else {
+                            self.interval
+                        };
                     }
                 });
             })

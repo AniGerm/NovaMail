@@ -123,32 +123,79 @@ impl SyncEngine {
         F: FnMut(SyncProgressEvent) + Send,
     {
         let (exists, uidvalidity, uidnext) = imap.select(name).await?;
-        let mailbox = if let Some(existing) = self.db.find_mailbox_by_name(account_id, name)? {
-            let mut updated = existing;
-            updated.role = role.map(|r| r.to_string()).or(updated.role);
-            updated.uidvalidity = Some(uidvalidity as i64);
-            updated.uidnext = Some(uidnext as i64);
-            updated.total_count = exists;
-            self.db.upsert_mailbox(&updated)?;
-            updated
-        } else {
-            let record = MailboxRecord {
-                id: Uuid::new_v4(),
-                account_id,
-                name: name.to_string(),
-                role: role.map(|r| r.to_string()),
-                uidvalidity: Some(uidvalidity as i64),
-                uidnext: Some(uidnext as i64),
-                unread_count: 0,
-                total_count: exists,
+        let (mailbox, prev_uidvalidity) =
+            if let Some(existing) = self.db.find_mailbox_by_name(account_id, name)? {
+                let prev_uidvalidity = existing.uidvalidity;
+                let mut updated = existing;
+                updated.role = role.map(|r| r.to_string()).or(updated.role);
+                updated.uidvalidity = Some(uidvalidity as i64);
+                updated.uidnext = Some(uidnext as i64);
+                updated.total_count = exists;
+                self.db.upsert_mailbox(&updated)?;
+                (updated, prev_uidvalidity)
+            } else {
+                let record = MailboxRecord {
+                    id: Uuid::new_v4(),
+                    account_id,
+                    name: name.to_string(),
+                    role: role.map(|r| r.to_string()),
+                    uidvalidity: Some(uidvalidity as i64),
+                    uidnext: Some(uidnext as i64),
+                    unread_count: 0,
+                    total_count: exists,
+                };
+                self.db.upsert_mailbox(&record)?;
+                (record, None)
             };
-            self.db.upsert_mailbox(&record)?;
-            record
+
+        // Incremental sync: only download UIDs we do not already have.
+        // Full BODY re-fetch of a 1500-message window every cycle made pull
+        // feel dead/slow and rotated attachment IDs out from under the UI.
+        let window = 1500u32;
+        let local_max = self.db.max_message_uid(mailbox.id)?.unwrap_or(0);
+        let same_validity = prev_uidvalidity == Some(uidvalidity as i64);
+
+        let from_uid = if !same_validity || local_max == 0 {
+            // First sync or UIDVALIDITY reset — bounded history window.
+            uidnext.saturating_sub(window).max(1)
+        } else {
+            local_max.saturating_add(1).max(1)
         };
 
-        // Office-friendly window: enough history for offline offload without full mailbox pull.
-        let window = 1500u32;
-        let from_uid = uidnext.saturating_sub(window).max(1);
+        if same_validity && local_max > 0 && from_uid >= uidnext {
+            // No new UIDs — cheap FLAGS catch-up so read/star changes from
+            // other clients still land without re-downloading bodies.
+            let flags_from = uidnext.saturating_sub(300).max(1);
+            if let Ok(flag_rows) = imap.fetch_uid_flags_range(flags_from, None).await {
+                let mut changed = false;
+                for row in flag_rows {
+                    if self.db.set_flags_by_uid(
+                        mailbox.id,
+                        row.uid,
+                        row.flags_seen,
+                        row.flags_flagged,
+                    )? {
+                        changed = true;
+                    }
+                }
+                if changed {
+                    tracing::debug!(
+                        mailbox = name,
+                        "updated local flags from IMAP (no new UIDs)"
+                    );
+                }
+            }
+            self.db.refresh_mailbox_counts(mailbox.id)?;
+            return Ok((0, Vec::new()));
+        }
+
+        tracing::info!(
+            mailbox = name,
+            from_uid,
+            uidnext,
+            local_max,
+            "fetching incremental IMAP UIDs"
+        );
         let fetched_msgs = imap.fetch_uid_range(from_uid, None).await?;
         let mut count = 0u32;
         let mut new_ids = Vec::new();
@@ -158,6 +205,18 @@ impl SyncEngine {
                 .db
                 .find_message_id_by_uid(mailbox.id, fetched.uid)?
                 .is_some();
+            if existed {
+                // Keep FLAGS fresh without touching attachment rows/IDs.
+                let _ = self.db.set_flags_by_uid(
+                    mailbox.id,
+                    fetched.uid,
+                    fetched.flags_seen,
+                    fetched.flags_flagged,
+                )?;
+                count += 1;
+                continue;
+            }
+
             let parsed = parse_rfc822(&fetched.raw, fetched.flags_seen, fetched.flags_flagged)?;
             let thread_id = self.resolve_thread(account_id, &parsed)?;
 
@@ -199,9 +258,7 @@ impl SyncEngine {
                 .db
                 .find_message_id_by_uid(mailbox.id, fetched.uid)?
                 .unwrap_or(local_id);
-            if !existed {
-                new_ids.push(message_id);
-            }
+            new_ids.push(message_id);
 
             if !parsed.attachments.is_empty() {
                 std::fs::create_dir_all(&self.blobs_dir)?;

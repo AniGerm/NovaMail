@@ -290,9 +290,16 @@ export function ReadingPane({
     }
   }
 
-  async function openAttachment(id: string) {
+  async function openAttachment(attachment: {
+    id: string;
+    filename: string;
+  }) {
     try {
-      const path = await api.attachmentsOpenPath(id);
+      const path = await api.attachmentsOpenPath(
+        attachment.id,
+        current.summary.id,
+        attachment.filename,
+      );
       await openPath(path);
       setAttachMenuId(null);
     } catch (error) {
@@ -300,9 +307,16 @@ export function ReadingPane({
     }
   }
 
-  async function revealAttachment(id: string) {
+  async function revealAttachment(attachment: {
+    id: string;
+    filename: string;
+  }) {
     try {
-      const folder = await api.attachmentsReveal(id);
+      const folder = await api.attachmentsReveal(
+        attachment.id,
+        current.summary.id,
+        attachment.filename,
+      );
       await openPath(folder);
       setAttachMenuId(null);
     } catch (error) {
@@ -601,7 +615,7 @@ export function ReadingPane({
                         type="button"
                         role="menuitem"
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
-                        onClick={() => void openAttachment(attachment.id)}
+                        onClick={() => void openAttachment(attachment)}
                       >
                         <Share2 size={14} />
                         {t("openWithSystem")}
@@ -610,7 +624,7 @@ export function ReadingPane({
                         type="button"
                         role="menuitem"
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
-                        onClick={() => void revealAttachment(attachment.id)}
+                        onClick={() => void revealAttachment(attachment)}
                       >
                         <FolderOpen size={14} />
                         {t("revealInFolder")}

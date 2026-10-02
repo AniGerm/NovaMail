@@ -194,7 +194,8 @@ export function AppShell() {
   });
 
   // Debounce list refreshes from background sync so large mailboxes don't thrash.
-  const scheduleMailRefresh = useCallback(() => {
+  // New-mail events use a shorter delay so the inbox feels live.
+  const scheduleMailRefresh = useCallback((delayMs = 400) => {
     const w = window as Window & { __novaMailRefreshTimer?: number };
     if (w.__novaMailRefreshTimer != null) {
       window.clearTimeout(w.__novaMailRefreshTimer);
@@ -203,7 +204,8 @@ export function AppShell() {
       w.__novaMailRefreshTimer = undefined;
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
       void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-    }, 1500);
+      void queryClient.invalidateQueries({ queryKey: ["threads"] });
+    }, delayMs);
   }, [queryClient]);
 
   useEffect(() => {
@@ -238,7 +240,7 @@ export function AppShell() {
     let unlisten: (() => void) | undefined;
     api
       .onMailNew(() => {
-        scheduleMailRefresh();
+        scheduleMailRefresh(150);
       })
       .then((fn) => {
         unlisten = fn;
@@ -254,7 +256,7 @@ export function AppShell() {
     let unlisten: (() => void) | undefined;
     api
       .onSyncCycle(() => {
-        scheduleMailRefresh();
+        scheduleMailRefresh(600);
       })
       .then((fn) => {
         unlisten = fn;
@@ -280,6 +282,83 @@ export function AppShell() {
     void api.shellSetUiLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
 
+  // After "mark unread", open-to-read must not flip it back until the user
+  // re-clicks the message (same row again, or leave and open it again).
+  const suppressAutoReadRef = useRef<Set<string>>(new Set());
+
+  const markMessageReadLocally = useCallback(
+    (id: string, mailboxId?: string | null) => {
+      queryClient.setQueryData(
+        ["message", id],
+        (old: MessageDetailDto | undefined) =>
+          old
+            ? { ...old, summary: { ...old.summary, unread: false } }
+            : old,
+      );
+      queryClient.setQueriesData(
+        { queryKey: ["messages", "flat"] },
+        (old: unknown) => {
+          if (!old || typeof old !== "object") return old;
+          const data = old as {
+            messages?: Array<{ id: string; unread: boolean }>;
+          };
+          if (!Array.isArray(data.messages)) return old;
+          return {
+            ...data,
+            messages: data.messages.map((m) =>
+              m.id === id ? { ...m, unread: false } : m,
+            ),
+          };
+        },
+      );
+      if (mailboxId) {
+        queryClient.setQueryData(
+          ["mailboxes", "all"],
+          (old: Array<{ id: string; unreadCount: number }> | undefined) => {
+            if (!old) return old;
+            return old.map((m) =>
+              m.id === mailboxId
+                ? { ...m, unreadCount: Math.max(0, (m.unreadCount ?? 0) - 1) }
+                : m,
+            );
+          },
+        );
+      }
+      void api.messagesSetFlags({ messageId: id, unread: false }).catch(() => {
+        void queryClient.invalidateQueries({ queryKey: ["message", id] });
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      });
+    },
+    [queryClient],
+  );
+
+  const handleSelectMessage = useCallback(
+    (id: string | null) => {
+      if (id) {
+        const wasSuppressed = suppressAutoReadRef.current.delete(id);
+        // Re-clicking the already-open unread message clears the lock and marks read.
+        if (
+          wasSuppressed &&
+          id === selectedMessageId &&
+          messageQuery.data?.summary.id === id &&
+          messageQuery.data.summary.unread
+        ) {
+          markMessageReadLocally(id, messageQuery.data.summary.mailboxId);
+        }
+      }
+      selectMessage(id);
+    },
+    [
+      markMessageReadLocally,
+      messageQuery.data?.summary.id,
+      messageQuery.data?.summary.mailboxId,
+      messageQuery.data?.summary.unread,
+      selectMessage,
+      selectedMessageId,
+    ],
+  );
+
   // Opening a message marks it read — optimistic cache update, no full list refetch.
   const openedUnread =
     messageQuery.data?.summary.id === selectedMessageId &&
@@ -289,52 +368,15 @@ export function AppShell() {
     if (!desktop || !selectedMessageId || !openedUnread || !openedMailboxId) {
       return;
     }
-    const id = selectedMessageId;
-    const mailboxId = openedMailboxId;
-
-    queryClient.setQueryData(
-      ["message", id],
-      (old: MessageDetailDto | undefined) =>
-        old
-          ? { ...old, summary: { ...old.summary, unread: false } }
-          : old,
-    );
-    queryClient.setQueriesData(
-      { queryKey: ["messages", "flat"] },
-      (old: unknown) => {
-        if (!old || typeof old !== "object") return old;
-        const data = old as { messages?: Array<{ id: string; unread: boolean }> };
-        if (!Array.isArray(data.messages)) return old;
-        return {
-          ...data,
-          messages: data.messages.map((m) =>
-            m.id === id ? { ...m, unread: false } : m,
-          ),
-        };
-      },
-    );
-    queryClient.setQueryData(
-      ["mailboxes", "all"],
-      (old: Array<{ id: string; unreadCount: number }> | undefined) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === mailboxId
-            ? { ...m, unreadCount: Math.max(0, (m.unreadCount ?? 0) - 1) }
-            : m,
-        );
-      },
-    );
-
-    void api.messagesSetFlags({ messageId: id, unread: false }).catch(() => {
-      void queryClient.invalidateQueries({ queryKey: ["message", id] });
-      void queryClient.invalidateQueries({ queryKey: ["messages"] });
-      void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-    });
+    if (suppressAutoReadRef.current.has(selectedMessageId)) {
+      return;
+    }
+    markMessageReadLocally(selectedMessageId, openedMailboxId);
   }, [
     desktop,
+    markMessageReadLocally,
     openedMailboxId,
     openedUnread,
-    queryClient,
     selectedMessageId,
   ]);
 
@@ -463,6 +505,15 @@ export function AppShell() {
             : action === "star"
               ? { starred: true }
               : { starred: false };
+      if (action === "unread") {
+        for (const messageId of messageIds) {
+          suppressAutoReadRef.current.add(messageId);
+        }
+      } else if (action === "read") {
+        for (const messageId of messageIds) {
+          suppressAutoReadRef.current.delete(messageId);
+        }
+      }
       // Sequential to keep IMAP remote flag updates orderly.
       for (const messageId of messageIds) {
         await api.messagesSetFlags({ messageId, ...flags });
@@ -537,9 +588,9 @@ export function AppShell() {
       if (messages.length === 0) return;
       const index = messages.findIndex((m) => m.id === selectedMessageId);
       const next = index < 0 ? 0 : Math.min(Math.max(index + delta, 0), messages.length - 1);
-      selectMessage(messages[next].id);
+      handleSelectMessage(messages[next].id);
     },
-    [messages, selectMessage, selectedMessageId],
+    [handleSelectMessage, messages, selectedMessageId],
   );
 
   const handleSelectAccountFilter = useCallback(
@@ -1146,7 +1197,7 @@ export function AppShell() {
                   ...prev,
                   snoozedOnly: false,
                 }));
-                selectMessage(id);
+                handleSelectMessage(id);
               }}
               onChanged={() => {
                 refreshMailQueries();
@@ -1179,19 +1230,21 @@ export function AppShell() {
                 threads={threads}
                 selectedId={selectedMessageId}
                 onSelect={(id) => {
-                  selectMessage(id);
+                  handleSelectMessage(id);
                   if (inboxFilters.mailboxRole === "drafts") {
                     void openDraftInComposer(id);
                   }
                 }}
                 onOpenFocus={(id) => {
-                  selectMessage(id);
+                  handleSelectMessage(id);
                   setMessageFocusOpen(true);
                 }}
                 onToggleStar={(messageId, starred) => {
                   void handleToggleStar(messageId, starred);
                 }}
-                onBulkFlags={(ids, action) => handleBulkFlags(ids, action)}
+                onBulkFlags={(ids, action) => {
+                  void handleBulkFlags(ids, action);
+                }}
                 total={listTotal}
                 filters={inboxFilters}
                 onFiltersChange={handleInboxFiltersChange}

@@ -1037,12 +1037,37 @@ impl AppState {
     }
 
     /// Ensure the attachment bytes exist locally (re-fetch from IMAP if needed), then return path.
-    pub async fn ensure_attachment_path(&self, attachment_id: Uuid) -> CoreResult<String> {
-        let attachment = self.db.get_attachment(attachment_id)?;
+    ///
+    /// `message_id` / `filename` let us recover when the UI still holds a stale
+    /// attachment UUID after a resync replaced rows.
+    pub async fn ensure_attachment_path(
+        &self,
+        attachment_id: Uuid,
+        message_id: Option<Uuid>,
+        filename: Option<String>,
+    ) -> CoreResult<String> {
+        let attachment = match self.db.get_attachment(attachment_id) {
+            Ok(a) => a,
+            Err(novamail_db::DbError::NotFound(_)) => {
+                let mid = message_id.ok_or_else(|| {
+                    CoreError::Message(format!("not found: attachment {attachment_id}"))
+                })?;
+                let name = filename.clone().unwrap_or_default();
+                tracing::warn!(
+                    %attachment_id,
+                    message_id = %mid,
+                    filename = %name,
+                    "stale attachment id; resolving via message"
+                );
+                self.resolve_attachment_for_message(mid, attachment_id, name.as_str())
+                    .await?
+            }
+            Err(err) => return Err(err.into()),
+        };
         let path = std::path::PathBuf::from(&attachment.path);
         if path.is_file() {
             tracing::info!(
-                attachment_id = %attachment_id,
+                attachment_id = %attachment.id,
                 path = %path.display(),
                 "opening attachment"
             );
@@ -1052,7 +1077,7 @@ impl AppState {
                 .into_owned());
         }
         tracing::warn!(
-            attachment_id = %attachment_id,
+            attachment_id = %attachment.id,
             message_id = %attachment.message_id,
             path = %attachment.path,
             "attachment missing; refetching message from IMAP"
@@ -1067,10 +1092,8 @@ impl AppState {
         )
         .await
         .map_err(|e| CoreError::Message(format!("could not refetch attachment: {e}")))?;
-        let refreshed = self.db.list_attachments(message_id)?;
-        let found = refreshed
-            .into_iter()
-            .find(|a| a.filename == filename)
+        let found = self
+            .find_attachment_row(message_id, Some(attachment.id), &filename)?
             .ok_or_else(|| {
                 CoreError::Message(format!(
                     "attachment '{filename}' still missing after IMAP refetch"
@@ -1094,14 +1117,73 @@ impl AppState {
             .into_owned())
     }
 
+    async fn resolve_attachment_for_message(
+        &self,
+        message_id: Uuid,
+        preferred_id: Uuid,
+        filename: &str,
+    ) -> CoreResult<AttachmentDto> {
+        if let Some(found) = self.find_attachment_row(message_id, Some(preferred_id), filename)? {
+            return Ok(found);
+        }
+        refetch_message_content(
+            &self.db,
+            &self.secrets,
+            &self.paths.blobs_dir,
+            message_id,
+        )
+        .await
+        .map_err(|e| CoreError::Message(format!("could not refetch attachment: {e}")))?;
+        self.find_attachment_row(message_id, Some(preferred_id), filename)?
+            .ok_or_else(|| {
+                CoreError::Message(format!(
+                    "not found: attachment {preferred_id} (message {message_id})"
+                ))
+            })
+    }
+
+    fn find_attachment_row(
+        &self,
+        message_id: Uuid,
+        preferred_id: Option<Uuid>,
+        filename: &str,
+    ) -> CoreResult<Option<AttachmentDto>> {
+        let rows = self.db.list_attachments(message_id)?;
+        if let Some(id) = preferred_id {
+            if let Some(hit) = rows.iter().find(|a| a.id == id) {
+                return Ok(Some(hit.clone()));
+            }
+        }
+        if !filename.is_empty() {
+            if let Some(hit) = rows.iter().find(|a| a.filename == filename) {
+                return Ok(Some(hit.clone()));
+            }
+        }
+        if rows.len() == 1 {
+            return Ok(Some(rows.into_iter().next().unwrap()));
+        }
+        Ok(None)
+    }
+
     /// Reveal the attachment's folder in the system file manager.
-    pub async fn reveal_attachment(&self, attachment_id: Uuid) -> CoreResult<String> {
-        let path = self.ensure_attachment_path(attachment_id).await?;
+    pub async fn reveal_attachment(
+        &self,
+        attachment_id: Uuid,
+        message_id: Option<Uuid>,
+        filename: Option<String>,
+    ) -> CoreResult<String> {
+        let path = self
+            .ensure_attachment_path(attachment_id, message_id, filename)
+            .await?;
         let parent = std::path::Path::new(&path)
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.clone());
         Ok(parent)
+    }
+
+    pub fn total_inbox_unread(&self) -> CoreResult<u32> {
+        Ok(self.db.total_inbox_unread()?)
     }
 
     /// Write an exported message rendering into the user's Downloads folder.

@@ -62,6 +62,18 @@ impl LiveImap {
         }
     }
 
+    /// Lightweight FLAGS-only fetch for catch-up without re-downloading bodies.
+    pub async fn fetch_uid_flags_range(
+        &mut self,
+        from_uid: u32,
+        to_uid: Option<u32>,
+    ) -> MailResult<Vec<FetchedFlags>> {
+        match self {
+            LiveImap::Tls(s) => s.fetch_uid_flags_range(from_uid, to_uid).await,
+            LiveImap::Plain(s) => s.fetch_uid_flags_range(from_uid, to_uid).await,
+        }
+    }
+
     pub async fn uid_store(&mut self, uid: &str, query: &str) -> MailResult<()> {
         match self {
             LiveImap::Tls(s) => s.uid_store(uid, query).await,
@@ -143,6 +155,13 @@ pub struct FetchedMessage {
     pub raw: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FetchedFlags {
+    pub uid: u32,
+    pub flags_seen: bool,
+    pub flags_flagged: bool,
+}
+
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
     pub async fn list_mailboxes(&mut self) -> MailResult<Vec<(String, Option<String>)>> {
         let mut stream = self
@@ -198,6 +217,34 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + Debug> ImapSession<T> {
             .map_err(|e| MailError::Imap(e.to_string()))?
         {
             if let Some(msg) = map_fetch(fetch) {
+                out.push(msg);
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn fetch_uid_flags_range(
+        &mut self,
+        from_uid: u32,
+        to_uid: Option<u32>,
+    ) -> MailResult<Vec<FetchedFlags>> {
+        let set = match to_uid {
+            Some(to) if to >= from_uid => format!("{from_uid}:{to}"),
+            _ => format!("{from_uid}:*"),
+        };
+        let mut stream = self
+            .session
+            .uid_fetch(&set, "(UID FLAGS)")
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))?;
+
+        let mut out = Vec::new();
+        while let Some(fetch) = stream
+            .try_next()
+            .await
+            .map_err(|e| MailError::Imap(e.to_string()))?
+        {
+            if let Some(msg) = map_flags_fetch(fetch) {
                 out.push(msg);
             }
         }
@@ -381,16 +428,7 @@ impl async_imap::Authenticator for Xoauth2 {
 
 fn map_fetch(fetch: Fetch) -> Option<FetchedMessage> {
     let uid = fetch.uid?;
-    let flags = fetch.flags();
-    let mut flags_seen = false;
-    let mut flags_flagged = false;
-    for flag in flags {
-        match flag {
-            async_imap::types::Flag::Seen => flags_seen = true,
-            async_imap::types::Flag::Flagged => flags_flagged = true,
-            _ => {}
-        }
-    }
+    let (flags_seen, flags_flagged) = extract_flags(&fetch);
     let raw = fetch.body()?.to_vec();
     Some(FetchedMessage {
         uid,
@@ -398,6 +436,29 @@ fn map_fetch(fetch: Fetch) -> Option<FetchedMessage> {
         flags_flagged,
         raw,
     })
+}
+
+fn map_flags_fetch(fetch: Fetch) -> Option<FetchedFlags> {
+    let uid = fetch.uid?;
+    let (flags_seen, flags_flagged) = extract_flags(&fetch);
+    Some(FetchedFlags {
+        uid,
+        flags_seen,
+        flags_flagged,
+    })
+}
+
+fn extract_flags(fetch: &Fetch) -> (bool, bool) {
+    let mut flags_seen = false;
+    let mut flags_flagged = false;
+    for flag in fetch.flags() {
+        match flag {
+            async_imap::types::Flag::Seen => flags_seen = true,
+            async_imap::types::Flag::Flagged => flags_flagged = true,
+            _ => {}
+        }
+    }
+    (flags_seen, flags_flagged)
 }
 
 fn infer_role(name: &str) -> Option<String> {

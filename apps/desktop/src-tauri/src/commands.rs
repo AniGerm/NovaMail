@@ -127,10 +127,13 @@ pub fn messages_get(
 
 #[tauri::command]
 pub async fn messages_set_flags(
+    app: AppHandle,
     state: State<'_, DesktopState>,
     request: SetFlagsRequest,
 ) -> Result<(), AppError> {
-    state.app.set_flags(request).await.map_err(map_err)
+    state.app.set_flags(request).await.map_err(map_err)?;
+    crate::update_unread_badge(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -284,10 +287,12 @@ pub fn attachments_list(
 pub async fn attachments_open_path(
     state: State<'_, DesktopState>,
     attachment_id: Uuid,
+    message_id: Option<Uuid>,
+    filename: Option<String>,
 ) -> Result<String, AppError> {
     state
         .app
-        .ensure_attachment_path(attachment_id)
+        .ensure_attachment_path(attachment_id, message_id, filename)
         .await
         .map_err(map_err)
 }
@@ -296,10 +301,12 @@ pub async fn attachments_open_path(
 pub async fn attachments_reveal(
     state: State<'_, DesktopState>,
     attachment_id: Uuid,
+    message_id: Option<Uuid>,
+    filename: Option<String>,
 ) -> Result<String, AppError> {
     state
         .app
-        .reveal_attachment(attachment_id)
+        .reveal_attachment(attachment_id, message_id, filename)
         .await
         .map_err(map_err)
 }
