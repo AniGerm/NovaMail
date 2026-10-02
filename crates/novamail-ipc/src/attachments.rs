@@ -21,3 +21,11 @@ pub struct OutgoingAttachment {
     pub mime: String,
     pub data_base64: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWithAppDto {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}

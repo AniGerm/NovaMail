@@ -25,6 +25,7 @@ interface MessageFocusDialogProps {
   onCreateEvent?: (suggestion?: EventSuggestionDto) => void;
   onCreateTask?: () => void;
   onReplySent?: () => void;
+  onMarkRead?: () => void;
 }
 
 /** Near-fullscreen reading surface with equal inset on all sides. */

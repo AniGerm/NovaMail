@@ -59,6 +59,12 @@ export interface OutgoingAttachment {
   dataBase64: string;
 }
 
+export interface OpenWithAppDto {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
 export interface MessageSummaryDto {
   id: string;
   accountId: string;

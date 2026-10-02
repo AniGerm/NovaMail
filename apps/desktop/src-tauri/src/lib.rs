@@ -1,4 +1,5 @@
 mod commands;
+mod open_with;
 mod shell_prefs;
 mod state;
 mod tray_badge;
@@ -259,6 +260,8 @@ pub fn run() {
             commands::messages_forward_draft,
             commands::attachments_list,
             commands::attachments_open_path,
+            commands::attachments_list_open_with,
+            commands::attachments_open_with,
             commands::attachments_reveal,
             commands::messages_export_pdf,
             commands::messages_export_html,

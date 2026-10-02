@@ -336,11 +336,20 @@ export function AppShell() {
   );
 
   const markSelectedReadIfNeeded = useCallback(() => {
-    const detail = messageQuery.data;
-    if (!detail || detail.summary.id !== selectedMessageId) return;
-    if (!detail.summary.unread) return;
-    markMessageReadLocally(detail.summary.id, detail.summary.mailboxId);
-  }, [markMessageReadLocally, messageQuery.data, selectedMessageId]);
+    const id = selectedMessageId;
+    if (!id) return;
+    const detail =
+      messageQuery.data?.summary.id === id ? messageQuery.data : undefined;
+    if (detail) {
+      if (!detail.summary.unread) return;
+      markMessageReadLocally(detail.summary.id, detail.summary.mailboxId);
+      return;
+    }
+    // Detail may still be loading (common for auto-selected first mail).
+    const fromList = messages.find((m) => m.id === id);
+    if (!fromList?.unread) return;
+    markMessageReadLocally(fromList.id, fromList.mailboxId);
+  }, [markMessageReadLocally, messageQuery.data, messages, selectedMessageId]);
 
   const handleSelectMessage = useCallback(
     (id: string | null) => {
@@ -1280,6 +1289,9 @@ export function AppShell() {
                     openFocusForMessage(selectedMessageId);
                   }
                 }}
+                onMarkRead={() => {
+                  markSelectedReadIfNeeded();
+                }}
                 onDelete={() => {
                   void handleDelete();
                 }}
@@ -1430,6 +1442,9 @@ export function AppShell() {
         aiEnabled={aiReplyEnabled}
         inSpamFolder={inboxFilters.mailboxRole === "junk"}
         onClose={() => setMessageFocusOpen(false)}
+        onMarkRead={() => {
+          markSelectedReadIfNeeded();
+        }}
         onDelete={() => {
           setMessageFocusOpen(false);
           void handleDelete();
