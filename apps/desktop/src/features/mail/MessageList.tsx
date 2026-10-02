@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  CheckCheck,
   ChevronDown,
   ChevronRight,
   ListTree,
@@ -336,19 +335,6 @@ export function MessageList({
             onClick={() => patch({ hasAttachments: !filters.hasAttachments })}
             label={t("filterAttachments")}
           />
-          <button
-            type="button"
-            className="ml-auto inline-flex items-center gap-1.5 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] px-2 py-1 text-xs font-medium text-[var(--nova-ink-muted)] hover:border-[var(--nova-accent)] hover:text-[var(--nova-ink)]"
-            onClick={() => {
-              if (allVisibleSelected && checkedCount > 0) clearSelection();
-              else void selectAllVisible();
-            }}
-          >
-            <CheckCheck className="h-3.5 w-3.5" />
-            {allVisibleSelected && checkedCount > 0
-              ? t("clearSelection")
-              : t("selectAll")}
-          </button>
         </div>
 
         {checkedCount > 0 ? (
@@ -495,6 +481,38 @@ export function MessageList({
         </div>
       </header>
 
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface-2)_55%,transparent)] px-2 py-1.5">
+          <label className="flex shrink-0 items-center">
+            <input
+              type="checkbox"
+              className="mt-0"
+              checked={allVisibleSelected && checkedCount > 0}
+              ref={(el) => {
+                if (el) {
+                  el.indeterminate =
+                    checkedCount > 0 && !allVisibleSelected;
+                }
+              }}
+              aria-label={t("selectAll")}
+              title={
+                allVisibleSelected && checkedCount > 0
+                  ? t("clearSelection")
+                  : t("selectAll")
+              }
+              onChange={() => {
+                if (allVisibleSelected && checkedCount > 0) clearSelection();
+                else void selectAllVisible();
+              }}
+            />
+          </label>
+          <span className="text-[11px] font-medium text-[var(--nova-ink-muted)]">
+            {checkedCount > 0
+              ? t("selectedCount", { count: checkedCount })
+              : t("selectAll")}
+          </span>
+        </div>
+
       <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto">
         <div
           style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}
@@ -516,7 +534,11 @@ export function MessageList({
               return (
                 <div
                   key={`thread-${thread.id}`}
-                  className="absolute left-0 right-0 border-b border-[var(--nova-border)]"
+                  className={cn(
+                    "absolute left-0 right-0 border-b border-[var(--nova-border)]",
+                    unread &&
+                      "bg-[color-mix(in_srgb,var(--nova-accent-soft)_28%,transparent)] shadow-[inset_3px_0_0_0_var(--nova-accent),inset_0_0_0_1px_color-mix(in_srgb,var(--nova-accent)_42%,transparent)]",
+                  )}
                   style={{
                     height: `${item.size}px`,
                     transform: `translateY(${item.start}px)`,
@@ -525,9 +547,7 @@ export function MessageList({
                   <div
                     className={cn(
                       "flex h-full w-full items-stretch gap-1 px-2 py-2.5 transition-colors",
-                      unread
-                        ? "bg-[color-mix(in_srgb,var(--nova-accent-soft)_35%,transparent)]"
-                        : "hover:bg-[var(--nova-surface-2)]",
+                      !unread && "hover:bg-[var(--nova-surface-2)]",
                       (threadChecked || threadPartial) &&
                         "bg-[color-mix(in_srgb,var(--nova-accent-soft)_55%,transparent)]",
                     )}
@@ -562,6 +582,12 @@ export function MessageList({
                       ) : (
                         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--nova-ink-muted)]" />
                       )}
+                      {unread ? (
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-accent)]"
+                        />
+                      ) : null}
                       <span
                         className={cn(
                           "min-w-0 flex-1 truncate text-sm",
@@ -625,10 +651,13 @@ export function MessageList({
                   indented ? "py-2 pl-10 pr-3" : "px-2 py-3",
                   selected
                     ? "bg-[var(--nova-accent-soft)]"
-                    : "hover:bg-[var(--nova-surface-2)]",
+                    : !message.unread && "hover:bg-[var(--nova-surface-2)]",
                   checked &&
                     "bg-[color-mix(in_srgb,var(--nova-accent-soft)_60%,transparent)]",
+                  message.unread &&
+                    "bg-[color-mix(in_srgb,var(--nova-accent-soft)_28%,transparent)] shadow-[inset_3px_0_0_0_var(--nova-accent),inset_0_0_0_1px_color-mix(in_srgb,var(--nova-accent)_42%,transparent)]",
                   indented &&
+                    !message.unread &&
                     "border-l-[3px] border-l-[var(--nova-accent)]",
                 )}
                 style={{
@@ -682,6 +711,12 @@ export function MessageList({
                         >
                           ↳
                         </span>
+                      ) : null}
+                      {message.unread ? (
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 shrink-0 rounded-full bg-[var(--nova-accent)]"
+                        />
                       ) : null}
                       <span className="truncate">
                         {displayName(message.from)}
@@ -743,6 +778,7 @@ export function MessageList({
             );
           })}
         </div>
+      </div>
       </div>
     </section>
   );
