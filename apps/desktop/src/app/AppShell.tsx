@@ -287,7 +287,11 @@ export function AppShell() {
     void api.shellSetUiLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
 
-  // Preview may stay unread (blue dot). Mark read only on re-click or fullscreen.
+  // Auto-preselect may leave the first mail unread (blue dot). The first *user*
+  // click on that preview — or fullscreen — clears it. Do not require a second
+  // click when the detail query is still loading (that was the remaining bug).
+  const autoPreviewIdRef = useRef<string | null>(null);
+
   const markMessageReadLocally = useCallback(
     (id: string, mailboxId?: string | null) => {
       queryClient.setQueryData(
@@ -326,59 +330,60 @@ export function AppShell() {
           },
         );
       }
-      void api.messagesSetFlags({ messageId: id, unread: false }).catch(() => {
-        void queryClient.invalidateQueries({ queryKey: ["message", id] });
-        void queryClient.invalidateQueries({ queryKey: ["messages"] });
-        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-      });
+      void api
+        .messagesSetFlags({ messageId: id, unread: false })
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ["messages", "threads"] });
+        })
+        .catch(() => {
+          void queryClient.invalidateQueries({ queryKey: ["message", id] });
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        });
     },
     [queryClient],
   );
 
-  const markSelectedReadIfNeeded = useCallback(() => {
-    const detail = messageQuery.data;
-    if (!detail || detail.summary.id !== selectedMessageId) return;
-    if (!detail.summary.unread) return;
-    markMessageReadLocally(detail.summary.id, detail.summary.mailboxId);
-  }, [markMessageReadLocally, messageQuery.data, selectedMessageId]);
+  const mailboxIdFor = useCallback(
+    (id: string) => {
+      if (messageQuery.data?.summary.id === id) {
+        return messageQuery.data.summary.mailboxId;
+      }
+      return messages.find((m) => m.id === id)?.mailboxId ?? null;
+    },
+    [messageQuery.data, messages],
+  );
 
   const handleSelectMessage = useCallback(
     (id: string | null) => {
-      if (id && id === selectedMessageId) {
-        // Re-click already previewed mail → clear blue unread dot.
-        markSelectedReadIfNeeded();
+      if (id) {
+        // Any user-driven select (incl. first click on the auto-previewed
+        // top mail) clears unread. Auto-preselect uses selectMessage()
+        // directly so the blue dot can stay until that click.
+        markMessageReadLocally(id, mailboxIdFor(id));
+        autoPreviewIdRef.current = null;
       }
       selectMessage(id);
     },
-    [markSelectedReadIfNeeded, selectMessage, selectedMessageId],
+    [mailboxIdFor, markMessageReadLocally, selectMessage],
   );
 
   const openFocusForMessage = useCallback(
     (id: string) => {
+      autoPreviewIdRef.current = null;
       selectMessage(id);
       // Fullscreen counts as "opened for real" → clear unread blue dot.
-      const detail = messageQuery.data;
-      if (detail?.summary.id === id) {
-        if (detail.summary.unread) {
-          markMessageReadLocally(id, detail.summary.mailboxId);
-        }
-      } else {
-        // Detail not loaded yet for this id — persist SEEN remotely + refresh.
-        void api.messagesSetFlags({ messageId: id, unread: false }).then(() => {
-          void queryClient.invalidateQueries({ queryKey: ["messages"] });
-          void queryClient.invalidateQueries({ queryKey: ["message", id] });
-          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-        });
-      }
+      markMessageReadLocally(id, mailboxIdFor(id));
       setMessageFocusOpen(true);
     },
-    [markMessageReadLocally, messageQuery.data, queryClient, selectMessage],
+    [mailboxIdFor, markMessageReadLocally, selectMessage],
   );
 
   // Preselect first mail so preview shows with unread dot still visible.
   useEffect(() => {
     if (!desktop || selectedMessageId) return;
     if (inboxFilters.viewMode === "flat" && messages[0]?.id) {
+      autoPreviewIdRef.current = messages[0].id;
       selectMessage(messages[0].id);
       return;
     }
@@ -387,7 +392,8 @@ export function AppShell() {
       void api
         .messagesListByThread(threads[0].id)
         .then((items) => {
-          if (cancelled || !items[0]?.id) return;
+          if (cancelled || !items[0]?.id || selectedMessageId) return;
+          autoPreviewIdRef.current = items[0].id;
           selectMessage(items[0].id);
         })
         .catch(() => undefined);
