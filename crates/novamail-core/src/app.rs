@@ -64,7 +64,7 @@ use crate::offline_mailbox::{
     self, OfflineMailboxSettings, SETTINGS_KEY as OFFLINE_MAILBOX_KEY,
 };
 use crate::paths::AppPaths;
-use crate::sanitize::{rewrite_cid_urls, sanitize_html};
+use crate::sanitize::sanitize_html;
 use crate::spam::{self, SpamSettings};
 use crate::{CoreError, CoreResult};
 
@@ -503,23 +503,9 @@ impl AppState {
     pub fn get_message(&self, message_id: Uuid) -> CoreResult<MessageDetailDto> {
         let mut detail = self.db.get_message(message_id)?;
         if let Some(html) = detail.body_html.take() {
-            let mut html = html;
-            if html.to_ascii_lowercase().contains("cid:") {
-                let mut cid_map = Vec::new();
-                for att in &detail.attachments {
-                    let Some(cid) = att.content_id.as_ref() else {
-                        continue;
-                    };
-                    if let Ok(data) = std::fs::read(&att.path) {
-                        cid_map.push((cid.clone(), att.mime.clone(), data));
-                    }
-                }
-                if !cid_map.is_empty() {
-                    html = rewrite_cid_urls(&html, &cid_map);
-                }
-            }
+            // Keep `cid:` intact — the UI maps Content-ID → asset:// URLs.
+            // Avoid embedding base64 here (large mailboxes + heavy HTML were crashing).
             let cleaned = sanitize_html(&html);
-            // Prefer HTML even when sparse — plaintext fallback only when empty.
             detail.body_html = if cleaned.trim().is_empty() {
                 None
             } else {

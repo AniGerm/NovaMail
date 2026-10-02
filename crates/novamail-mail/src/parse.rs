@@ -1,4 +1,3 @@
-use base64::Engine;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
 use novamail_ipc::AddressDto;
 
@@ -79,10 +78,9 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         .unwrap_or_else(|| chrono::Utc::now().timestamp());
 
     let body_text = message.body_text(0).map(|s| s.to_string());
-    let mut body_html = message.body_html(0).map(|s| s.to_string());
+    let body_html = message.body_html(0).map(|s| s.to_string());
 
     let mut attachments = Vec::new();
-    let mut cid_parts: Vec<(String, String, Vec<u8>)> = Vec::new();
 
     for (idx, part) in message.attachments().enumerate() {
         let filename = part
@@ -110,9 +108,6 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
             continue;
         }
         let content_id = part.content_id().map(|cid| normalize_cid(cid));
-        if let Some(cid) = content_id.clone() {
-            cid_parts.push((cid, mime.clone(), data.clone()));
-        }
         attachments.push(ParsedAttachment {
             filename,
             mime,
@@ -127,7 +122,10 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         let Some(cid) = part.content_id().map(normalize_cid) else {
             continue;
         };
-        if cid_parts.iter().any(|(existing, _, _)| existing == &cid) {
+        if attachments
+            .iter()
+            .any(|a| a.content_id.as_deref() == Some(cid.as_str()))
+        {
             continue;
         }
         let mime = part
@@ -152,7 +150,6 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
             .attachment_name()
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("inline-{}.bin", attachments.len()));
-        cid_parts.push((cid.clone(), mime.clone(), data.clone()));
         attachments.push(ParsedAttachment {
             filename,
             mime,
@@ -161,9 +158,8 @@ pub fn parse_rfc822(raw: &[u8], flags_seen: bool, flags_flagged: bool) -> MailRe
         });
     }
 
-    if let Some(html) = body_html.as_mut() {
-        *html = rewrite_cid_to_data(html, &cid_parts);
-    }
+    // Keep `cid:` references in HTML. The UI resolves them via attachment
+    // content-id → local asset URLs so we never inflate bodies with base64.
 
     let snippet_source = body_text
         .clone()
@@ -204,29 +200,6 @@ fn normalize_cid(cid: &str) -> String {
         .to_string()
 }
 
-fn rewrite_cid_to_data(html: &str, cid_parts: &[(String, String, Vec<u8>)]) -> String {
-    if cid_parts.is_empty() || !html.to_ascii_lowercase().contains("cid:") {
-        return html.to_string();
-    }
-    let mut out = html.to_string();
-    for (cid, mime, data) in cid_parts {
-        if data.is_empty() || cid.is_empty() {
-            continue;
-        }
-        let data_url = format!(
-            "data:{};base64,{}",
-            mime,
-            base64::engine::general_purpose::STANDARD.encode(data)
-        );
-        for candidate in [format!("cid:{cid}"), format!("cid:<{cid}>")] {
-            if out.contains(&candidate) {
-                out = out.replace(&candidate, &data_url);
-            }
-        }
-    }
-    out
-}
-
 fn strip_tags(html: String) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
@@ -262,7 +235,7 @@ Hi Bob!\r\n";
     }
 
     #[test]
-    fn rewrites_inline_cid_images_in_html() {
+    fn keeps_cid_and_content_id_for_inline_images() {
         let raw = b"From: Alice <alice@example.com>\r\n\
 To: Bob <bob@example.com>\r\n\
 Subject: Pic\r\n\
@@ -283,8 +256,11 @@ iVBORw0KGgo=\r\n\
 --b1--\r\n";
         let parsed = parse_rfc822(raw, true, false).unwrap();
         let html = parsed.body_html.expect("html body");
-        assert!(html.contains("data:image/png;base64,"));
-        assert!(!html.to_ascii_lowercase().contains("cid:"));
+        assert!(html.contains("cid:img1@x"));
         assert!(html.contains("Hello"));
+        assert!(parsed
+            .attachments
+            .iter()
+            .any(|a| a.content_id.as_deref() == Some("img1@x")));
     }
 }

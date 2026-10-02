@@ -274,6 +274,7 @@ export const de = {
   addRule: "Regel hinzufügen",
   edit: "Bearbeiten",
   delete: "Löschen",
+  archive: "Archivieren",
   spam: "Spam",
   trash: "Papierkorb",
   spamTitle: "Spam-Filter",

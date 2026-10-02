@@ -136,7 +136,10 @@ export function AppShell() {
 
   const messagesQuery = useQuery({
     queryKey: ["messages", "flat", listRequest],
-    enabled: desktop && (accountsQuery.data?.length ?? 0) > 0,
+    enabled:
+      desktop &&
+      (accountsQuery.data?.length ?? 0) > 0 &&
+      (inboxFilters.viewMode === "flat" || triageOpen),
     queryFn: () => api.messagesList(listRequest),
   });
 
@@ -161,6 +164,19 @@ export function AppShell() {
     queryFn: () => api.aiGetSettings(),
   });
 
+  // Debounce list refreshes from background sync so large mailboxes don't thrash.
+  const scheduleMailRefresh = useCallback(() => {
+    const w = window as Window & { __novaMailRefreshTimer?: number };
+    if (w.__novaMailRefreshTimer != null) {
+      window.clearTimeout(w.__novaMailRefreshTimer);
+    }
+    w.__novaMailRefreshTimer = window.setTimeout(() => {
+      w.__novaMailRefreshTimer = undefined;
+      void queryClient.invalidateQueries({ queryKey: ["messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+    }, 1500);
+  }, [queryClient]);
+
   useEffect(() => {
     if (!desktop) return;
     let unlisten: (() => void) | undefined;
@@ -176,8 +192,7 @@ export function AppShell() {
             : `Synchronisiere ${event.mailboxName}… ${event.fetched}`,
         );
         if (event.done) {
-          void queryClient.invalidateQueries({ queryKey: ["messages"] });
-          void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+          scheduleMailRefresh();
         }
       })
       .then((fn) => {
@@ -186,7 +201,7 @@ export function AppShell() {
     return () => {
       unlisten?.();
     };
-  }, [desktop, queryClient, setSyncStatus]);
+  }, [desktop, scheduleMailRefresh, setSyncStatus]);
 
   // Refresh list + sidebar badges as soon as background sync finds new mail.
   useEffect(() => {
@@ -194,9 +209,7 @@ export function AppShell() {
     let unlisten: (() => void) | undefined;
     api
       .onMailNew(() => {
-        void queryClient.invalidateQueries({ queryKey: ["messages"] });
-        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-        void queryClient.invalidateQueries({ queryKey: ["message"] });
+        scheduleMailRefresh();
       })
       .then((fn) => {
         unlisten = fn;
@@ -204,7 +217,7 @@ export function AppShell() {
     return () => {
       unlisten?.();
     };
-  }, [desktop, queryClient]);
+  }, [desktop, scheduleMailRefresh]);
 
   // Every scheduled IMAP cycle — keep inbox live even when no "new UID" event fired.
   useEffect(() => {
@@ -212,8 +225,7 @@ export function AppShell() {
     let unlisten: (() => void) | undefined;
     api
       .onSyncCycle(() => {
-        void queryClient.invalidateQueries({ queryKey: ["messages"] });
-        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+        scheduleMailRefresh();
       })
       .then((fn) => {
         unlisten = fn;
@@ -221,7 +233,7 @@ export function AppShell() {
     return () => {
       unlisten?.();
     };
-  }, [desktop, queryClient]);
+  }, [desktop, scheduleMailRefresh]);
 
   // Keep WebKit spellcheck language in sync with settings.
   useEffect(() => {
@@ -231,19 +243,53 @@ export function AppShell() {
     void api.spellcheckSetLanguages([code, short, "en_US", "en"]).catch(() => undefined);
   }, [desktop, spellcheckLang]);
 
-  // Opening a message marks it read so sidebar unread badges update live.
+  // Opening a message marks it read — optimistic cache update, no full list refetch.
   useEffect(() => {
     if (!desktop || !selectedMessageId || !messageQuery.data) return;
     if (!messageQuery.data.summary.unread) return;
     const id = selectedMessageId;
+    const mailboxId = messageQuery.data.summary.mailboxId;
+
+    queryClient.setQueryData(
+      ["message", id],
+      (old: MessageDetailDto | undefined) =>
+        old
+          ? { ...old, summary: { ...old.summary, unread: false } }
+          : old,
+    );
+    queryClient.setQueriesData(
+      { queryKey: ["messages"] },
+      (old: unknown) => {
+        if (!old || typeof old !== "object") return old;
+        const data = old as { messages?: Array<{ id: string; unread: boolean }> };
+        if (!Array.isArray(data.messages)) return old;
+        return {
+          ...data,
+          messages: data.messages.map((m) =>
+            m.id === id ? { ...m, unread: false } : m,
+          ),
+        };
+      },
+    );
+    queryClient.setQueryData(
+      ["mailboxes", "all"],
+      (old: Array<{ id: string; unreadCount: number }> | undefined) => {
+        if (!old) return old;
+        return old.map((m) =>
+          m.id === mailboxId
+            ? { ...m, unreadCount: Math.max(0, (m.unreadCount ?? 0) - 1) }
+            : m,
+        );
+      },
+    );
+
     void api
       .messagesSetFlags({ messageId: id, unread: false })
-      .then(() => {
+      .catch(() => {
         void queryClient.invalidateQueries({ queryKey: ["message", id] });
         void queryClient.invalidateQueries({ queryKey: ["messages"] });
         void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-      })
-      .catch(() => undefined);
+      });
   }, [desktop, messageQuery.data, queryClient, selectedMessageId]);
 
   useEffect(() => {
@@ -1048,6 +1094,12 @@ export function AppShell() {
                 message={messageQuery.data}
                 aiEnabled={aiReplyEnabled}
                 inSpamFolder={inboxFilters.mailboxRole === "junk"}
+                onDelete={() => {
+                  void handleDelete();
+                }}
+                onArchive={() => {
+                  void handleArchive();
+                }}
                 onReply={() => {
                   setComposerBody("");
                   if (messageQuery.data) {
