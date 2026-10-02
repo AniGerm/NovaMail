@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   ListTree,
   List,
+  Mail,
+  MailOpen,
   Paperclip,
   Star,
+  StarOff,
 } from "lucide-react";
-import { cn, Select } from "@novamail/ui";
+import { Button, cn, Select } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type {
@@ -43,12 +47,20 @@ export interface InboxFilters {
   viewMode: InboxViewMode;
 }
 
+export type BulkFlagAction =
+  | "read"
+  | "unread"
+  | "star"
+  | "unstar";
+
 interface MessageListProps {
   messages: MessageSummaryDto[];
   threads: ThreadListItemDto[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onOpenFocus?: (id: string) => void;
   onToggleStar?: (messageId: string, starred: boolean) => void;
+  onBulkFlags?: (messageIds: string[], action: BulkFlagAction) => void | Promise<void>;
   total: number;
   filters: InboxFilters;
   onFiltersChange: (next: InboxFilters) => void;
@@ -74,7 +86,9 @@ export function MessageList({
   threads,
   selectedId,
   onSelect,
+  onOpenFocus,
   onToggleStar,
+  onBulkFlags,
   total,
   filters,
   onFiltersChange,
@@ -89,10 +103,15 @@ export function MessageList({
     Record<string, MessageSummaryDto[]>
   >({});
   const [loadingThread, setLoadingThread] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const lastClickedId = useRef<string | null>(null);
 
   useEffect(() => {
     setExpandedThreads(new Set());
     setThreadMessages({});
+    setCheckedIds(new Set());
+    lastClickedId.current = null;
   }, [filters.viewMode, filters.accountId, filters.mailboxId, filters.unreadOnly, filters.starredOnly, filters.hasAttachments, filters.sortBy, filters.sortDir]);
 
   const toggleThread = async (threadId: string) => {
@@ -136,6 +155,101 @@ export function MessageList({
     return out;
   }, [expandedThreads, filters.viewMode, messages, threadMessages, threads]);
 
+  const selectableMessageIds = useMemo(() => {
+    if (filters.viewMode === "flat") {
+      return messages.map((m) => m.id);
+    }
+    const ids: string[] = [];
+    for (const thread of threads) {
+      const children = threadMessages[thread.id];
+      if (children) {
+        for (const m of children) ids.push(m.id);
+      }
+    }
+    return ids;
+  }, [filters.viewMode, messages, threadMessages, threads]);
+
+  const allVisibleSelected =
+    selectableMessageIds.length > 0 &&
+    selectableMessageIds.every((id) => checkedIds.has(id));
+
+  const toggleChecked = (id: string, shiftKey: boolean) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (shiftKey && lastClickedId.current) {
+        const order = selectableMessageIds;
+        const a = order.indexOf(lastClickedId.current);
+        const b = order.indexOf(id);
+        if (a >= 0 && b >= 0) {
+          const [from, to] = a < b ? [a, b] : [b, a];
+          for (let i = from; i <= to; i += 1) {
+            const mid = order[i];
+            if (mid) next.add(mid);
+          }
+          lastClickedId.current = id;
+          return next;
+        }
+      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      lastClickedId.current = id;
+      return next;
+    });
+  };
+
+  const ensureThreadMessages = async (threadId: string) => {
+    if (threadMessages[threadId]) return threadMessages[threadId];
+    const items = await api.messagesListByThread(threadId);
+    setThreadMessages((prev) => ({ ...prev, [threadId]: items }));
+    return items;
+  };
+
+  const toggleThreadChecked = async (threadId: string) => {
+    const items = await ensureThreadMessages(threadId);
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        items.length > 0 && items.every((m) => next.has(m.id));
+      if (allSelected) {
+        for (const m of items) next.delete(m.id);
+      } else {
+        for (const m of items) next.add(m.id);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisible = async () => {
+    if (filters.viewMode === "flat") {
+      setCheckedIds(new Set(messages.map((m) => m.id)));
+      return;
+    }
+    const ids = new Set<string>();
+    await Promise.all(
+      threads.map(async (thread) => {
+        const items = await ensureThreadMessages(thread.id);
+        for (const m of items) ids.add(m.id);
+      }),
+    );
+    setCheckedIds(ids);
+  };
+
+  const clearSelection = () => {
+    setCheckedIds(new Set());
+    lastClickedId.current = null;
+  };
+
+  const runBulk = async (action: BulkFlagAction) => {
+    if (!onBulkFlags || checkedIds.size === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      await onBulkFlags([...checkedIds], action);
+      clearSelection();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -154,6 +268,8 @@ export function MessageList({
 
   const patch = (partial: Partial<InboxFilters>) =>
     onFiltersChange({ ...filters, ...partial });
+
+  const checkedCount = checkedIds.size;
 
   return (
     <section
@@ -204,7 +320,7 @@ export function MessageList({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <FilterChip
             active={filters.unreadOnly}
             onClick={() => patch({ unreadOnly: !filters.unreadOnly })}
@@ -220,7 +336,81 @@ export function MessageList({
             onClick={() => patch({ hasAttachments: !filters.hasAttachments })}
             label={t("filterAttachments")}
           />
+          <button
+            type="button"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] px-2 py-1 text-xs font-medium text-[var(--nova-ink-muted)] hover:border-[var(--nova-accent)] hover:text-[var(--nova-ink)]"
+            onClick={() => {
+              if (allVisibleSelected && checkedCount > 0) clearSelection();
+              else void selectAllVisible();
+            }}
+          >
+            <CheckCheck className="h-3.5 w-3.5" />
+            {allVisibleSelected && checkedCount > 0
+              ? t("clearSelection")
+              : t("selectAll")}
+          </button>
         </div>
+
+        {checkedCount > 0 ? (
+          <div
+            className="flex flex-wrap items-center gap-1.5 rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/30 bg-[var(--nova-accent-soft)] px-2.5 py-2"
+            role="toolbar"
+            aria-label={t("bulkActions")}
+          >
+            <span className="mr-1 text-xs font-medium text-[var(--nova-accent)]">
+              {t("selectedCount", { count: checkedCount })}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("read")}
+            >
+              <MailOpen className="h-3.5 w-3.5" />
+              {t("markAsRead")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("unread")}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              {t("markAsUnread")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("star")}
+            >
+              <Star className="h-3.5 w-3.5" />
+              {t("markAsStarred")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("unstar")}
+            >
+              <StarOff className="h-3.5 w-3.5" />
+              {t("markAsUnstarred")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={bulkBusy}
+              onClick={clearSelection}
+            >
+              {t("clearSelection")}
+            </Button>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-1">
@@ -265,7 +455,7 @@ export function MessageList({
               <option value="">{t("allAccounts")}</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.name}
+                  {(account.label || account.name).trim() || account.email}
                 </option>
               ))}
             </Select>
@@ -316,6 +506,13 @@ export function MessageList({
             if (row.kind === "thread") {
               const { thread, expanded } = row;
               const unread = thread.unreadCount > 0;
+              const children = threadMessages[thread.id] ?? [];
+              const threadChecked =
+                children.length > 0 &&
+                children.every((m) => checkedIds.has(m.id));
+              const threadPartial =
+                !threadChecked &&
+                children.some((m) => checkedIds.has(m.id));
               return (
                 <div
                   key={`thread-${thread.id}`}
@@ -325,18 +522,40 @@ export function MessageList({
                     transform: `translateY(${item.start}px)`,
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void toggleThread(thread.id);
-                    }}
+                  <div
                     className={cn(
-                      "flex h-full w-full flex-col gap-1 px-3 py-2.5 text-left transition-colors",
+                      "flex h-full w-full items-stretch gap-1 px-2 py-2.5 transition-colors",
                       unread
                         ? "bg-[color-mix(in_srgb,var(--nova-accent-soft)_35%,transparent)]"
                         : "hover:bg-[var(--nova-surface-2)]",
+                      (threadChecked || threadPartial) &&
+                        "bg-[color-mix(in_srgb,var(--nova-accent-soft)_55%,transparent)]",
                     )}
                   >
+                    <label
+                      className="flex shrink-0 items-start pt-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={threadChecked}
+                        ref={(el) => {
+                          if (el) el.indeterminate = threadPartial;
+                        }}
+                        aria-label={t("selectThread")}
+                        onChange={() => {
+                          void toggleThreadChecked(thread.id);
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void toggleThread(thread.id);
+                      }}
+                      className="flex min-w-0 flex-1 flex-col gap-1 text-left"
+                    >
                     <div className="flex items-center gap-1.5">
                       {expanded ? (
                         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--nova-ink-muted)]" />
@@ -383,7 +602,8 @@ export function MessageList({
                         ? t("loadingThread")
                         : thread.snippet}
                     </p>
-                  </button>
+                    </button>
+                  </div>
                 </div>
               );
             }
@@ -395,92 +615,131 @@ export function MessageList({
             if (!message) return null;
             const selected = message.id === selectedId;
             const indented = row.kind === "thread-child";
+            const checked = checkedIds.has(message.id);
 
             return (
-              <button
+              <div
                 key={message.id}
-                type="button"
-                onClick={() => onSelect(message.id)}
                 className={cn(
-                  "absolute left-0 right-0 flex w-full flex-col gap-1 border-b border-[var(--nova-border)] text-left transition-colors",
-                  indented ? "py-2 pl-8 pr-4" : "px-4 py-3",
+                  "absolute left-0 right-0 flex border-b border-[var(--nova-border)] transition-colors",
+                  indented ? "py-2 pl-10 pr-3" : "px-2 py-3",
                   selected
                     ? "bg-[var(--nova-accent-soft)]"
                     : "hover:bg-[var(--nova-surface-2)]",
+                  checked &&
+                    "bg-[color-mix(in_srgb,var(--nova-accent-soft)_60%,transparent)]",
                   indented &&
-                    "border-l-2 border-l-[var(--nova-accent)] bg-[color-mix(in_srgb,var(--nova-surface-2)_55%,transparent)]",
+                    "border-l-[3px] border-l-[var(--nova-accent)]",
                 )}
                 style={{
                   height: `${item.size}px`,
                   transform: `translateY(${item.start}px)`,
                 }}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={cn(
-                      "truncate text-sm",
-                      message.unread ? "font-semibold" : "font-medium",
-                    )}
-                  >
-                    {displayName(message.from)}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      aria-label={t("starMessage")}
-                      aria-pressed={message.starred}
-                      className="rounded p-0.5 text-[var(--nova-ink-muted)] hover:bg-[var(--nova-surface)] hover:text-[var(--nova-warning)]"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onToggleStar?.(message.id, !message.starred);
-                      }}
+                <label
+                  className="flex shrink-0 items-start pt-1 pr-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={checked}
+                    aria-label={t("selectMessage")}
+                    onChange={(e) => {
+                      const shiftKey =
+                        (e.nativeEvent as MouseEvent).shiftKey === true;
+                      toggleChecked(message.id, shiftKey);
+                    }}
+                    onClick={(e) => {
+                      // Support shift-click range without relying on change event.
+                      if (e.shiftKey) {
+                        e.preventDefault();
+                        toggleChecked(message.id, true);
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onSelect(message.id)}
+                  onDoubleClick={() => {
+                    onSelect(message.id);
+                    onOpenFocus?.(message.id);
+                  }}
+                  className="flex min-w-0 flex-1 flex-col gap-1 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={cn(
+                        "flex min-w-0 items-center gap-1.5 truncate text-sm",
+                        message.unread ? "font-semibold" : "font-medium",
+                      )}
                     >
-                      <Star
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          message.starred &&
-                            "fill-[var(--nova-warning)] text-[var(--nova-warning)]",
-                        )}
-                      />
-                    </button>
+                      {indented ? (
+                        <span
+                          aria-hidden
+                          className="shrink-0 font-mono text-[var(--nova-ink-muted)]"
+                        >
+                          ↳
+                        </span>
+                      ) : null}
+                      <span className="truncate">
+                        {displayName(message.from)}
+                      </span>
+                    </span>
                     <span className="text-xs text-[var(--nova-ink-muted)]">
                       {formatMessageDate(message.date, locale)}
                     </span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "truncate text-sm",
+                        message.unread
+                          ? "text-[var(--nova-ink)]"
+                          : "text-[var(--nova-ink-muted)]",
+                      )}
+                    >
+                      {indented
+                        ? message.snippet || message.subject || t("noSubject")
+                        : message.subject || t("noSubject")}
+                    </span>
+                    {message.hasAttachments ? (
+                      <Paperclip className="h-3.5 w-3.5 text-[var(--nova-ink-muted)]" />
+                    ) : null}
+                    {message.localOnly ? (
+                      <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
+                        {t("localOnlyBadge")}
+                      </span>
+                    ) : null}
+                    {message.snoozedUntil ? (
+                      <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
+                        {t("snoozedBadge")}
+                      </span>
+                    ) : null}
+                  </div>
+                  {!indented ? (
+                    <p className="truncate text-xs text-[var(--nova-ink-muted)]">
+                      {message.snippet}
+                    </p>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("starMessage")}
+                  aria-pressed={message.starred}
+                  className="mt-1 shrink-0 self-start rounded p-0.5 text-[var(--nova-ink-muted)] hover:bg-[var(--nova-surface)] hover:text-[var(--nova-warning)]"
+                  onClick={() => onToggleStar?.(message.id, !message.starred)}
+                >
+                  <Star
                     className={cn(
-                      "truncate text-sm",
-                      message.unread
-                        ? "text-[var(--nova-ink)]"
-                        : "text-[var(--nova-ink-muted)]",
+                      "h-3.5 w-3.5",
+                      message.starred &&
+                        "fill-[var(--nova-warning)] text-[var(--nova-warning)]",
                     )}
-                  >
-                    {indented
-                      ? message.snippet || message.subject || t("noSubject")
-                      : message.subject || t("noSubject")}
-                  </span>
-                  {message.hasAttachments ? (
-                    <Paperclip className="h-3.5 w-3.5 text-[var(--nova-ink-muted)]" />
-                  ) : null}
-                  {message.localOnly ? (
-                    <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
-                      {t("localOnlyBadge")}
-                    </span>
-                  ) : null}
-                  {message.snoozedUntil ? (
-                    <span className="shrink-0 rounded-[var(--nova-radius-sm)] bg-[var(--nova-surface-2)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--nova-ink-muted)]">
-                      {t("snoozedBadge")}
-                    </span>
-                  ) : null}
-                </div>
-                {!indented ? (
-                  <p className="truncate text-xs text-[var(--nova-ink-muted)]">
-                    {message.snippet}
-                  </p>
-                ) : null}
-              </button>
+                  />
+                </button>
+              </div>
             );
           })}
         </div>

@@ -11,6 +11,8 @@ export type MailProvider =
 export interface AccountDto {
   id: string;
   name: string;
+  /** Sidebar nickname; empty falls back to `name`. */
+  label: string;
   email: string;
   provider: MailProvider;
   authType: AuthType;
@@ -189,6 +191,7 @@ export interface ListThreadsResponse {
 
 export interface AddAccountPasswordRequest {
   name: string;
+  label?: string;
   email: string;
   password: string;
   provider: MailProvider;
@@ -203,6 +206,7 @@ export interface AddAccountPasswordRequest {
 export interface UpdateAccountRequest {
   id: string;
   name: string;
+  label?: string;
   email: string;
   provider: MailProvider;
   imapHost: string;
@@ -664,6 +668,7 @@ export interface MessageAiInsights {
   replySuggestion?: string | null;
   eventSuggestions?: EventSuggestionDto[];
   provider?: string | null;
+  incomplete?: boolean;
 }
 
 export interface AiSettings {

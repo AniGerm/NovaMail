@@ -257,6 +257,21 @@ pub async fn offload_message_remote(
     Ok(size)
 }
 
+/// Re-download a message body + attachments from IMAP into the local blob store.
+pub async fn refetch_message_content(
+    db: &Database,
+    secrets: &SecretStore,
+    blobs_dir: &std::path::Path,
+    message_id: Uuid,
+) -> MailResult<()> {
+    let Some(locator) = load_locator(db, message_id)? else {
+        return Err(MailError::Other(
+            "message has no IMAP locator; cannot refetch attachments".into(),
+        ));
+    };
+    ensure_full_local_copy(db, secrets, blobs_dir, message_id, &locator).await
+}
+
 async fn ensure_full_local_copy(
     db: &Database,
     secrets: &SecretStore,

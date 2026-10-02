@@ -12,6 +12,8 @@ pub const FLAG_ARCHIVED: i64 = 1 << 4;
 pub struct AccountRecord {
     pub id: Uuid,
     pub name: String,
+    /// Sidebar nickname; empty means fall back to `name`.
+    pub label: String,
     pub email: String,
     pub provider: MailProvider,
     pub auth_type: AuthType,

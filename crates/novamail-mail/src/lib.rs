@@ -25,8 +25,8 @@ pub use oauth_callback::{wait_for_oauth_callback, OAuthCallbackResult};
 pub use pop3::{Pop3Client, Pop3Message};
 pub use remote_actions::{
     append_sent_remote, archive_remote, delete_remote, execute_delete_remote, move_remote,
-    offload_message_remote, plan_delete_remote, probe_account_quota, save_draft_remote,
-    set_flags_remote, DeleteRemotePlan,
+    offload_message_remote, plan_delete_remote, probe_account_quota, refetch_message_content,
+    save_draft_remote, set_flags_remote, DeleteRemotePlan,
 };
 pub use scheduler::SyncScheduler;
 pub use smtp_client::SmtpClient;

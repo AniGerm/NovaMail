@@ -35,6 +35,15 @@ pub struct SuggestReplyRequest {
     pub subject: String,
     pub body_text: String,
     pub from_email: String,
+    /// Display name of the original sender (preferred for greetings).
+    #[serde(default)]
+    pub from_name: Option<String>,
+    /// Mailbox owner who is writing the reply (perspective).
+    #[serde(default)]
+    pub reply_as_email: Option<String>,
+    /// Display name of the mailbox owner (for sign-off).
+    #[serde(default)]
+    pub reply_as_name: Option<String>,
     /// Optional facts / instructions the user wants included in the reply.
     #[serde(default)]
     pub facts: Option<String>,
@@ -171,7 +180,13 @@ impl AiProvider for NullAiProvider {
             &request.body_text,
             request.preferred_language.as_deref(),
         );
-        let name = guess_first_name(&request.from_email);
+        let name = reply_addressee_name(request.from_name.as_deref(), &request.from_email);
+        let sign = request
+            .reply_as_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("");
         let facts = request
             .facts
             .as_deref()
@@ -186,13 +201,25 @@ impl AiProvider for NullAiProvider {
             .unwrap_or_default();
         let suggestion = if lang == "de" {
             format!(
-                "Hallo {name},\n\nvielen Dank für Ihre E-Mail zu \"{}\".{}\n\nFreundliche Grüße",
-                request.subject, facts
+                "Guten Tag {name},\n\nvielen Dank für Ihre E-Mail zu \"{}\".{}\n\nFreundliche Grüße{}",
+                request.subject,
+                facts,
+                if sign.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{sign}")
+                }
             )
         } else {
             format!(
-                "Hi {name},\n\nThanks for your email regarding \"{}\".{}\n\nBest regards",
-                request.subject, facts
+                "Hi {name},\n\nThanks for your email regarding \"{}\".{}\n\nBest regards{}",
+                request.subject,
+                facts,
+                if sign.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{sign}")
+                }
             )
         };
         Ok(SuggestReplyResponse {
@@ -210,7 +237,18 @@ impl AiProvider for NullAiProvider {
             &request.body_text,
             request.preferred_language.as_deref(),
         );
-        let name = guess_first_name(&request.from_email);
+        let name = reply_addressee_name(request.from_name.as_deref(), &request.from_email);
+        let sign = request
+            .reply_as_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("");
+        let sign_off = if sign.is_empty() {
+            String::new()
+        } else {
+            format!("\n{sign}")
+        };
         let facts = request
             .facts
             .as_deref()
@@ -226,22 +264,22 @@ impl AiProvider for NullAiProvider {
         let variants = if lang == "de" {
             vec![
                 format!(
-                    "Hallo {name},\n\nvielen Dank für Ihre Nachricht zu \"{}\".{} Wir melden uns zeitnah.\n\nFreundliche Grüße",
+                    "Guten Tag {name},\n\nvielen Dank für Ihre Nachricht zu \"{}\".{} Wir melden uns zeitnah.\n\nFreundliche Grüße{sign_off}",
                     request.subject, facts
                 ),
                 format!(
-                    "Hallo {name},\n\ndanke für die Mail.{} Gerne klären wir \"{}\" gemeinsam.\n\nViele Grüße",
+                    "Guten Tag {name},\n\ndanke für die Mail.{} Gerne klären wir \"{}\" gemeinsam.\n\nViele Grüße{sign_off}",
                     facts, request.subject
                 ),
             ]
         } else {
             vec![
                 format!(
-                    "Hi {name},\n\nThanks for your message about \"{}\".{} We'll follow up shortly.\n\nBest regards",
+                    "Hi {name},\n\nThanks for your message about \"{}\".{} We'll follow up shortly.\n\nBest regards{sign_off}",
                     request.subject, facts
                 ),
                 format!(
-                    "Hello {name},\n\nThanks for the email.{} Happy to discuss \"{}\" further.\n\nKind regards",
+                    "Hello {name},\n\nThanks for the email.{} Happy to discuss \"{}\" further.\n\nKind regards{sign_off}",
                     facts, request.subject
                 ),
             ]
@@ -373,7 +411,24 @@ fn is_quote_boundary(trimmed: &str, lower: &str, kept_lines: usize) -> bool {
 }
 
 /// Lightweight offline / fallback extractor for relative + ISO dates and times.
+/// Never panics: UTF-8 edge cases return an empty list instead of aborting AI work.
 pub fn heuristic_event_suggestions(
+    subject: &str,
+    body: &str,
+    reference_at: i64,
+) -> Vec<EventSuggestion> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        heuristic_event_suggestions_inner(subject, body, reference_at)
+    })) {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!("event heuristic panicked; returning no suggestions");
+            Vec::new()
+        }
+    }
+}
+
+fn heuristic_event_suggestions_inner(
     subject: &str,
     body: &str,
     reference_at: i64,
@@ -555,10 +610,11 @@ fn contains_word(haystack: &str, word: &str) -> bool {
 fn guess_location(lower: &str) -> Option<String> {
     for place in ["bowling", "zoom", "teams", "meet", "café", "cafe", "büro", "buero", "office"] {
         if contains_word(lower, place) {
-            let mut label = place.to_string();
-            if let Some(first) = label.get_mut(0..1) {
-                first.make_ascii_uppercase();
-            }
+            let mut chars = place.chars();
+            let label = match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => place.to_string(),
+            };
             return Some(label);
         }
     }
@@ -633,7 +689,13 @@ fn parse_hhmm_prefix(s: &str) -> Option<(u32, u32)> {
 
 fn find_time_near(lower: &str, weekday: &str) -> Option<(u32, u32)> {
     let idx = lower.find(weekday)?;
-    let window = &lower[idx..lower.len().min(idx + 48)];
+    // `find` returns a byte index — never slice with raw `idx + N` (panics on UTF-8).
+    let window = lower
+        .get(idx..)
+        .unwrap_or("")
+        .chars()
+        .take(48)
+        .collect::<String>();
     // HH:MM
     for (i, _) in window.char_indices() {
         let slice = &window[i..];
@@ -663,6 +725,62 @@ fn guess_first_name(email: &str) -> String {
             }
         })
         .unwrap_or_else(|| "there".into())
+}
+
+/// Name to greet in a reply — prefers From display name, never invents Frau/Herr.
+pub fn reply_addressee_name(from_name: Option<&str>, from_email: &str) -> String {
+    if let Some(raw) = from_name.map(str::trim).filter(|s| !s.is_empty()) {
+        // Keep existing titles if the contact already has them.
+        let lower = raw.to_lowercase();
+        if lower.starts_with("frau ")
+            || lower.starts_with("herr ")
+            || lower.starts_with("mr ")
+            || lower.starts_with("mrs ")
+            || lower.starts_with("ms ")
+            || lower.starts_with("dr ")
+        {
+            return raw.to_string();
+        }
+        return raw.to_string();
+    }
+    guess_first_name(from_email)
+}
+
+/// Drop opening salutation lines so the model cannot copy "Sehr geehrte Frau X"
+/// from the body (those address the mailbox owner, not the person we reply to).
+pub fn strip_leading_salutation(body: &str) -> String {
+    let mut lines = body.lines().peekable();
+    while let Some(line) = lines.peek() {
+        let t = line.trim();
+        if t.is_empty() {
+            lines.next();
+            continue;
+        }
+        let lower = t.to_lowercase();
+        let is_salutation = lower.starts_with("sehr geehrte")
+            || lower.starts_with("liebe ")
+            || lower.starts_with("lieber ")
+            || lower.starts_with("liebes ")
+            || lower.starts_with("guten tag")
+            || lower.starts_with("hallo ")
+            || lower.starts_with("hallo,")
+            || lower.starts_with("hi ")
+            || lower.starts_with("hi,")
+            || lower.starts_with("hey ")
+            || lower.starts_with("dear ")
+            || lower == "hallo"
+            || lower == "hi";
+        if is_salutation {
+            lines.next();
+            // Also drop a following empty line.
+            if lines.peek().map(|l| l.trim().is_empty()).unwrap_or(false) {
+                lines.next();
+            }
+            continue;
+        }
+        break;
+    }
+    lines.collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
@@ -697,6 +815,42 @@ mod tests {
             .unwrap();
         assert!(!result.suggestions.is_empty());
         assert!(result.suggestions.iter().any(|s| s.label.contains("14:30") || s.starts_at > 0));
+    }
+
+    #[test]
+    fn reply_addressee_keeps_display_name_without_inventing_title() {
+        assert_eq!(
+            reply_addressee_name(Some("Susanne Ortner"), "s.ortner@example.com"),
+            "Susanne Ortner"
+        );
+        assert_eq!(
+            reply_addressee_name(Some("Frau Ortner"), "x@example.com"),
+            "Frau Ortner"
+        );
+        assert_eq!(
+            reply_addressee_name(None, "max.mustermann@example.com"),
+            "Max"
+        );
+    }
+
+    #[test]
+    fn strip_leading_salutation_removes_recipient_greeting() {
+        let body = "Sehr geehrte Frau Ortner,\n\nvielen Dank für Ihre Nachricht.\n\nMit freundlichen Grüßen\nMax";
+        let cleaned = strip_leading_salutation(body);
+        assert!(cleaned.starts_with("vielen Dank"));
+        assert!(!cleaned.to_lowercase().contains("sehr geehrte"));
+    }
+
+    #[test]
+    fn find_time_near_handles_utf8_after_weekday() {
+        // Multi-byte chars after the weekday used to panic on idx+48 byte slices.
+        let lower = "montag 18:00 ähähähähähähähähähähähähähähähähähähähähähähähähäh";
+        let t = find_time_near(lower, "montag").expect("time");
+        assert_eq!(t, (18, 0));
+        // En-dash (U+2013, 3 bytes) — the exact panic from production logs.
+        let lower = "montag ––––––––––––––––––––––––––––––––––––––––––––––––––––";
+        assert!(find_time_near(lower, "montag").is_none());
+        let _ = heuristic_event_suggestions("Bowling am Montag – Abend", "bis später", 1_727_500_000);
     }
 
     #[test]

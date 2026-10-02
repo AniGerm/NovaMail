@@ -207,6 +207,8 @@ export function SettingsDialog({
   const [spellBusyCode, setSpellBusyCode] = useState<string | null>(null);
   const [spellStatus, setSpellStatus] = useState<string | null>(null);
   const [otherLangsOpen, setOtherLangsOpen] = useState(false);
+  const [closeToTray, setCloseToTray] = useState(true);
+  const [autostart, setAutostart] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const primarySpellDicts = spellDicts.filter((d) =>
     PRIMARY_SPELL_CODES.has(d.code),
@@ -228,6 +230,17 @@ export function SettingsDialog({
     try {
       const status = await api.spellcheckStatus();
       setSpellDicts(status.dictionaries);
+    } catch {
+      /* ignore when shell APIs unavailable */
+    }
+  }
+
+  async function refreshShellPrefs() {
+    if (!isDesktopShell()) return;
+    try {
+      const prefs = await api.shellGetPrefs();
+      setCloseToTray(prefs.closeToTray);
+      setAutostart(prefs.autostart);
     } catch {
       /* ignore when shell APIs unavailable */
     }
@@ -269,6 +282,7 @@ export function SettingsDialog({
     refreshExtras().catch((err) => setError((err as AppError).message));
     refreshAi().catch((err) => setError((err as AppError).message));
     refreshSpellcheck().catch(() => undefined);
+    refreshShellPrefs().catch(() => undefined);
     if (isDesktopShell()) {
       void api
         .appVersion()
@@ -537,6 +551,7 @@ export function SettingsDialog({
               const next = e.target.value as Locale;
               setLocale(next);
               if (isDesktopShell()) {
+                void api.shellSetUiLocale(next).catch(() => undefined);
                 void api
                   .spellcheckEnsureForLocale(next)
                   .then(() => refreshSpellcheck())
@@ -565,7 +580,7 @@ export function SettingsDialog({
                 const short = code.split("_")[0] ?? code;
                 if (isDesktopShell()) {
                   void api
-                    .spellcheckSetLanguages([code, short, "en_US", "en"])
+                    .spellcheckSetLanguages([code, short])
                     .catch(() => undefined);
                 }
               }}
@@ -741,6 +756,57 @@ export function SettingsDialog({
           />
           {t("highContrast")}
         </label>
+
+        {isDesktopShell() ? (
+          <section className="grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+            <label className="grid gap-1">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={closeToTray}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setCloseToTray(enabled);
+                    void api
+                      .shellSetCloseToTray(enabled)
+                      .then((prefs) => {
+                        setCloseToTray(prefs.closeToTray);
+                        setAutostart(prefs.autostart);
+                      })
+                      .catch((err) => setError((err as AppError).message));
+                  }}
+                />
+                {t("closeToTray")}
+              </span>
+              <span className="text-xs text-[var(--nova-ink-muted)]">
+                {t("closeToTrayHint")}
+              </span>
+            </label>
+            <label className="grid gap-1">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={autostart}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setAutostart(enabled);
+                    void api
+                      .shellSetAutostart(enabled)
+                      .then((prefs) => {
+                        setCloseToTray(prefs.closeToTray);
+                        setAutostart(prefs.autostart);
+                      })
+                      .catch((err) => setError((err as AppError).message));
+                  }}
+                />
+                {t("autostart")}
+              </span>
+              <span className="text-xs text-[var(--nova-ink-muted)]">
+                {t("autostartHint")}
+              </span>
+            </label>
+          </section>
+        ) : null}
 
         <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
           <h3 className="font-medium">{t("updatesTitle")}</h3>

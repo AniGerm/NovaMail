@@ -11,9 +11,16 @@ import {
   Clock3,
   Trash2,
   Archive,
+  Maximize2,
+  Share2,
+  FolderOpen,
+  Printer,
+  FileDown,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
+import { SpellSuggestBar } from "@/features/composer/SpellSuggestBar";
+import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 import { api } from "@/shared/api/client";
 import type {
   AppError,
@@ -25,7 +32,6 @@ import type {
 import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
-import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 
 type ReplyVariant = "a" | "b" | "own";
 
@@ -33,6 +39,8 @@ interface ReadingPaneProps {
   message?: MessageDetailDto | null;
   aiEnabled?: boolean;
   inSpamFolder?: boolean;
+  /** Hide chrome duplicated by the focus dialog header. */
+  focusMode?: boolean;
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
@@ -44,12 +52,14 @@ interface ReadingPaneProps {
   onCreateEvent?: (suggestion?: EventSuggestionDto) => void;
   onCreateTask?: () => void;
   onReplySent?: () => void;
+  onOpenFocus?: () => void;
 }
 
 export function ReadingPane({
   message,
   aiEnabled = true,
   inSpamFolder = false,
+  focusMode = false,
   onReply,
   onForward,
   onToggleStar,
@@ -61,9 +71,11 @@ export function ReadingPane({
   onCreateEvent,
   onCreateTask,
   onReplySent,
+  onOpenFocus,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const spellcheckLang = useUiStore((s) => s.spellcheckLang);
   const [summary, setSummary] = useState<string | null>(null);
   const [eventSuggestions, setEventSuggestions] = useState<
     EventSuggestionDto[]
@@ -73,10 +85,14 @@ export function ReadingPane({
   const [variantB, setVariantB] = useState<string | null>(null);
   const [activeVariant, setActiveVariant] = useState<ReplyVariant>("a");
   const [draft, setDraft] = useState("");
+  const [draftCaret, setDraftCaret] = useState(0);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [attachMenuId, setAttachMenuId] = useState<string | null>(null);
   const [invitePending, setInvitePending] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
@@ -88,9 +104,13 @@ export function ReadingPane({
     setDraft("");
     setAiError(null);
     setSnoozeOpen(false);
+    setShareOpen(false);
+    setAttachMenuId(null);
     setPgpResult(null);
     setEventSuggestions([]);
     setInvitePending(false);
+    setAiGenerating(false);
+    setDraftCaret(0);
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
@@ -139,12 +159,16 @@ export function ReadingPane({
             const b = insights.replyB ?? null;
             setVariantA(a);
             setVariantB(b);
-            if (a) {
+            if (a && !draftRef.current?.matches(":focus")) {
               setActiveVariant("a");
               setDraft(a);
             }
+            const done =
+              !insights.incomplete && Boolean(insights.summary && a && b);
+            setAiGenerating(!done);
             polls += 1;
-            return Boolean(insights.summary && a && b) || polls >= 3;
+            // Keep polling while incomplete; stop after ~2 min max.
+            return done || polls >= 24;
           })
           .catch(() => true);
       void loadInsights();
@@ -270,9 +294,98 @@ export function ReadingPane({
     try {
       const path = await api.attachmentsOpenPath(id);
       await openPath(path);
+      setAttachMenuId(null);
     } catch (error) {
       setAiError((error as AppError).message || t("openAttachmentFailed"));
     }
+  }
+
+  async function revealAttachment(id: string) {
+    try {
+      const folder = await api.attachmentsReveal(id);
+      await openPath(folder);
+      setAttachMenuId(null);
+    } catch (error) {
+      setAiError((error as AppError).message || t("revealAttachmentFailed"));
+    }
+  }
+
+  async function exportMessage(format: "pdf" | "html") {
+    if (!current) return;
+    try {
+      const path =
+        format === "pdf"
+          ? await api.messagesExportPdf(current.summary.id)
+          : await api.messagesExportHtml(current.summary.id);
+      await openPath(path);
+      setShareOpen(false);
+      setAiError(null);
+    } catch (error) {
+      setAiError((error as AppError).message || t("exportMessageFailed"));
+    }
+  }
+
+  function printMessage() {
+    if (!current) return;
+    setShareOpen(false);
+    const title = current.summary.subject || t("noSubject");
+    const from = `${displayName(current.summary.from)} <${current.summary.from.email}>`;
+    const bodyHtml = current.bodyHtml
+      ? current.bodyHtml
+      : `<pre style="white-space:pre-wrap;font:14px/1.5 sans-serif">${(
+          current.bodyText || current.summary.snippet || ""
+        )
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</pre>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;")}</title>
+      <style>body{font:15px/1.55 system-ui,sans-serif;color:#111;margin:1.5rem} h1{font-size:1.35rem} .meta{color:#555;margin-bottom:1rem}</style>
+      </head><body><h1>${title
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")}</h1><p class="meta">${from
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")}</p>${bodyHtml}</body></html>`;
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    if (!doc) {
+      frame.remove();
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    const cleanup = () => {
+      frame.remove();
+    };
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } finally {
+        window.setTimeout(cleanup, 1000);
+      }
+    };
+    // Some WebKit builds fire print before onload; still schedule cleanup.
+    window.setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        /* ignore */
+      }
+      window.setTimeout(cleanup, 1500);
+    }, 250);
   }
 
   return (
@@ -282,10 +395,64 @@ export function ReadingPane({
     >
       <header className="border-b border-[var(--nova-border)] px-8 py-5">
         <div className="mb-3 flex items-start justify-between gap-4">
-          <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
-            {current.summary.subject || t("noSubject")}
-          </h2>
+          {focusMode ? (
+            <div className="min-w-0 flex-1" />
+          ) : (
+            <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
+              {current.summary.subject || t("noSubject")}
+            </h2>
+          )}
           <div className="relative flex items-center gap-1">
+            {onOpenFocus && !focusMode ? (
+              <IconButton label={t("openFullscreen")} onClick={onOpenFocus}>
+                <Maximize2 />
+              </IconButton>
+            ) : null}
+            <div className="relative">
+              <IconButton
+                label={t("shareMessage")}
+                onClick={() => {
+                  setSnoozeOpen(false);
+                  setShareOpen((open) => !open);
+                }}
+              >
+                <Share2 />
+              </IconButton>
+              {shareOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-20 mt-1 min-w-[12.5rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => void exportMessage("pdf")}
+                  >
+                    <FileDown size={14} />
+                    {t("exportPdf")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => void exportMessage("html")}
+                  >
+                    <FileDown size={14} />
+                    {t("exportHtml")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                    onClick={() => printMessage()}
+                  >
+                    <Printer size={14} />
+                    {t("printMessage")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <IconButton label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
@@ -410,17 +577,46 @@ export function ReadingPane({
             </p>
             <ul className="flex flex-wrap gap-2">
               {attachments.map((attachment) => (
-                <li key={attachment.id}>
+                <li key={attachment.id} className="relative">
                   <button
                     type="button"
                     className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
-                    onClick={() => void openAttachment(attachment.id)}
+                    onClick={() =>
+                      setAttachMenuId((id) =>
+                        id === attachment.id ? null : attachment.id,
+                      )
+                    }
                   >
                     {attachment.filename}{" "}
                     <span className="text-[var(--nova-ink-muted)]">
                       ({formatBytes(attachment.size)})
                     </span>
                   </button>
+                  {attachMenuId === attachment.id ? (
+                    <div
+                      role="menu"
+                      className="absolute left-0 top-full z-20 mt-1 min-w-[11rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        onClick={() => void openAttachment(attachment.id)}
+                      >
+                        <Share2 size={14} />
+                        {t("openWithSystem")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        onClick={() => void revealAttachment(attachment.id)}
+                      >
+                        <FolderOpen size={14} />
+                        {t("revealInFolder")}
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -485,6 +681,15 @@ export function ReadingPane({
                 </Button>
               ) : null}
             </div>
+            {aiGenerating ? (
+              <div
+                className="mb-3 flex items-center gap-2 rounded-[var(--nova-radius-sm)] border border-dashed border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2 text-xs text-[var(--nova-ink-muted)]"
+                role="status"
+              >
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--nova-accent)]" />
+                {t("aiReplyGenerating")}
+              </div>
+            ) : null}
             {summary ? (
               <p className="mb-3 text-sm leading-6 text-[var(--nova-ink-muted)]">
                 <span className="font-medium text-[var(--nova-accent)]">{t("summary")}: </span>
@@ -548,11 +753,45 @@ export function ReadingPane({
             </div>
             <label className="grid gap-1.5">
               <span className="sr-only">{t("replyDraftPlaceholder")}</span>
+              <SpellSuggestBar
+                text={draft}
+                caret={draftCaret}
+                onApply={(from, to, replacement) => {
+                  const next = draft.slice(0, from) + replacement + draft.slice(to);
+                  setDraft(next);
+                  const caret = from + replacement.length;
+                  setDraftCaret(caret);
+                  requestAnimationFrame(() => {
+                    const el = draftRef.current;
+                    if (!el) return;
+                    el.focus();
+                    el.setSelectionRange(caret, caret);
+                  });
+                }}
+              />
               <textarea
                 ref={draftRef}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={t("replyDraftPlaceholder")}
+                spellCheck
+                lang={spellcheckLang.replace("_", "-")}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setDraftCaret(e.target.selectionStart ?? e.target.value.length);
+                }}
+                onSelect={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                onKeyUp={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                onClick={(e) => {
+                  setDraftCaret(e.currentTarget.selectionStart ?? 0);
+                }}
+                placeholder={
+                  aiGenerating && !draft.trim()
+                    ? t("aiReplyGenerating")
+                    : t("replyDraftPlaceholder")
+                }
                 rows={6}
                 className="w-full resize-y rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2.5 text-[15px] leading-6 text-[var(--nova-ink)] outline-none focus:border-[var(--nova-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--nova-accent)_25%,transparent)]"
               />

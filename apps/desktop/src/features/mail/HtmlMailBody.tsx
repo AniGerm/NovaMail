@@ -27,7 +27,14 @@ export function prepareSafeMailHtml(html: string): string {
   );
   // Cap giant leftover data: URIs.
   out = out.replace(/data:[^"'>\s]{40000,}/gi, "data:,");
+  // Prevent HTML mail from painting over the whole app (fixed/sticky overlays).
+  out = out.replace(/position\s*:\s*(fixed|sticky)/gi, "position:relative");
+  out = out.replace(
+    /(<(?:html|body)\b[^>]*\bstyle\s*=\s*["'][^"']*)\b(?:width|height|min-height)\s*:\s*[^;"']+/gi,
+    "$1",
+  );
   if (out.length > MAX_HTML_CHARS) {
+    // Slice on a code-unit boundary that is also a tag boundary when possible.
     const cut = out.lastIndexOf(">", MAX_HTML_CHARS);
     const end = cut > MAX_HTML_CHARS / 2 ? cut + 1 : MAX_HTML_CHARS;
     out = `${out.slice(0, end)}<p style="color:#666;margin-top:1em">[…]</p>`;

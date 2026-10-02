@@ -361,7 +361,10 @@ export function Sidebar({
                             : "flex min-w-0 flex-1 items-center justify-between rounded-[var(--nova-radius-sm)] px-2 py-1.5 text-left text-sm hover:bg-[var(--nova-surface-2)]"
                         }
                       >
-                        <span className="truncate">{account.name}</span>
+                        <span className="truncate">
+                          {(account.label || account.name).trim() ||
+                            account.email}
+                        </span>
                       </button>
                     </div>
                     {isOpen ? (

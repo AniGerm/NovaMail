@@ -31,9 +31,10 @@ interface ComposerProps {
   /** Prefill To field (e.g. from command palette) */
   initialTo?: string;
   onClose: () => void;
-  onSent: () => void;
+  /** Called after a successful send; `sentDraftId` is set when a draft was consumed. */
+  onSent: (sentDraftId?: string | null) => void | Promise<void>;
   onDraftSaved?: () => void;
-  onAddToContacts?: (prefill: ContactPrefill) => void;
+  onAddToContacts?: (prefill: ContactPrefill | ContactPrefill[]) => void;
 }
 
 function formatAddress(addr: AddressDto): string {
@@ -273,14 +274,16 @@ export function Composer({
     setBusy(true);
     setError(null);
     setStatus(null);
+    const sentDraftId = draftId;
     try {
       await api.messagesSend(buildSendRequest());
-      onSent();
+      // Close first so a refresh cannot remount under an open modal (white overlay).
       onClose();
       setBodyHtml("<p><br></p>");
       setBodyText("");
       setDraftId(null);
       setAttachments([]);
+      await onSent(sentDraftId);
     } catch (err) {
       setError((err as AppError).message || t("sendFailed"));
     } finally {
@@ -301,18 +304,19 @@ export function Composer({
     setError(null);
     setStatus(null);
     setSendLaterOpen(false);
+    const sentDraftId = draftId;
     try {
       await api.messagesSendLater({
         sendAt,
         message: buildSendRequest(),
       });
       setStatus(t("sendLaterDone"));
-      onSent();
       onClose();
       setBodyHtml("<p><br></p>");
       setBodyText("");
       setDraftId(null);
       setAttachments([]);
+      await onSent(sentDraftId);
     } catch (err) {
       setError((err as AppError).message || t("sendFailed"));
     } finally {

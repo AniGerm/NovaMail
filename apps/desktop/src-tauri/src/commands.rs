@@ -18,7 +18,8 @@ use novamail_ipc::{
     RespondInvitationRequest, RuleDto, SaveDraftRequest, SearchRequest, SearchResponse,
     SendLaterRequest, SendMessageRequest, SetContactsShareModeRequest, SetFlagsRequest,
     SetMessageLabelsRequest, SignatureDto, SnoozeRequest, SnoozedMessageDto, SpamScoreDto,
-    SpamSettingsDto, SpellDictionaryDto, SpellcheckStatus, SuggestRepliesMessageRequest,
+    SpamSettingsDto, SpellDictionaryDto, SpellSuggestResult, SpellcheckStatus,
+    SuggestRepliesMessageRequest,
     SuggestRepliesMessageResponse, SuggestReplyMessageRequest, SuggestReplyMessageResponse,
     SummarizeMessageRequest, SummarizeMessageResponse, SyncProgressEvent, SyncRequest, SyncResult,
     UpsertCalendarAccountRequest, UpsertCalendarCollectionRequest, UpsertCalendarEventRequest,
@@ -280,14 +281,43 @@ pub fn attachments_list(
 }
 
 #[tauri::command]
-pub fn attachments_open_path(
+pub async fn attachments_open_path(
     state: State<'_, DesktopState>,
     attachment_id: Uuid,
 ) -> Result<String, AppError> {
     state
         .app
-        .open_attachment_path(attachment_id)
+        .ensure_attachment_path(attachment_id)
+        .await
         .map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn attachments_reveal(
+    state: State<'_, DesktopState>,
+    attachment_id: Uuid,
+) -> Result<String, AppError> {
+    state
+        .app
+        .reveal_attachment(attachment_id)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_export_pdf(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<String, AppError> {
+    state.app.export_message_pdf(message_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn messages_export_html(
+    state: State<'_, DesktopState>,
+    message_id: Uuid,
+) -> Result<String, AppError> {
+    state.app.export_message_html(message_id).map_err(map_err)
 }
 
 #[tauri::command]
@@ -340,8 +370,10 @@ pub async fn spellcheck_ensure_for_locale(
 #[tauri::command]
 pub fn spellcheck_set_languages(
     app: AppHandle,
+    state: State<'_, DesktopState>,
     languages: Vec<String>,
 ) -> Result<(), AppError> {
+    let _ = state.app.spellcheck_ensure_personal_dicts(&languages);
     #[cfg(target_os = "linux")]
     {
         use tauri::Manager;
@@ -350,8 +382,28 @@ pub fn spellcheck_set_languages(
         }
     }
     let _ = app;
-    let _ = languages;
     Ok(())
+}
+
+#[tauri::command]
+pub fn spellcheck_suggest(
+    state: State<'_, DesktopState>,
+    word: String,
+    lang: String,
+) -> Result<SpellSuggestResult, AppError> {
+    state.app.spellcheck_suggest(word, lang).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn spellcheck_learn_word(
+    state: State<'_, DesktopState>,
+    word: String,
+    lang: String,
+) -> Result<(), AppError> {
+    state
+        .app
+        .spellcheck_learn_word(word, lang)
+        .map_err(map_err)
 }
 
 #[tauri::command]
@@ -1073,6 +1125,17 @@ pub fn calendar_collections_set_default(
 }
 
 #[tauri::command]
+pub fn calendar_collections_delete(
+    state: State<'_, DesktopState>,
+    id: Uuid,
+) -> Result<(), AppError> {
+    state
+        .app
+        .delete_calendar_collection(id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
 pub fn calendar_invitations_list(
     state: State<'_, DesktopState>,
     pending_only: Option<bool>,
@@ -1098,6 +1161,29 @@ pub async fn calendar_invitations_respond(
 #[tauri::command]
 pub fn app_version() -> AppVersionInfo {
     updater::app_version_info()
+}
+
+#[tauri::command]
+pub fn shell_get_prefs() -> crate::shell_prefs::ShellPrefs {
+    crate::shell_prefs::load()
+}
+
+#[tauri::command]
+pub fn shell_set_close_to_tray(enabled: bool) -> Result<crate::shell_prefs::ShellPrefs, AppError> {
+    crate::shell_prefs::set_close_to_tray(enabled)
+        .map_err(|message| AppError::new("shell_prefs", message))
+}
+
+#[tauri::command]
+pub fn shell_set_autostart(enabled: bool) -> Result<crate::shell_prefs::ShellPrefs, AppError> {
+    crate::shell_prefs::set_autostart(enabled)
+        .map_err(|message| AppError::new("shell_prefs", message))
+}
+
+#[tauri::command]
+pub fn shell_set_ui_locale(locale: String) -> Result<crate::shell_prefs::ShellPrefs, AppError> {
+    crate::shell_prefs::set_ui_locale(&locale)
+        .map_err(|message| AppError::new("shell_prefs", message))
 }
 
 #[tauri::command]
