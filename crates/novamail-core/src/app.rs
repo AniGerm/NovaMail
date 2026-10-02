@@ -539,7 +539,7 @@ impl AppState {
         let message_id = request.message_id;
         let unread = request.unread;
         let starred = request.starred;
-        tokio::spawn(async move {
+        spawn_background(async move {
             if let Err(err) = set_flags_remote(&db, &secrets, message_id, unread, starred).await {
                 tracing::warn!(error = %err, "IMAP flag sync failed; local flags kept");
             }
@@ -1048,7 +1048,7 @@ impl AppState {
         self.db.delete_message(message_id)?;
         if let Some(plan) = plan {
             let secrets = self.secrets.clone();
-            tokio::spawn(async move {
+            spawn_background(async move {
                 if let Err(err) = execute_delete_remote(&secrets, plan).await {
                     tracing::warn!(error = %err, "IMAP delete failed; local copy already removed");
                 }
@@ -1879,11 +1879,14 @@ impl AppState {
         let ids: Vec<Uuid> = message_ids.iter().copied().take(25).collect();
         let db = self.db.clone();
         let ai = self.ai_provider();
-        tokio::spawn(async move {
+        // Sync Tauri commands / scheduler callbacks have no Tokio reactor — never
+        // call tokio::spawn directly here (that panic aborted the process on open).
+        spawn_background(async move {
             static AI_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
             let _guard = AI_LOCK.lock().await;
             for message_id in ids {
-                if let Err(err) = Self::generate_and_store_insights(&db, ai.as_ref(), message_id).await
+                if let Err(err) =
+                    Self::generate_and_store_insights(&db, ai.as_ref(), message_id).await
                 {
                     tracing::debug!(%message_id, error = %err, "background AI insight skipped");
                 }
@@ -2326,7 +2329,7 @@ impl AppState {
         }
         let db = self.db.clone();
         let secrets = self.secrets.clone();
-        tokio::spawn(async move {
+        spawn_background(async move {
             for (message_id, name, role) in moves {
                 if let Err(err) = move_remote(&db, &secrets, message_id, &name, Some(&role)).await {
                     tracing::warn!(%message_id, error = %err, "rule IMAP move failed");
@@ -3695,6 +3698,37 @@ fn find_matching_contact<'a>(
         }
     }
     existing.iter().find(|c| c.id == contact.id)
+}
+
+/// Spawn async work from sync or async contexts without panicking.
+///
+/// Sync Tauri commands have no Tokio reactor; `tokio::spawn` there aborts the process
+/// (`there is no reactor running`). Prefer the current handle when present, otherwise
+/// run the future on a short-lived background thread runtime.
+fn spawn_background<F>(fut: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn(fut);
+        }
+        Err(_) => {
+            let _ = std::thread::Builder::new()
+                .name("novamail-bg".into())
+                .spawn(move || match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => {
+                        rt.block_on(fut);
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to build background runtime");
+                    }
+                });
+        }
+    }
 }
 
 #[cfg(test)]
