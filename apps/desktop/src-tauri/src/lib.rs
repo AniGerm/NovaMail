@@ -2,20 +2,28 @@ mod commands;
 mod state;
 mod updater;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::panic;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use novamail_mail::SyncScheduler;
 use state::DesktopState;
 use tauri::{Emitter, Manager};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::MakeWriter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("novamail=info".parse().unwrap()),
-        )
-        .init();
+    let log_path = default_log_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    init_logging(&log_path);
+    install_panic_hook(log_path.clone());
+    tracing::info!(path = %log_path.display(), "NovaMail logging started");
 
     // Prevent rustls IMAP/SMTP panics when the feature graph is ambiguous.
     novamail_mail::ensure_crypto_provider();
@@ -254,6 +262,7 @@ pub fn run() {
             commands::calendar_invitations_list,
             commands::calendar_invitations_respond,
             commands::app_version,
+            commands::logs_path,
             commands::updates_check,
             commands::updates_download,
             commands::updates_install,
@@ -262,6 +271,101 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running NovaMail");
+}
+
+fn default_log_path() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("novamail")
+        .join("logs")
+        .join("novamail.log")
+}
+
+fn init_logging(path: &Path) {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
+        .map(|f| Arc::new(Mutex::new(f)));
+    let writer = TeeWriter { file };
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::from_default_env().add_directive("novamail=info".parse().unwrap()),
+        )
+        .with_writer(writer)
+        .try_init();
+}
+
+fn install_panic_hook(log_path: PathBuf) {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        let msg = format!(
+            "\n===== PANIC {} =====\n{}\n",
+            chrono_like_timestamp(),
+            info
+        );
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let _ = f.write_all(msg.as_bytes());
+            let _ = f.flush();
+        }
+        eprintln!("{msg}");
+        default_hook(info);
+    }));
+}
+
+fn chrono_like_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
+}
+
+#[derive(Clone)]
+struct TeeWriter {
+    file: Option<Arc<Mutex<std::fs::File>>>,
+}
+
+impl<'a> MakeWriter<'a> for TeeWriter {
+    type Writer = TeeGuard;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        TeeGuard {
+            file: self.file.clone(),
+        }
+    }
+}
+
+struct TeeGuard {
+    file: Option<Arc<Mutex<std::fs::File>>>,
+}
+
+impl Write for TeeGuard {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        if let Some(file) = &self.file {
+            if let Ok(mut f) = file.lock() {
+                let _ = f.write_all(buf);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stderr().flush();
+        if let Some(file) = &self.file {
+            if let Ok(mut f) = file.lock() {
+                let _ = f.flush();
+            }
+        }
+        Ok(())
+    }
 }
 
 /// WebKitGTK leaves spell checking disabled on the web context; without this,

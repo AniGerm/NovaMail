@@ -500,6 +500,7 @@ export const api = {
       request: { id, response },
     }),
   appVersion: () => call<AppVersionInfo>("app_version"),
+  logsPath: () => call<string>("logs_path"),
   updatesCheck: () => call<UpdateCheckResult>("updates_check"),
   updatesDownload: () => call<UpdateActionResult>("updates_download"),
   updatesInstall: () => call<UpdateActionResult>("updates_install"),

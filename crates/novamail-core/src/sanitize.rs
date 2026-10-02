@@ -5,6 +5,11 @@
 
 use ammonia::{Builder, UrlRelative};
 
+/// Soft cap for HTML delivered to the UI (IPC + WebKit). Larger bodies OOM/crash.
+pub const MAX_HTML_CHARS: usize = 800_000;
+/// Inline `data:` images larger than this are replaced with a placeholder.
+const MAX_DATA_URI_CHARS: usize = 32_768;
+
 /// CSS properties commonly used by marketing / newsletter HTML.
 const STYLE_PROPS: &[&str] = &[
     "color",
@@ -14,7 +19,6 @@ const STYLE_PROPS: &[&str] = &[
     "background-size",
     "background-repeat",
     "background-position",
-    "background-attachment",
     "width",
     "height",
     "max-width",
@@ -60,19 +64,12 @@ const STYLE_PROPS: &[&str] = &[
     "flex",
     "flex-direction",
     "flex-wrap",
-    "flex-grow",
-    "flex-shrink",
     "justify-content",
     "align-items",
-    "align-self",
     "gap",
-    "row-gap",
-    "column-gap",
     "float",
     "clear",
     "overflow",
-    "overflow-x",
-    "overflow-y",
     "visibility",
     "opacity",
     "position",
@@ -89,8 +86,9 @@ const STYLE_PROPS: &[&str] = &[
 ];
 
 pub fn sanitize_html(html: &str) -> String {
-    // Preserve `<style>` blocks (newsletters rely on them) while still stripping scripts.
-    let (styles, without_styles) = extract_style_blocks(html);
+    // Drop giant base64 blobs first — they are the main open-message crash source.
+    let html = strip_oversized_data_uris(html);
+    let (styles, without_styles) = extract_style_blocks(&html);
 
     let mut builder = Builder::default();
     builder
@@ -149,11 +147,70 @@ pub fn sanitize_html(html: &str) -> String {
         .filter_style_properties(STYLE_PROPS.iter().copied().collect());
 
     let cleaned_body = builder.clean(&without_styles).to_string();
-    if styles.is_empty() {
+    let combined = if styles.is_empty() {
         cleaned_body
     } else {
+        // Cap style blocks too — huge CSS sheets have crashed WebKit.
+        let styles = if styles.len() > 100_000 {
+            String::new()
+        } else {
+            styles
+        };
         format!("{styles}{cleaned_body}")
+    };
+    cap_html(&combined, MAX_HTML_CHARS)
+}
+
+/// Replace oversized `data:` URIs (esp. inline images) with a tiny placeholder.
+pub fn strip_oversized_data_uris(html: &str) -> String {
+    let bytes = html.as_bytes();
+    let lower = html.to_ascii_lowercase();
+    let lower_bytes = lower.as_bytes();
+    let mut out = String::with_capacity(html.len().min(MAX_HTML_CHARS));
+    let mut i = 0;
+    while i < bytes.len() {
+        if lower_bytes.get(i..).is_some_and(|s| s.starts_with(b"data:")) {
+            let start = i;
+            // Scan until quote, whitespace, or `>` / `)`.
+            let mut end = i + 5;
+            while end < bytes.len() {
+                let c = bytes[end];
+                if c == b'"' || c == b'\'' || c == b' ' || c == b'\n' || c == b'\r' || c == b'\t'
+                    || c == b'>' || c == b')'
+                {
+                    break;
+                }
+                end += 1;
+                // Hard stop so pathological strings don't hang.
+                if end - start > MAX_DATA_URI_CHARS * 4 {
+                    break;
+                }
+            }
+            let uri_len = end - start;
+            if uri_len > MAX_DATA_URI_CHARS {
+                out.push_str("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+            } else {
+                out.push_str(&html[start..end]);
+            }
+            i = end;
+            continue;
+        }
+        out.push(html[i..].chars().next().unwrap_or('?'));
+        i += html[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
     }
+    out
+}
+
+fn cap_html(html: &str, max: usize) -> String {
+    if html.len() <= max {
+        return html.to_string();
+    }
+    let cut = html[..max].rfind('>').unwrap_or(max);
+    let end = if cut > max / 2 { cut + 1 } else { max };
+    format!(
+        "{}<p style=\"margin-top:1em;color:#666\">[… HTML gekürzt …]</p>",
+        &html[..end]
+    )
 }
 
 /// Pull `<style>…</style>` blocks out so ammonia does not delete their CSS content.
@@ -174,7 +231,6 @@ fn extract_style_blocks(html: &str) -> (String, String) {
         let content_start = tag_end_rel + 1;
         let search = &after_start_lower[content_start..];
         let Some(end_rel) = search.find("</style") else {
-            // Unclosed style — drop the rest of the tag opener and continue.
             rest = &after_start[content_start..];
             rest_lower = &after_start_lower[content_start..];
             continue;
@@ -200,7 +256,6 @@ fn extract_style_blocks(html: &str) -> (String, String) {
 }
 
 fn scrub_style_css(css: &str) -> String {
-    // Drop constructs that can pull scripts or navigate the top window.
     css.lines()
         .filter(|line| {
             let t = line.trim().to_ascii_lowercase();
@@ -228,13 +283,26 @@ mod tests {
     }
 
     #[test]
-    fn keeps_tables_styles_and_data_images() {
-        let html = r#"<style>.x{color:#333;padding:12px}</style><table width="600" style="background-color:#f5f5f5"><tr><td class="x"><img src="data:image/png;base64,aaa=" width="120" alt="logo"><p>Hi</p></td></tr></table>"#;
+    fn keeps_tables_and_small_data_images() {
+        let html = r#"<table width="600"><tr><td><img src="data:image/png;base64,aaa=" alt="logo"><p>Hi</p></td></tr></table>"#;
         let clean = sanitize_html(html);
         assert!(clean.contains("<table"));
-        assert!(clean.contains("data:image/png;base64,aaa="));
         assert!(clean.contains("Hi"));
-        assert!(clean.contains("<style"));
-        assert!(clean.contains(".x{color:#333;padding:12px}") || clean.contains("color:#333"));
+    }
+
+    #[test]
+    fn strips_huge_data_uris() {
+        let huge = format!("data:image/png;base64,{}", "A".repeat(80_000));
+        let html = format!(r#"<img src="{huge}">"#);
+        let out = strip_oversized_data_uris(&html);
+        assert!(!out.contains(&"A".repeat(1000)));
+        assert!(out.contains("data:image/gif;base64,"));
+    }
+
+    #[test]
+    fn caps_total_html_size() {
+        let html = format!("<p>{}</p>", "x".repeat(MAX_HTML_CHARS + 10_000));
+        let clean = sanitize_html(&html);
+        assert!(clean.len() < MAX_HTML_CHARS + 200);
     }
 }

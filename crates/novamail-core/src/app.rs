@@ -501,17 +501,31 @@ impl AppState {
     }
 
     pub fn get_message(&self, message_id: Uuid) -> CoreResult<MessageDetailDto> {
+        tracing::info!(%message_id, "get_message start");
         let mut detail = self.db.get_message(message_id)?;
         if let Some(html) = detail.body_html.take() {
-            // Keep `cid:` intact — the UI maps Content-ID → asset:// URLs.
-            // Avoid embedding base64 here (large mailboxes + heavy HTML were crashing).
-            let cleaned = sanitize_html(&html);
+            let raw_len = html.len();
+            // Never let sanitize panics or multi‑MB base64 kill the process on open.
+            let cleaned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                sanitize_html(&html)
+            }))
+            .unwrap_or_else(|_| {
+                tracing::error!(%message_id, "sanitize_html panicked; dropping HTML body");
+                String::new()
+            });
+            tracing::info!(
+                %message_id,
+                raw_len,
+                cleaned_len = cleaned.len(),
+                "get_message html sanitized"
+            );
             detail.body_html = if cleaned.trim().is_empty() {
                 None
             } else {
                 Some(cleaned)
             };
         }
+        tracing::info!(%message_id, "get_message done");
         Ok(detail)
     }
 

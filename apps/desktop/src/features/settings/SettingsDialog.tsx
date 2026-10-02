@@ -188,6 +188,7 @@ export function SettingsDialog({
   const importInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState("");
+  const [logsPath, setLogsPath] = useState("");
   const [updateChannel, setUpdateChannel] = useState("dev");
   const [updateUi, setUpdateUi] = useState<UpdateUiState>(INITIAL_UPDATE);
   const [aiSettings, setAiSettings] = useState<AiSettings>({
@@ -275,6 +276,10 @@ export function SettingsDialog({
           setAppVersion(info.version);
           setUpdateChannel(info.channel);
         })
+        .catch(() => undefined);
+      void api
+        .logsPath()
+        .then((path) => setLogsPath(path))
         .catch(() => undefined);
     }
   }, [open, t]);
@@ -800,6 +805,18 @@ export function SettingsDialog({
             <p className="text-xs text-[var(--nova-ink-muted)]">{updateUi.status}</p>
           ) : null}
         </section>
+
+        {logsPath ? (
+          <section className="grid gap-1 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
+            <h3 className="font-medium">{t("crashLogTitle")}</h3>
+            <p className="text-xs text-[var(--nova-ink-muted)]">
+              {t("crashLogHint")}
+            </p>
+            <code className="break-all rounded bg-[var(--nova-surface-2)] px-2 py-1 text-xs">
+              {logsPath}
+            </code>
+          </section>
+        ) : null}
 
         </>
         ) : null}
