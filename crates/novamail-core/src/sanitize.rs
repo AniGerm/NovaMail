@@ -213,43 +213,6 @@ fn scrub_style_css(css: &str) -> String {
         .join("\n")
 }
 
-/// Rewrite `cid:` image/link references to `data:` URLs using Content-ID → blob map.
-pub fn rewrite_cid_urls(html: &str, cid_map: &[(String, String, Vec<u8>)]) -> String {
-    if html.is_empty() || cid_map.is_empty() || !html.to_ascii_lowercase().contains("cid:") {
-        return html.to_string();
-    }
-
-    let mut out = html.to_string();
-    for (cid, mime, data) in cid_map {
-        if data.is_empty() {
-            continue;
-        }
-        let bare = cid.trim().trim_matches(|c| c == '<' || c == '>');
-        if bare.is_empty() {
-            continue;
-        }
-        let data_url = format!(
-            "data:{};base64,{}",
-            if mime.is_empty() {
-                "application/octet-stream"
-            } else {
-                mime
-            },
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data)
-        );
-        for candidate in [
-            format!("cid:{bare}"),
-            format!("cid:<{bare}>"),
-            format!("CID:{bare}"),
-        ] {
-            if out.contains(&candidate) {
-                out = out.replace(&candidate, &data_url);
-            }
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,14 +236,5 @@ mod tests {
         assert!(clean.contains("Hi"));
         assert!(clean.contains("<style"));
         assert!(clean.contains(".x{color:#333;padding:12px}") || clean.contains("color:#333"));
-    }
-
-    #[test]
-    fn rewrites_cid_to_data_url() {
-        let html = r#"<img src="cid:pic@mail">"#;
-        let map = vec![("pic@mail".into(), "image/png".into(), vec![0u8, 1, 2])];
-        let rewritten = rewrite_cid_urls(html, &map);
-        assert!(rewritten.contains("data:image/png;base64,"));
-        assert!(!rewritten.contains("cid:"));
     }
 }
