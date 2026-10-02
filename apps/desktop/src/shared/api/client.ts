@@ -7,6 +7,7 @@ import type {
   UpdateAccountRequest,
   AppError,
   AttachmentDto,
+  OpenWithAppDto,
   CardDavServerStatus,
   ContactDto,
   ContactsBookSettings,
@@ -260,6 +261,28 @@ export const api = {
   ) =>
     call<string>("attachments_open_path", {
       attachmentId,
+      messageId: messageId ?? null,
+      filename: filename ?? null,
+    }),
+  attachmentsListOpenWith: (
+    attachmentId: string,
+    messageId?: string | null,
+    filename?: string | null,
+  ) =>
+    call<OpenWithAppDto[]>("attachments_list_open_with", {
+      attachmentId,
+      messageId: messageId ?? null,
+      filename: filename ?? null,
+    }),
+  attachmentsOpenWith: (
+    attachmentId: string,
+    appId: string,
+    messageId?: string | null,
+    filename?: string | null,
+  ) =>
+    call<string>("attachments_open_with", {
+      attachmentId,
+      appId,
       messageId: messageId ?? null,
       filename: filename ?? null,
     }),

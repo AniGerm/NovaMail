@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Printer,
   FileDown,
+  ChevronDown,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
@@ -26,6 +27,7 @@ import type {
   AppError,
   EventSuggestionDto,
   MessageDetailDto,
+  OpenWithAppDto,
   PgpDecryptResult,
   SnoozePreset,
 } from "@/shared/api/types";
@@ -34,6 +36,33 @@ import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
 
 type ReplyVariant = "a" | "b" | "own";
+
+function isCommonAttachment(mime: string, filename: string): boolean {
+  const m = (mime || "").toLowerCase();
+  const name = filename.toLowerCase();
+  if (
+    m.startsWith("image/") ||
+    m.startsWith("audio/") ||
+    m.startsWith("video/") ||
+    m.startsWith("text/")
+  ) {
+    return true;
+  }
+  if (
+    m === "application/pdf" ||
+    m.includes("officedocument") ||
+    m.includes("msword") ||
+    m.includes("spreadsheet") ||
+    m.includes("presentation") ||
+    m === "application/zip" ||
+    m === "application/vnd.oasis.opendocument.text"
+  ) {
+    return true;
+  }
+  return /\.(pdf|png|jpe?g|gif|webp|svg|txt|md|csv|docx?|xlsx?|pptx?|odt|ods|odp|mp3|mp4|webm|zip|ics)$/i.test(
+    name,
+  );
+}
 
 interface ReadingPaneProps {
   message?: MessageDetailDto | null;
@@ -55,6 +84,8 @@ interface ReadingPaneProps {
   onOpenFocus?: () => void;
   /** Double-click preview ↔ fullscreen. */
   onToggleFocus?: () => void;
+  /** Clear unread when the user engages with the preview (click/scroll). */
+  onMarkRead?: () => void;
 }
 
 export function ReadingPane({
@@ -75,6 +106,7 @@ export function ReadingPane({
   onReplySent,
   onOpenFocus,
   onToggleFocus,
+  onMarkRead,
 }: ReadingPaneProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -96,7 +128,10 @@ export function ReadingPane({
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [attachMenuId, setAttachMenuId] = useState<string | null>(null);
+  const [openWithApps, setOpenWithApps] = useState<OpenWithAppDto[]>([]);
+  const [openWithLoading, setOpenWithLoading] = useState(false);
   const [invitePending, setInvitePending] = useState(false);
+  const markedReadForId = useRef<string | null>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -109,11 +144,13 @@ export function ReadingPane({
     setSnoozeOpen(false);
     setShareOpen(false);
     setAttachMenuId(null);
+    setOpenWithApps([]);
     setPgpResult(null);
     setEventSuggestions([]);
     setInvitePending(false);
     setAiGenerating(false);
     setDraftCaret(0);
+    markedReadForId.current = null;
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
@@ -293,18 +330,70 @@ export function ReadingPane({
     }
   }
 
+  function notePreviewEngaged() {
+    const id = message?.summary.id;
+    if (!id || !onMarkRead) return;
+    if (!message?.summary.unread) return;
+    if (markedReadForId.current === id) return;
+    markedReadForId.current = id;
+    onMarkRead();
+  }
+
   async function openAttachment(attachment: {
     id: string;
     filename: string;
+    mime: string;
   }) {
     try {
-      // Rust stages + opens via xdg-open; no frontend shell open needed.
       await api.attachmentsOpen(
         attachment.id,
         current.summary.id,
         attachment.filename,
       );
       setAttachMenuId(null);
+      setOpenWithApps([]);
+    } catch (error) {
+      setAiError((error as AppError).message || t("openAttachmentFailed"));
+    }
+  }
+
+  async function openAttachmentMenu(attachment: {
+    id: string;
+    filename: string;
+    mime: string;
+  }) {
+    const nextId = attachMenuId === attachment.id ? null : attachment.id;
+    setAttachMenuId(nextId);
+    setOpenWithApps([]);
+    if (!nextId) return;
+    setOpenWithLoading(true);
+    try {
+      const apps = await api.attachmentsListOpenWith(
+        attachment.id,
+        current.summary.id,
+        attachment.filename,
+      );
+      setOpenWithApps(apps);
+    } catch {
+      setOpenWithApps([]);
+    } finally {
+      setOpenWithLoading(false);
+    }
+  }
+
+  async function openAttachmentWithApp(
+    attachment: { id: string; filename: string },
+    appId: string,
+  ) {
+    try {
+      await api.attachmentsOpenWith(
+        attachment.id,
+        appId,
+        current.summary.id,
+        attachment.filename,
+      );
+      setAttachMenuId(null);
+      setOpenWithApps([]);
     } catch (error) {
       setAiError((error as AppError).message || t("openAttachmentFailed"));
     }
@@ -321,9 +410,23 @@ export function ReadingPane({
         attachment.filename,
       );
       setAttachMenuId(null);
+      setOpenWithApps([]);
     } catch (error) {
       setAiError((error as AppError).message || t("revealAttachmentFailed"));
     }
+  }
+
+  async function onAttachmentChipClick(attachment: {
+    id: string;
+    filename: string;
+    mime: string;
+  }) {
+    if (isCommonAttachment(attachment.mime, attachment.filename)) {
+      await openAttachment(attachment);
+      return;
+    }
+    // Uncommon / special formats → ask via the chevron menu (Open with…).
+    await openAttachmentMenu(attachment);
   }
 
   async function exportMessage(format: "pdf" | "html") {
@@ -408,6 +511,7 @@ export function ReadingPane({
     <article
       aria-label={t("readingPane")}
       className="nova-fade-in flex h-full min-w-0 flex-col"
+      onPointerDownCapture={() => notePreviewEngaged()}
       onDoubleClick={(event) => {
         // Ignore double-clicks on interactive controls (buttons, links, inputs).
         const target = event.target as HTMLElement | null;
@@ -418,6 +522,7 @@ export function ReadingPane({
         ) {
           return;
         }
+        notePreviewEngaged();
         if (onToggleFocus) {
           onToggleFocus();
         } else if (focusMode) {
@@ -602,7 +707,10 @@ export function ReadingPane({
         ) : null}
       </header>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6">
+      <div
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-8 py-6"
+        onScroll={() => notePreviewEngaged()}
+      >
         {attachments.length > 0 ? (
           <section aria-label={t("attachments")}>
             <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
@@ -612,24 +720,32 @@ export function ReadingPane({
             <ul className="flex flex-wrap gap-2">
               {attachments.map((attachment) => (
                 <li key={attachment.id} className="relative">
-                  <button
-                    type="button"
-                    className="rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-1.5 text-sm hover:bg-[var(--nova-accent-soft)]"
-                    onClick={() =>
-                      setAttachMenuId((id) =>
-                        id === attachment.id ? null : attachment.id,
-                      )
-                    }
-                  >
-                    {attachment.filename}{" "}
-                    <span className="text-[var(--nova-ink-muted)]">
-                      ({formatBytes(attachment.size)})
-                    </span>
-                  </button>
+                  <div className="flex overflow-hidden rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)]">
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                      onClick={() => void onAttachmentChipClick(attachment)}
+                      title={attachment.filename}
+                    >
+                      {attachment.filename}{" "}
+                      <span className="text-[var(--nova-ink-muted)]">
+                        ({formatBytes(attachment.size)})
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="border-l border-[var(--nova-border)] px-1.5 text-[var(--nova-ink-muted)] hover:bg-[var(--nova-accent-soft)] hover:text-[var(--nova-ink)]"
+                      aria-label={t("openAttachmentMenu")}
+                      aria-expanded={attachMenuId === attachment.id}
+                      onClick={() => void openAttachmentMenu(attachment)}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
                   {attachMenuId === attachment.id ? (
                     <div
                       role="menu"
-                      className="absolute left-0 top-full z-20 mt-1 min-w-[11rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                      className="absolute left-0 top-full z-20 mt-1 min-w-[14rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
                     >
                       <button
                         type="button"
@@ -637,9 +753,41 @@ export function ReadingPane({
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
                         onClick={() => void openAttachment(attachment)}
                       >
-                        <Share2 size={14} />
-                        {t("openWithSystem")}
+                        <Paperclip size={14} />
+                        {t("openAttachment")}
                       </button>
+                      <div className="my-1 border-t border-[var(--nova-border)]" />
+                      <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                        {t("openWithSystem")}
+                      </p>
+                      {openWithLoading ? (
+                        <p className="px-3 py-2 text-sm text-[var(--nova-ink-muted)]">
+                          …
+                        </p>
+                      ) : openWithApps.length === 0 ? (
+                        <p className="px-3 pb-2 text-xs text-[var(--nova-ink-muted)]">
+                          {t("noOpenWithApps")}
+                        </p>
+                      ) : (
+                        openWithApps.map((app) => (
+                          <button
+                            key={app.id}
+                            type="button"
+                            role="menuitem"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                            onClick={() =>
+                              void openAttachmentWithApp(attachment, app.id)
+                            }
+                          >
+                            <Share2 size={14} />
+                            <span className="min-w-0 truncate">
+                              {app.name}
+                              {app.isDefault ? " ★" : ""}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                      <div className="my-1 border-t border-[var(--nova-border)]" />
                       <button
                         type="button"
                         role="menuitem"

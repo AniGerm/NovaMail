@@ -3,6 +3,7 @@ use novamail_ipc::{
     UpdateAccountRequest,
     AiInstallOllamaRequest, AiInstallOllamaResponse, AiInstallProgressEvent, AiPullModelRequest,
     AiPullModelResponse, AiPullProgressEvent, AiRuntimeStatus, AiSettings, AppError, AttachmentDto,
+    OpenWithAppDto,
     CalDavCollectionDto, CalendarAccountDto, CalendarCollectionDto, CalendarEventDto,
     CalendarInvitationDto, CalendarTaskDto, CardDavServerStatus, ContactsBookSettings,
     ContactsShareMode, ContactsShareStatus, ContactDto, DiscoverCalDavRequest, ExportBackupRequest,
@@ -327,6 +328,100 @@ pub async fn attachments_open_path(
         AppError::new("open", format!("cannot open attachment: {e}"))
     })?;
     Ok(staged)
+}
+
+#[tauri::command]
+pub async fn attachments_list_open_with(
+    state: State<'_, DesktopState>,
+    attachment_id: Uuid,
+    message_id: Option<Uuid>,
+    filename: Option<String>,
+) -> Result<Vec<OpenWithAppDto>, AppError> {
+    let mime = resolve_attachment_mime(&state, attachment_id, message_id, filename.as_deref())?;
+    let apps = crate::open_with::list_apps_for_mime(&mime)
+        .into_iter()
+        .map(|a| OpenWithAppDto {
+            id: a.id,
+            name: a.name,
+            is_default: a.is_default,
+        })
+        .collect();
+    Ok(apps)
+}
+
+#[tauri::command]
+pub async fn attachments_open_with(
+    state: State<'_, DesktopState>,
+    attachment_id: Uuid,
+    app_id: String,
+    message_id: Option<Uuid>,
+    filename: Option<String>,
+) -> Result<String, AppError> {
+    let staged = state
+        .app
+        .stage_attachment_for_open(attachment_id, message_id, filename)
+        .await
+        .map_err(map_err)?;
+    crate::open_with::open_path_with_app(std::path::Path::new(&staged), &app_id)
+        .map_err(|e| AppError::new("open", e))?;
+    Ok(staged)
+}
+
+fn resolve_attachment_mime(
+    state: &State<'_, DesktopState>,
+    attachment_id: Uuid,
+    message_id: Option<Uuid>,
+    filename: Option<&str>,
+) -> Result<String, AppError> {
+    if let Ok(att) = state.app.db().get_attachment(attachment_id) {
+        if !att.mime.trim().is_empty() {
+            return Ok(att.mime);
+        }
+    }
+    if let Some(mid) = message_id {
+        if let Ok(rows) = state.app.db().list_attachments(mid) {
+            if let Some(hit) = rows.iter().find(|a| a.id == attachment_id) {
+                if !hit.mime.trim().is_empty() {
+                    return Ok(hit.mime.clone());
+                }
+            }
+            if let Some(name) = filename {
+                if let Some(hit) = rows.iter().find(|a| a.filename == name) {
+                    if !hit.mime.trim().is_empty() {
+                        return Ok(hit.mime.clone());
+                    }
+                }
+            }
+        }
+    }
+    Ok(mime_from_filename(filename.unwrap_or("")).into())
+}
+
+fn mime_from_filename(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".pdf") {
+        "application/pdf"
+    } else if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".csv") {
+        "text/plain"
+    } else if lower.ends_with(".docx") {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    } else if lower.ends_with(".xlsx") {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    } else if lower.ends_with(".pptx") {
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    } else if lower.ends_with(".zip") {
+        "application/zip"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 #[tauri::command]
