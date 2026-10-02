@@ -244,11 +244,16 @@ export function AppShell() {
   }, [desktop, spellcheckLang]);
 
   // Opening a message marks it read — optimistic cache update, no full list refetch.
+  const openedUnread =
+    messageQuery.data?.summary.id === selectedMessageId &&
+    messageQuery.data?.summary.unread === true;
+  const openedMailboxId = messageQuery.data?.summary.mailboxId;
   useEffect(() => {
-    if (!desktop || !selectedMessageId || !messageQuery.data) return;
-    if (!messageQuery.data.summary.unread) return;
+    if (!desktop || !selectedMessageId || !openedUnread || !openedMailboxId) {
+      return;
+    }
     const id = selectedMessageId;
-    const mailboxId = messageQuery.data.summary.mailboxId;
+    const mailboxId = openedMailboxId;
 
     queryClient.setQueryData(
       ["message", id],
@@ -258,7 +263,7 @@ export function AppShell() {
           : old,
     );
     queryClient.setQueriesData(
-      { queryKey: ["messages"] },
+      { queryKey: ["messages", "flat"] },
       (old: unknown) => {
         if (!old || typeof old !== "object") return old;
         const data = old as { messages?: Array<{ id: string; unread: boolean }> };
@@ -283,14 +288,18 @@ export function AppShell() {
       },
     );
 
-    void api
-      .messagesSetFlags({ messageId: id, unread: false })
-      .catch(() => {
-        void queryClient.invalidateQueries({ queryKey: ["message", id] });
-        void queryClient.invalidateQueries({ queryKey: ["messages"] });
-        void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
-      });
-  }, [desktop, messageQuery.data, queryClient, selectedMessageId]);
+    void api.messagesSetFlags({ messageId: id, unread: false }).catch(() => {
+      void queryClient.invalidateQueries({ queryKey: ["message", id] });
+      void queryClient.invalidateQueries({ queryKey: ["messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+    });
+  }, [
+    desktop,
+    openedMailboxId,
+    openedUnread,
+    queryClient,
+    selectedMessageId,
+  ]);
 
   useEffect(() => {
     if (!desktop) return;
