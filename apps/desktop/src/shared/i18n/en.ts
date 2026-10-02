@@ -276,6 +276,7 @@ export const en: Translations = {
   addRule: "Add rule",
   edit: "Edit",
   delete: "Delete",
+  archive: "Archive",
   spam: "Spam",
   trash: "Trash",
   spamTitle: "Spam filter",

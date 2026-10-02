@@ -9,6 +9,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Clock3,
+  Trash2,
+  Archive,
 } from "lucide-react";
 import { Button, EmptyState, IconButton } from "@novamail/ui";
 
@@ -23,6 +25,7 @@ import type {
 import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
+import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 
 type ReplyVariant = "a" | "b" | "own";
 
@@ -33,6 +36,8 @@ interface ReadingPaneProps {
   onReply: () => void;
   onForward?: () => void;
   onToggleStar: () => void;
+  onDelete?: () => void;
+  onArchive?: () => void;
   onMarkSpam?: () => void;
   onMarkNotSpam?: () => void;
   onSnooze?: (preset: SnoozePreset) => void;
@@ -48,6 +53,8 @@ export function ReadingPane({
   onReply,
   onForward,
   onToggleStar,
+  onDelete,
+  onArchive,
   onMarkSpam,
   onMarkNotSpam,
   onSnooze,
@@ -87,9 +94,15 @@ export function ReadingPane({
     const id = message?.summary.id;
     if (!id) return;
     let cancelled = false;
-    const body = `${message?.bodyText ?? ""}\n${message?.bodyHtml ?? ""}`;
+    // Avoid scanning huge HTML bodies — text + attachment names are enough.
+    const inviteProbe = `${message?.bodyText ?? ""}\n${(message?.attachments ?? [])
+      .map((a) => a.filename)
+      .join("\n")}`;
     const looksLikeInvite =
-      /BEGIN:VCALENDAR/i.test(body) && /METHOD:REQUEST/i.test(body);
+      (/BEGIN:VCALENDAR/i.test(inviteProbe) && /METHOD:REQUEST/i.test(inviteProbe)) ||
+      (message?.attachments ?? []).some((a) =>
+        /\.ics$/i.test(a.filename) || /calendar/i.test(a.mime),
+      );
     if (looksLikeInvite) {
       setInvitePending(true);
     }
@@ -114,11 +127,12 @@ export function ReadingPane({
         cancelled = true;
       };
     }
+    let polls = 0;
     const loadInsights = () =>
       api
         .aiMessageInsights(id)
         .then((insights) => {
-          if (cancelled) return false;
+          if (cancelled) return true;
           if (insights.summary) setSummary(insights.summary);
           setEventSuggestions(insights.eventSuggestions ?? []);
           const a = insights.replyA ?? insights.replySuggestion ?? null;
@@ -129,17 +143,18 @@ export function ReadingPane({
             setActiveVariant("a");
             setDraft(a);
           }
-          // Incomplete → background AI still running; keep polling briefly.
-          return Boolean(insights.summary && a && b);
+          polls += 1;
+          // Stop after a few tries so large mailboxes don't keep hammering AI.
+          return Boolean(insights.summary && a && b) || polls >= 4;
         })
-        .catch(() => false);
+        .catch(() => true);
 
     void loadInsights();
     const timer = window.setInterval(() => {
       void loadInsights().then((done) => {
         if (done) window.clearInterval(timer);
       });
-    }, 2500);
+    }, 4000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -286,6 +301,16 @@ export function ReadingPane({
             <IconButton label={t("forward")} onClick={onForward}>
               <Forward />
             </IconButton>
+            {onArchive ? (
+              <IconButton label={t("archive")} onClick={onArchive}>
+                <Archive />
+              </IconButton>
+            ) : null}
+            {onDelete ? (
+              <IconButton label={t("delete")} onClick={onDelete}>
+                <Trash2 />
+              </IconButton>
+            ) : null}
             {onSnooze ? (
               <>
                 <IconButton
@@ -429,9 +454,9 @@ export function ReadingPane({
             {t("messageBody")}
           </p>
           {current.bodyHtml ? (
-            <div
-              className="nova-html-body max-w-none overflow-x-auto text-[15px] leading-7 text-[var(--nova-ink)] [&_img]:h-auto [&_img]:max-w-full [&_table]:max-w-full"
-              dangerouslySetInnerHTML={{ __html: current.bodyHtml }}
+            <HtmlMailBody
+              html={current.bodyHtml}
+              attachments={attachments}
             />
           ) : (
             <div className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--nova-ink)]">

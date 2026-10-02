@@ -1,7 +1,7 @@
 //! HTML sanitization for untrusted message bodies.
 //!
 //! ADR 0002 / 0004: never hand raw HTML from IMAP to the UI renderer.
-//! Configured for typical HTML email (tables, inline styles, remote/data images).
+//! Configured for typical HTML email (tables, `<style>`, inline CSS, remote/data images).
 
 use ammonia::{Builder, UrlRelative};
 
@@ -14,6 +14,7 @@ const STYLE_PROPS: &[&str] = &[
     "background-size",
     "background-repeat",
     "background-position",
+    "background-attachment",
     "width",
     "height",
     "max-width",
@@ -53,28 +54,54 @@ const STYLE_PROPS: &[&str] = &[
     "text-transform",
     "vertical-align",
     "white-space",
+    "word-break",
+    "overflow-wrap",
     "display",
+    "flex",
+    "flex-direction",
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "gap",
+    "row-gap",
+    "column-gap",
     "float",
     "clear",
     "overflow",
+    "overflow-x",
+    "overflow-y",
     "visibility",
     "opacity",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "z-index",
+    "box-sizing",
     "list-style",
     "list-style-type",
     "table-layout",
+    "object-fit",
 ];
 
 pub fn sanitize_html(html: &str) -> String {
+    // Preserve `<style>` blocks (newsletters rely on them) while still stripping scripts.
+    let (styles, without_styles) = extract_style_blocks(html);
+
     let mut builder = Builder::default();
     builder
         .link_rel(Some("noopener noreferrer"))
-        // Keep relative URLs so newsletter layouts are not stripped to bare text.
         .url_relative(UrlRelative::PassThrough)
-        .add_url_schemes(["data", "cid", "http", "https", "mailto"])
+        .add_url_schemes(["data", "cid", "http", "https", "mailto", "asset"])
         .add_tags(["center", "font"])
         .add_generic_attributes([
             "style",
             "class",
+            "id",
             "align",
             "valign",
             "bgcolor",
@@ -88,6 +115,7 @@ pub fn sanitize_html(html: &str) -> String {
             "face",
             "size",
             "role",
+            "dir",
         ])
         .add_tag_attributes("table", &["width", "height", "bgcolor", "background", "align"])
         .add_tag_attributes(
@@ -119,7 +147,70 @@ pub fn sanitize_html(html: &str) -> String {
         )
         .add_tag_attributes("font", &["color", "face", "size"])
         .filter_style_properties(STYLE_PROPS.iter().copied().collect());
-    builder.clean(html).to_string()
+
+    let cleaned_body = builder.clean(&without_styles).to_string();
+    if styles.is_empty() {
+        cleaned_body
+    } else {
+        format!("{styles}{cleaned_body}")
+    }
+}
+
+/// Pull `<style>…</style>` blocks out so ammonia does not delete their CSS content.
+fn extract_style_blocks(html: &str) -> (String, String) {
+    let lower = html.to_ascii_lowercase();
+    let mut styles = String::new();
+    let mut body = String::with_capacity(html.len());
+    let mut rest = html;
+    let mut rest_lower = lower.as_str();
+
+    while let Some(start) = rest_lower.find("<style") {
+        body.push_str(&rest[..start]);
+        let after_start = &rest[start..];
+        let after_start_lower = &rest_lower[start..];
+        let Some(tag_end_rel) = after_start_lower.find('>') else {
+            break;
+        };
+        let content_start = tag_end_rel + 1;
+        let search = &after_start_lower[content_start..];
+        let Some(end_rel) = search.find("</style") else {
+            // Unclosed style — drop the rest of the tag opener and continue.
+            rest = &after_start[content_start..];
+            rest_lower = &after_start_lower[content_start..];
+            continue;
+        };
+        let close_abs = content_start + end_rel;
+        let css = &after_start[content_start..close_abs];
+        let safe_css = scrub_style_css(css);
+        if !safe_css.trim().is_empty() {
+            styles.push_str("<style type=\"text/css\">");
+            styles.push_str(&safe_css);
+            styles.push_str("</style>");
+        }
+        let after_close = &after_start_lower[close_abs..];
+        let close_end = after_close
+            .find('>')
+            .map(|i| close_abs + i + 1)
+            .unwrap_or(after_start.len());
+        rest = &after_start[close_end..];
+        rest_lower = &after_start_lower[close_end..];
+    }
+    body.push_str(rest);
+    (styles, body)
+}
+
+fn scrub_style_css(css: &str) -> String {
+    // Drop constructs that can pull scripts or navigate the top window.
+    css.lines()
+        .filter(|line| {
+            let t = line.trim().to_ascii_lowercase();
+            !t.contains("expression(")
+                && !t.contains("javascript:")
+                && !t.contains("-moz-binding")
+                && !t.starts_with("@import")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Rewrite `cid:` image/link references to `data:` URLs using Content-ID → blob map.
@@ -175,22 +266,19 @@ mod tests {
 
     #[test]
     fn keeps_tables_styles_and_data_images() {
-        let html = r#"<table width="600" style="background-color:#f5f5f5"><tr><td style="padding:12px;color:#333"><img src="data:image/png;base64,aaa=" width="120" alt="logo"><p>Hi</p></td></tr></table>"#;
+        let html = r#"<style>.x{color:#333;padding:12px}</style><table width="600" style="background-color:#f5f5f5"><tr><td class="x"><img src="data:image/png;base64,aaa=" width="120" alt="logo"><p>Hi</p></td></tr></table>"#;
         let clean = sanitize_html(html);
         assert!(clean.contains("<table"));
         assert!(clean.contains("data:image/png;base64,aaa="));
         assert!(clean.contains("Hi"));
-        assert!(clean.contains("padding"));
+        assert!(clean.contains("<style"));
+        assert!(clean.contains(".x{color:#333;padding:12px}") || clean.contains("color:#333"));
     }
 
     #[test]
     fn rewrites_cid_to_data_url() {
         let html = r#"<img src="cid:pic@mail">"#;
-        let map = vec![(
-            "pic@mail".into(),
-            "image/png".into(),
-            vec![0u8, 1, 2],
-        )];
+        let map = vec![("pic@mail".into(), "image/png".into(), vec![0u8, 1, 2])];
         let rewritten = rewrite_cid_urls(html, &map);
         assert!(rewritten.contains("data:image/png;base64,"));
         assert!(!rewritten.contains("cid:"));
