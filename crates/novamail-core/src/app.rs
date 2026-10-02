@@ -1240,10 +1240,12 @@ impl AppState {
         } else {
             safe
         };
-        let stage_dir = self.paths.data_dir.join("open");
+        // Per-attachment dir + original basename only — xdg-open / MIME helpers
+        // key off the filename; UUID prefixes often make openers no-op.
+        let stage_dir = self.paths.data_dir.join("open").join(attachment_id.to_string());
         std::fs::create_dir_all(&stage_dir)
             .map_err(|e| CoreError::Message(format!("cannot create open dir: {e}")))?;
-        let staged = stage_dir.join(format!("{attachment_id}_{safe}"));
+        let staged = stage_dir.join(&safe);
         std::fs::copy(&blob, &staged)
             .map_err(|e| CoreError::Message(format!("cannot stage attachment: {e}")))?;
         Ok(staged.to_string_lossy().into_owned())
