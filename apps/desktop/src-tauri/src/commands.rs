@@ -321,8 +321,11 @@ pub async fn attachments_open_path(
         .await
         .map_err(map_err)?;
     // Open from Rust — more reliable on Linux than returning a path for the
-    // frontend shell plugin (xdg-open + original filename).
-    open::that(&staged).map_err(|e| AppError::new("open", format!("cannot open attachment: {e}")))?;
+    // frontend shell plugin (xdg-open often no-ops on UUID-prefixed blob names).
+    tracing::info!(path = %staged, "opening staged attachment via system handler");
+    open::that(&staged).map_err(|e| {
+        AppError::new("open", format!("cannot open attachment: {e}"))
+    })?;
     Ok(staged)
 }
 

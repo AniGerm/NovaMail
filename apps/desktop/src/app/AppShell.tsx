@@ -355,13 +355,15 @@ export function AppShell() {
 
   const openFocusForMessage = useCallback(
     (id: string) => {
-      handleSelectMessage(id);
-      // Fullscreen counts as "opened for real" → mark read.
+      selectMessage(id);
+      // Fullscreen counts as "opened for real" → clear unread blue dot.
       const detail = messageQuery.data;
-      if (detail?.summary.id === id && detail.summary.unread) {
-        markMessageReadLocally(id, detail.summary.mailboxId);
-      } else if (id !== selectedMessageId) {
-        // Detail may not be loaded yet; mark after a short tick via flags API.
+      if (detail?.summary.id === id) {
+        if (detail.summary.unread) {
+          markMessageReadLocally(id, detail.summary.mailboxId);
+        }
+      } else {
+        // Detail not loaded yet for this id — persist SEEN remotely + refresh.
         void api.messagesSetFlags({ messageId: id, unread: false }).then(() => {
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
           void queryClient.invalidateQueries({ queryKey: ["message", id] });
@@ -370,13 +372,7 @@ export function AppShell() {
       }
       setMessageFocusOpen(true);
     },
-    [
-      handleSelectMessage,
-      markMessageReadLocally,
-      messageQuery.data,
-      queryClient,
-      selectedMessageId,
-    ],
+    [markMessageReadLocally, messageQuery.data, queryClient, selectMessage],
   );
 
   // Preselect first mail so preview shows with unread dot still visible.
