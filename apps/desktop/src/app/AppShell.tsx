@@ -29,6 +29,7 @@ import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
+import { PanelResizeHandle } from "@/shared/ui/PanelResizeHandle";
 import type {
   AccountDto,
   AiSettings,
@@ -72,6 +73,10 @@ export function AppShell() {
     density,
     inboxViewMode,
     setInboxViewMode,
+    sidebarWidth,
+    setSidebarWidth,
+    listWidth,
+    setListWidth,
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
@@ -120,6 +125,8 @@ export function AppShell() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [plannedSummary, setPlannedSummary] =
     useState<PlannedSummaryDto | null>(null);
+  /** Pending calendar invites + due/overdue tasks. */
+  const [calendarAttention, setCalendarAttention] = useState(0);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
   const spellcheckLang = useUiStore((s) => s.spellcheckLang);
@@ -436,9 +443,32 @@ export function AppShell() {
       .catch(() => setPlannedSummary(null));
   }, [desktop]);
 
+  const refreshCalendarAttention = useCallback(() => {
+    if (!desktop) return;
+    void Promise.all([
+      api.calendarInvitationsList(true),
+      api.calendarTasksList(false),
+    ])
+      .then(([invites, tasks]) => {
+        const now = Math.floor(Date.now() / 1000);
+        const due = tasks.filter(
+          (task) => !task.completed && task.dueAt != null && task.dueAt <= now,
+        ).length;
+        setCalendarAttention(invites.length + due);
+      })
+      .catch(() => undefined);
+  }, [desktop]);
+
   useEffect(() => {
     refreshPlannedSummary();
   }, [refreshPlannedSummary]);
+
+  useEffect(() => {
+    refreshCalendarAttention();
+    if (!desktop) return;
+    const id = window.setInterval(refreshCalendarAttention, 60_000);
+    return () => window.clearInterval(id);
+  }, [desktop, refreshCalendarAttention]);
 
   useEffect(() => {
     if (!desktop || !commandPaletteOpen) return;
@@ -726,6 +756,7 @@ export function AppShell() {
     selectMessage(null);
     setPlannedOpen(false);
     setCalendarOpen(true);
+    refreshCalendarAttention();
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
@@ -733,7 +764,7 @@ export function AppShell() {
       localOnly: false,
       snoozedOnly: false,
     }));
-  }, [selectMessage]);
+  }, [refreshCalendarAttention, selectMessage]);
 
   const refreshMailQueries = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -1186,8 +1217,10 @@ export function AppShell() {
             (plannedSummary?.outboundPendingCount ?? 0)
           }
           calendarSelected={calendarOpen}
+          calendarCount={calendarAttention}
           syncStatus={syncStatus}
           themeMode={theme}
+          width={sidebarWidth}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
           onSelectMailbox={handleSelectMailbox}
@@ -1204,10 +1237,21 @@ export function AppShell() {
           onOpenContacts={() => setContactsOpen(true)}
           onOpenTriage={() => setTriageOpen(true)}
         />
+        <PanelResizeHandle
+          value={sidebarWidth}
+          min={180}
+          max={420}
+          onChange={setSidebarWidth}
+          label={t("resizeSidebar")}
+        />
 
         {calendarOpen ? (
           <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
-            <CalendarPanel />
+            <CalendarPanel
+              onAttentionChange={(count) => {
+                setCalendarAttention(count);
+              }}
+            />
           </div>
         ) : plannedOpen ? (
           <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
@@ -1245,7 +1289,7 @@ export function AppShell() {
           </div>
         ) : (
           <>
-            <div className="w-[380px] shrink-0">
+            <div className="min-w-0 shrink-0" style={{ width: listWidth }}>
               <MessageList
                 messages={messages}
                 threads={threads}
@@ -1273,6 +1317,13 @@ export function AppShell() {
                 searchQuery={searchQuery}
               />
             </div>
+            <PanelResizeHandle
+              value={listWidth}
+              min={260}
+              max={640}
+              onChange={setListWidth}
+              label={t("resizeMessageList")}
+            />
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
               <ReadingPane
                 message={messageQuery.data}
@@ -1375,6 +1426,7 @@ export function AppShell() {
                       setCalendarOpen(true);
                       setPlannedOpen(false);
                       setSyncStatus(t("taskCreated"));
+                      refreshCalendarAttention();
                     })
                     .catch((err) =>
                       setSyncStatus((err as AppError).message),

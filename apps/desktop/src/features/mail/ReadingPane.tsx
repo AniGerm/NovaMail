@@ -745,53 +745,52 @@ export function ReadingPane({
                   {attachMenuId === attachment.id ? (
                     <div
                       role="menu"
-                      className="absolute left-0 top-full z-20 mt-1 min-w-[14rem] rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+                      className="absolute left-0 top-full z-20 mt-1 flex max-h-[min(22rem,50vh)] min-w-[15rem] flex-col overflow-hidden rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
                     >
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
                         onClick={() => void openAttachment(attachment)}
                       >
                         <Paperclip size={14} />
                         {t("openAttachment")}
                       </button>
-                      <div className="my-1 border-t border-[var(--nova-border)]" />
-                      <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                      <div className="my-1 shrink-0 border-t border-[var(--nova-border)]" />
+                      <p className="shrink-0 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--nova-ink-muted)]">
                         {t("openWithSystem")}
                       </p>
-                      {openWithLoading ? (
-                        <p className="px-3 py-2 text-sm text-[var(--nova-ink-muted)]">
-                          …
-                        </p>
-                      ) : openWithApps.length === 0 ? (
-                        <p className="px-3 pb-2 text-xs text-[var(--nova-ink-muted)]">
-                          {t("noOpenWithApps")}
-                        </p>
-                      ) : (
-                        openWithApps.map((app) => (
-                          <button
-                            key={app.id}
-                            type="button"
-                            role="menuitem"
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
-                            onClick={() =>
-                              void openAttachmentWithApp(attachment, app.id)
-                            }
-                          >
-                            <Share2 size={14} />
-                            <span className="min-w-0 truncate">
-                              {app.name}
-                              {app.isDefault ? " ★" : ""}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                      <div className="my-1 border-t border-[var(--nova-border)]" />
+                      <div className="min-h-0 flex-1 overflow-y-auto">
+                        {openWithLoading ? (
+                          <p className="px-3 py-2 text-sm text-[var(--nova-ink-muted)]">
+                            …
+                          </p>
+                        ) : openWithApps.length === 0 ? (
+                          <p className="px-3 pb-2 text-xs text-[var(--nova-ink-muted)]">
+                            {t("noOpenWithApps")}
+                          </p>
+                        ) : (
+                          openWithApps.map((app) => (
+                            <button
+                              key={app.id}
+                              type="button"
+                              role="menuitem"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                              onClick={() =>
+                                void openAttachmentWithApp(attachment, app.id)
+                              }
+                            >
+                              <Share2 size={14} />
+                              <span className="min-w-0 truncate">{app.name}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <div className="my-1 shrink-0 border-t border-[var(--nova-border)]" />
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+                        className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
                         onClick={() => void revealAttachment(attachment)}
                       >
                         <FolderOpen size={14} />
