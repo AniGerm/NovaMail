@@ -125,6 +125,8 @@ export function AppShell() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [plannedSummary, setPlannedSummary] =
     useState<PlannedSummaryDto | null>(null);
+  /** Pending calendar invites + due/overdue tasks. */
+  const [calendarAttention, setCalendarAttention] = useState(0);
   const desktop = isDesktopShell();
   const locale = useUiStore((s) => s.locale);
   const spellcheckLang = useUiStore((s) => s.spellcheckLang);
@@ -441,9 +443,32 @@ export function AppShell() {
       .catch(() => setPlannedSummary(null));
   }, [desktop]);
 
+  const refreshCalendarAttention = useCallback(() => {
+    if (!desktop) return;
+    void Promise.all([
+      api.calendarInvitationsList(true),
+      api.calendarTasksList(false),
+    ])
+      .then(([invites, tasks]) => {
+        const now = Math.floor(Date.now() / 1000);
+        const due = tasks.filter(
+          (task) => !task.completed && task.dueAt != null && task.dueAt <= now,
+        ).length;
+        setCalendarAttention(invites.length + due);
+      })
+      .catch(() => undefined);
+  }, [desktop]);
+
   useEffect(() => {
     refreshPlannedSummary();
   }, [refreshPlannedSummary]);
+
+  useEffect(() => {
+    refreshCalendarAttention();
+    if (!desktop) return;
+    const id = window.setInterval(refreshCalendarAttention, 60_000);
+    return () => window.clearInterval(id);
+  }, [desktop, refreshCalendarAttention]);
 
   useEffect(() => {
     if (!desktop || !commandPaletteOpen) return;
@@ -731,6 +756,7 @@ export function AppShell() {
     selectMessage(null);
     setPlannedOpen(false);
     setCalendarOpen(true);
+    refreshCalendarAttention();
     setInboxFilters((prev) => ({
       ...prev,
       mailboxId: null,
@@ -738,7 +764,7 @@ export function AppShell() {
       localOnly: false,
       snoozedOnly: false,
     }));
-  }, [selectMessage]);
+  }, [refreshCalendarAttention, selectMessage]);
 
   const refreshMailQueries = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -1191,6 +1217,7 @@ export function AppShell() {
             (plannedSummary?.outboundPendingCount ?? 0)
           }
           calendarSelected={calendarOpen}
+          calendarCount={calendarAttention}
           syncStatus={syncStatus}
           themeMode={theme}
           width={sidebarWidth}
@@ -1220,7 +1247,11 @@ export function AppShell() {
 
         {calendarOpen ? (
           <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
-            <CalendarPanel />
+            <CalendarPanel
+              onAttentionChange={(count) => {
+                setCalendarAttention(count);
+              }}
+            />
           </div>
         ) : plannedOpen ? (
           <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
@@ -1395,6 +1426,7 @@ export function AppShell() {
                       setCalendarOpen(true);
                       setPlannedOpen(false);
                       setSyncStatus(t("taskCreated"));
+                      refreshCalendarAttention();
                     })
                     .catch((err) =>
                       setSyncStatus((err as AppError).message),

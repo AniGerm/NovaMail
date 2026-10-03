@@ -44,7 +44,12 @@ interface EventDraft {
   reminderMinutes: number;
 }
 
-export function CalendarPanel() {
+interface CalendarPanelProps {
+  /** Pending invites + due/overdue incomplete tasks (for sidebar badge). */
+  onAttentionChange?: (count: number) => void;
+}
+
+export function CalendarPanel({ onAttentionChange }: CalendarPanelProps = {}) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const loc = locale === "de" ? "de-DE" : "en-US";
@@ -64,12 +69,14 @@ export function CalendarPanel() {
     { href: string; displayName: string }[]
   >([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskDueAt, setNewTaskDueAt] = useState(() => defaultTaskDueAt());
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTaskTitle, setEditingTaskTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [draft, setDraft] = useState<EventDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [taskBusy, setTaskBusy] = useState(false);
 
   const range = useMemo(() => {
     if (view === "month") {
@@ -117,6 +124,13 @@ export function CalendarPanel() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const dueTaskCount = useMemo(() => countDueTasks(tasks), [tasks]);
+  const inviteCount = invites.length;
+
+  useEffect(() => {
+    onAttentionChange?.(inviteCount + dueTaskCount);
+  }, [dueTaskCount, inviteCount, onAttentionChange]);
 
   const periodTitle = useMemo(() => {
     if (view === "month") {
@@ -264,17 +278,27 @@ export function CalendarPanel() {
 
   const createTask = async () => {
     const title = newTaskTitle.trim();
-    if (!title) return;
+    if (!title) {
+      setError(t("calendarTaskTitleRequired"));
+      return;
+    }
+    setTaskBusy(true);
+    setError(null);
     try {
       await api.calendarTasksUpsert({
         title,
-        dueAt: Math.floor(Date.now() / 1000) + 86400,
+        dueAt: newTaskDueAt,
+        completed: false,
+        notes: "",
       });
       setNewTaskTitle("");
+      setNewTaskDueAt(defaultTaskDueAt());
       setStatus(t("calendarTaskSaved"));
       await refresh();
     } catch (err) {
-      setError((err as AppError).message);
+      setError((err as AppError).message || t("calendarTaskSaveFailed"));
+    } finally {
+      setTaskBusy(false);
     }
   };
 
@@ -283,9 +307,9 @@ export function CalendarPanel() {
       await api.calendarTasksUpsert({
         id: task.id,
         title: task.title,
-        dueAt: task.dueAt,
+        dueAt: task.dueAt ?? null,
         completed: !task.completed,
-        notes: task.notes,
+        notes: task.notes ?? "",
       });
       await refresh();
     } catch (err) {
@@ -309,12 +333,28 @@ export function CalendarPanel() {
       await api.calendarTasksUpsert({
         id: task.id,
         title,
-        dueAt: task.dueAt,
+        dueAt: task.dueAt ?? null,
         completed: task.completed,
-        notes: task.notes,
+        notes: task.notes ?? "",
       });
       setEditingTaskId(null);
       setEditingTaskTitle("");
+      setStatus(t("calendarTaskSaved"));
+      await refresh();
+    } catch (err) {
+      setError((err as AppError).message);
+    }
+  };
+
+  const updateTaskDue = async (task: CalendarTaskDto, dueAt: number | null) => {
+    try {
+      await api.calendarTasksUpsert({
+        id: task.id,
+        title: task.title,
+        dueAt,
+        completed: task.completed,
+        notes: task.notes ?? "",
+      });
       setStatus(t("calendarTaskSaved"));
       await refresh();
     } catch (err) {
@@ -443,14 +483,14 @@ export function CalendarPanel() {
                   ["schedule", t("calendarSchedule")],
                   [
                     "inbox",
-                    invites.length
-                      ? `${t("calendarInbox")} · ${invites.length}`
+                    inviteCount
+                      ? `${t("calendarInbox")} · ${inviteCount}`
                       : t("calendarInbox"),
                   ],
                   [
                     "tasks",
-                    tasks.filter((task) => !task.completed).length
-                      ? `${t("calendarTasksTitle")} · ${tasks.filter((task) => !task.completed).length}`
+                    dueTaskCount
+                      ? `${t("calendarTasksTitle")} · ${dueTaskCount}`
                       : t("calendarTasksTitle"),
                   ],
                   ["manage", t("calendarManage")],
@@ -830,22 +870,50 @@ export function CalendarPanel() {
                 {t("calendarTasksHint")}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="space-y-2 rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_90%,transparent)] p-3">
               <Input
                 value={newTaskTitle}
                 onChange={(e) => setNewTaskTitle(e.target.value)}
                 placeholder={t("taskTitle")}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void createTask();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void createTask();
+                  }
                 }}
               />
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => void createTask()}
-              >
-                {t("add")}
-              </Button>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid min-w-[9rem] flex-1 gap-1 text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarTaskDueDate")}
+                  <input
+                    type="date"
+                    className="h-9 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-sm text-[var(--nova-ink)]"
+                    value={toLocalDate(newTaskDueAt)}
+                    onChange={(e) =>
+                      setNewTaskDueAt(withLocalDate(newTaskDueAt, e.target.value))
+                    }
+                  />
+                </label>
+                <label className="grid min-w-[7rem] gap-1 text-xs text-[var(--nova-ink-muted)]">
+                  {t("calendarTaskDueTime")}
+                  <input
+                    type="time"
+                    className="h-9 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-sm text-[var(--nova-ink)]"
+                    value={toLocalTime(newTaskDueAt)}
+                    onChange={(e) =>
+                      setNewTaskDueAt(withLocalTime(newTaskDueAt, e.target.value))
+                    }
+                  />
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={taskBusy}
+                  onClick={() => void createTask()}
+                >
+                  {taskBusy ? t("working") : t("add")}
+                </Button>
+              </div>
             </div>
             {tasks.length === 0 ? (
               <p className="text-sm text-[var(--nova-ink-muted)]">
@@ -855,10 +923,16 @@ export function CalendarPanel() {
               <ul className="space-y-2">
                 {tasks.map((task) => {
                   const renaming = editingTaskId === task.id;
+                  const due = task.dueAt ?? null;
+                  const isDue = isTaskDue(task);
                   return (
                     <li
                       key={task.id}
-                      className="flex items-start gap-3 rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_90%,transparent)] px-4 py-3"
+                      className={`flex items-start gap-3 rounded-[var(--nova-radius-lg)] border px-4 py-3 ${
+                        isDue
+                          ? "border-[color-mix(in_srgb,var(--nova-warning)_55%,var(--nova-border))] bg-[color-mix(in_srgb,var(--nova-warning)_10%,var(--nova-surface))]"
+                          : "border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_90%,transparent)]"
+                      }`}
                     >
                       <input
                         type="checkbox"
@@ -867,7 +941,7 @@ export function CalendarPanel() {
                         onChange={() => void toggleTaskCompleted(task)}
                         aria-label={task.title}
                       />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 space-y-2">
                         {renaming ? (
                           <Input
                             autoFocus
@@ -900,15 +974,58 @@ export function CalendarPanel() {
                             {task.title}
                           </button>
                         )}
-                        {task.dueAt != null ? (
-                          <p className="mt-1 text-xs text-[var(--nova-ink-muted)]">
-                            {formatDateTime(task.dueAt, locale)}
-                          </p>
-                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="grid gap-0.5 text-[10px] uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                            {t("calendarTaskDueDate")}
+                            <input
+                              type="date"
+                              className="h-8 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-xs text-[var(--nova-ink)]"
+                              value={due != null ? toLocalDate(due) : ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (!value) {
+                                  void updateTaskDue(task, null);
+                                  return;
+                                }
+                                const base = due ?? defaultTaskDueAt();
+                                void updateTaskDue(
+                                  task,
+                                  withLocalDate(base, value),
+                                );
+                              }}
+                            />
+                          </label>
+                          <label className="grid gap-0.5 text-[10px] uppercase tracking-wide text-[var(--nova-ink-muted)]">
+                            {t("calendarTaskDueTime")}
+                            <input
+                              type="time"
+                              className="h-8 rounded-[var(--nova-radius-sm)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-2 text-xs text-[var(--nova-ink)]"
+                              value={due != null ? toLocalTime(due) : ""}
+                              disabled={due == null}
+                              onChange={(e) => {
+                                if (due == null) return;
+                                void updateTaskDue(
+                                  task,
+                                  withLocalTime(due, e.target.value),
+                                );
+                              }}
+                            />
+                          </label>
+                          {isDue ? (
+                            <span className="text-xs font-medium text-[var(--nova-warning)]">
+                              {t("calendarTaskDueNow")}
+                            </span>
+                          ) : due != null ? (
+                            <span className="text-xs text-[var(--nova-ink-muted)]">
+                              {formatDateTime(due, locale)}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <div className="flex shrink-0 gap-1">
                         {!renaming ? (
                           <Button
+                            type="button"
                             size="sm"
                             variant="ghost"
                             onClick={() => beginRenameTask(task)}
@@ -917,6 +1034,7 @@ export function CalendarPanel() {
                           </Button>
                         ) : null}
                         <Button
+                          type="button"
                           size="sm"
                           variant="ghost"
                           onClick={() => void deleteTask(task.id)}
@@ -1534,6 +1652,23 @@ function formatDateTime(unix: number, locale: string): string {
       minute: "2-digit",
     },
   );
+}
+
+/** Default due: tomorrow 09:00 local. */
+function defaultTaskDueAt(): number {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function isTaskDue(task: CalendarTaskDto, nowSec = Math.floor(Date.now() / 1000)): boolean {
+  return !task.completed && task.dueAt != null && task.dueAt <= nowSec;
+}
+
+function countDueTasks(tasks: CalendarTaskDto[]): number {
+  const now = Math.floor(Date.now() / 1000);
+  return tasks.filter((task) => isTaskDue(task, now)).length;
 }
 
 function pad2(n: number): string {

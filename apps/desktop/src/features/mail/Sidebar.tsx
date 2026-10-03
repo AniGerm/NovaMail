@@ -37,6 +37,8 @@ interface SidebarProps {
   plannedSelected?: boolean;
   plannedCount?: number;
   calendarSelected?: boolean;
+  /** Pending invites + due/overdue tasks. */
+  calendarCount?: number;
   syncStatus: string | null;
   themeMode: ThemeMode;
   onSelectUnified: () => void;
@@ -94,6 +96,7 @@ export function Sidebar({
   plannedSelected = false,
   plannedCount = 0,
   calendarSelected = false,
+  calendarCount = 0,
   syncStatus,
   themeMode,
   onSelectUnified,
@@ -290,12 +293,15 @@ export function Sidebar({
           onClick={onSelectCalendar}
           className={
             calendarSelected
-              ? "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
-              : "flex h-11 items-center gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
+              ? "flex h-11 items-center justify-between gap-3 rounded-[var(--nova-radius-md)] bg-[var(--nova-accent-soft)] px-3 text-left text-sm font-medium text-[var(--nova-accent)]"
+              : "flex h-11 items-center justify-between gap-3 rounded-[var(--nova-radius-md)] px-3 text-left text-sm hover:bg-[var(--nova-accent-soft)]"
           }
         >
-          <CalendarDays size={18} />
-          {t("calendar")}
+          <span className="flex items-center gap-3">
+            <CalendarDays size={18} />
+            {t("calendar")}
+          </span>
+          {calendarCount > 0 ? <Badge>{calendarCount}</Badge> : null}
         </button>
         <button
           type="button"
