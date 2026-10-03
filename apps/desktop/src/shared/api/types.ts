@@ -552,6 +552,9 @@ export type ContactsShareMode = "local" | "server" | "client";
 export interface LdapServerStatus {
   running: boolean;
   listenUrl: string;
+  /** All bound URLs (may include ldap://host:389 when privileged bind works). */
+  listenUrls?: string[];
+  allowAnonymous?: boolean;
   baseDn: string;
   bindDn: string;
   username: string;

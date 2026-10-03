@@ -669,6 +669,19 @@ export function ContactsDialog({
                     onFocus={(e) => e.currentTarget.select()}
                   />
                 </label>
+                {(share.ldapServer.listenUrls?.length ?? 0) > 1 ? (
+                  <label className="grid gap-1 text-xs">
+                    <span>{t("ldapServerUrlsLabel")}</span>
+                    <Input
+                      readOnly
+                      value={(share.ldapServer.listenUrls ?? []).join(" · ")}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </label>
+                ) : null}
+                <p className="text-xs text-[var(--nova-ink-muted)]">
+                  {t("ldapRicohHint")}
+                </p>
                 <div className="grid gap-2 md:grid-cols-2">
                   <label className="grid gap-1 text-xs">
                     <span>{t("ldapServerBindDn")}</span>

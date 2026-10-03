@@ -1,7 +1,8 @@
-//! Minimal LDAP v3 server so other NovaMail PCs can sync contacts from the hub.
+//! LDAP v3 hub server for shared contacts (NovaMail PCs, Ricoh MFPs, generic clients).
 //!
-//! Supports Simple Bind, Search, Add, Modify, and Delete against the local
-//! contact store. Bound to `0.0.0.0:1389` by default (non-root port).
+//! Supports Simple Bind (optional anonymous read), Search with filter/scope,
+//! Add, Modify, and Delete. Default listen `0.0.0.0:1389`; optional second bind
+//! on port 389 for appliances that expect the well-known LDAP port.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -22,18 +23,23 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use uuid::Uuid;
 
+use crate::ldap_filter::{filter_matches, parse_filter, LdapFilter};
 use crate::{ContactsError, ContactsResult, ContactStore};
 
 const DEFAULT_ADDR: &str = "0.0.0.0:1389";
+const PRIVILEGED_ADDR: &str = "0.0.0.0:389";
 pub const DEFAULT_BASE_DN: &str = "ou=people,dc=novamail";
 pub const DEFAULT_BIND_DN: &str = "cn=novamail,dc=novamail";
 const ROOT_DN: &str = "dc=novamail";
 
 pub struct LdapServer {
     store: Arc<dyn ContactStore>,
-    listen_addr: String,
-    username: parking_lot::Mutex<String>,
-    password: parking_lot::Mutex<String>,
+    listen_addrs: parking_lot::Mutex<Vec<String>>,
+    also_listen_389: parking_lot::Mutex<bool>,
+    allow_anonymous: parking_lot::Mutex<bool>,
+    username: Arc<parking_lot::Mutex<String>>,
+    password: Arc<parking_lot::Mutex<String>>,
+    bound_addrs: parking_lot::Mutex<Vec<String>>,
     shutdown_tx: parking_lot::Mutex<Option<watch::Sender<bool>>>,
     running: parking_lot::Mutex<bool>,
 }
@@ -42,17 +48,28 @@ impl LdapServer {
     pub fn new(store: Arc<dyn ContactStore>) -> Self {
         Self {
             store,
-            listen_addr: DEFAULT_ADDR.into(),
-            username: parking_lot::Mutex::new("novamail".into()),
-            password: parking_lot::Mutex::new(String::new()),
+            listen_addrs: parking_lot::Mutex::new(vec![DEFAULT_ADDR.into()]),
+            also_listen_389: parking_lot::Mutex::new(true),
+            allow_anonymous: parking_lot::Mutex::new(false),
+            username: Arc::new(parking_lot::Mutex::new("novamail".into())),
+            password: Arc::new(parking_lot::Mutex::new(String::new())),
+            bound_addrs: parking_lot::Mutex::new(Vec::new()),
             shutdown_tx: parking_lot::Mutex::new(None),
             running: parking_lot::Mutex::new(false),
         }
     }
 
-    pub fn with_addr(mut self, addr: impl Into<String>) -> Self {
-        self.listen_addr = addr.into();
+    pub fn with_addr(self, addr: impl Into<String>) -> Self {
+        *self.listen_addrs.lock() = vec![addr.into()];
         self
+    }
+
+    pub fn set_also_listen_389(&self, enabled: bool) {
+        *self.also_listen_389.lock() = enabled;
+    }
+
+    pub fn set_allow_anonymous(&self, enabled: bool) {
+        *self.allow_anonymous.lock() = enabled;
     }
 
     pub fn set_credentials(&self, username: impl Into<String>, password: impl Into<String>) {
@@ -61,10 +78,25 @@ impl LdapServer {
     }
 
     pub fn status(&self) -> LdapServerStatus {
-        let advertise = advertise_host_port(&self.listen_addr);
+        let bound = self.bound_addrs.lock().clone();
+        let addrs = if bound.is_empty() {
+            self.listen_addrs.lock().clone()
+        } else {
+            bound
+        };
+        let listen_urls: Vec<String> = addrs
+            .iter()
+            .map(|a| format!("ldap://{}", advertise_host_port(a)))
+            .collect();
+        let listen_url = listen_urls
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "ldap://127.0.0.1:1389".into());
         LdapServerStatus {
             running: *self.running.lock(),
-            listen_url: format!("ldap://{advertise}"),
+            listen_url,
+            listen_urls,
+            allow_anonymous: *self.allow_anonymous.lock(),
             base_dn: DEFAULT_BASE_DN.into(),
             bind_dn: DEFAULT_BIND_DN.into(),
             username: self.username.lock().clone(),
@@ -77,29 +109,68 @@ impl LdapServer {
         if *self.running.lock() {
             return Ok(self.status());
         }
-        if self.password.lock().trim().is_empty() {
+        let allow_anon = *self.allow_anonymous.lock();
+        if self.password.lock().trim().is_empty() && !allow_anon {
             return Err(ContactsError::Ldap(
                 "LDAP password is empty; set credentials before starting".into(),
             ));
         }
-        let addr: SocketAddr = self
-            .listen_addr
-            .parse()
-            .map_err(|e| ContactsError::Ldap(format!("invalid listen addr: {e}")))?;
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|e| ContactsError::Ldap(format!("bind failed: {e}")))?;
+
+        let mut candidates = self.listen_addrs.lock().clone();
+        if *self.also_listen_389.lock() && !candidates.iter().any(|a| a.ends_with(":389")) {
+            candidates.push(PRIVILEGED_ADDR.into());
+        }
+
+        let mut listeners = Vec::new();
+        let mut bound = Vec::new();
+        let mut errors = Vec::new();
+        for addr_s in candidates {
+            let addr: SocketAddr = match addr_s.parse() {
+                Ok(a) => a,
+                Err(e) => {
+                    errors.push(format!("{addr_s}: {e}"));
+                    continue;
+                }
+            };
+            match TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    bound.push(addr_s);
+                    listeners.push(listener);
+                }
+                Err(e) => {
+                    tracing::warn!(addr = %addr, error = %e, "LDAP bind failed (continuing)");
+                    errors.push(format!("{addr_s}: {e}"));
+                }
+            }
+        }
+        if listeners.is_empty() {
+            return Err(ContactsError::Ldap(format!(
+                "LDAP bind failed on all addresses: {}",
+                errors.join("; ")
+            )));
+        }
 
         let (tx, rx) = watch::channel(false);
         *self.shutdown_tx.lock() = Some(tx);
+        *self.bound_addrs.lock() = bound;
         *self.running.lock() = true;
 
         let store = self.store.clone();
-        let username = self.username.lock().clone();
-        let password = self.password.lock().clone();
-        tokio::spawn(async move {
-            serve_loop(listener, store, username, password, rx).await;
-        });
+        let username = self.username.clone();
+        let password = self.password.clone();
+        // Snapshot anonymous flag for this run (toggle requires restart).
+        let allow_anonymous = Arc::new(parking_lot::Mutex::new(allow_anon));
+
+        for listener in listeners {
+            let store = store.clone();
+            let username = username.clone();
+            let password = password.clone();
+            let allow_anonymous = allow_anonymous.clone();
+            let rx = rx.clone();
+            tokio::spawn(async move {
+                serve_loop(listener, store, username, password, allow_anonymous, rx).await;
+            });
+        }
         Ok(self.status())
     }
 
@@ -108,6 +179,7 @@ impl LdapServer {
             let _ = tx.send(true);
         }
         *self.running.lock() = false;
+        self.bound_addrs.lock().clear();
         self.status()
     }
 }
@@ -115,8 +187,9 @@ impl LdapServer {
 async fn serve_loop(
     listener: TcpListener,
     store: Arc<dyn ContactStore>,
-    username: String,
-    password: String,
+    username: Arc<parking_lot::Mutex<String>>,
+    password: Arc<parking_lot::Mutex<String>>,
+    allow_anonymous: Arc<parking_lot::Mutex<bool>>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
@@ -132,8 +205,9 @@ async fn serve_loop(
                         let store = store.clone();
                         let username = username.clone();
                         let password = password.clone();
+                        let allow_anonymous = allow_anonymous.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = handle_conn(stream, store, &username, &password).await {
+                            if let Err(err) = handle_conn(stream, store, username, password, allow_anonymous).await {
                                 tracing::debug!(error = %err, "ldap client connection ended");
                             }
                         });
@@ -148,11 +222,13 @@ async fn serve_loop(
 async fn handle_conn(
     mut stream: TcpStream,
     store: Arc<dyn ContactStore>,
-    username: &str,
-    password: &str,
+    username: Arc<parking_lot::Mutex<String>>,
+    password: Arc<parking_lot::Mutex<String>>,
+    allow_anonymous: Arc<parking_lot::Mutex<bool>>,
 ) -> ContactsResult<()> {
     let mut buf = BytesMut::with_capacity(4096);
     let mut authed = false;
+    let mut can_write = false;
     loop {
         let Some(tag) = read_message(&mut stream, &mut buf).await? else {
             break;
@@ -160,9 +236,13 @@ async fn handle_conn(
         let (msg_id, op) = split_ldap_message(tag)?;
         match op.id {
             0 => {
-                // BindRequest
-                let ok = check_bind(&op, username, password);
+                // BindRequest — re-read credentials so set_credentials applies live.
+                let user = username.lock().clone();
+                let pass = password.lock().clone();
+                let anon = *allow_anonymous.lock();
+                let (ok, write_ok) = check_bind(&op, &user, &pass, anon);
                 authed = ok;
+                can_write = write_ok;
                 write_tag(
                     &mut stream,
                     ldap_result_message(msg_id, 1, if ok { 0 } else { 49 }, ""),
@@ -187,8 +267,8 @@ async fn handle_conn(
             }
             6 => {
                 // ModifyRequest
-                if !authed {
-                    write_tag(&mut stream, ldap_result_message(msg_id, 7, 50, "bind required"))
+                if !authed || !can_write {
+                    write_tag(&mut stream, ldap_result_message(msg_id, 7, 50, "insufficientAccessRights"))
                         .await?;
                     continue;
                 }
@@ -197,8 +277,8 @@ async fn handle_conn(
             }
             8 => {
                 // AddRequest
-                if !authed {
-                    write_tag(&mut stream, ldap_result_message(msg_id, 9, 50, "bind required"))
+                if !authed || !can_write {
+                    write_tag(&mut stream, ldap_result_message(msg_id, 9, 50, "insufficientAccessRights"))
                         .await?;
                     continue;
                 }
@@ -207,8 +287,8 @@ async fn handle_conn(
             }
             10 => {
                 // DelRequest
-                if !authed {
-                    write_tag(&mut stream, ldap_result_message(msg_id, 11, 50, "bind required"))
+                if !authed || !can_write {
+                    write_tag(&mut stream, ldap_result_message(msg_id, 11, 50, "insufficientAccessRights"))
                         .await?;
                     continue;
                 }
@@ -285,12 +365,18 @@ fn split_ldap_message(tag: StructureTag) -> ContactsResult<(i64, StructureTag)> 
     Ok((id, op))
 }
 
-fn check_bind(op: &StructureTag, username: &str, password: &str) -> bool {
+/// Returns `(authenticated, can_write)`. Anonymous bind is read-only when enabled.
+fn check_bind(
+    op: &StructureTag,
+    username: &str,
+    password: &str,
+    allow_anonymous: bool,
+) -> (bool, bool) {
     let Some(parts) = op.clone().expect_constructed() else {
-        return false;
+        return (false, false);
     };
     if parts.len() < 3 {
-        return false;
+        return (false, false);
     }
     let name = octet_string(&parts[1]).unwrap_or_default();
     let auth = &parts[2];
@@ -299,19 +385,76 @@ fn check_bind(op: &StructureTag, username: &str, password: &str) -> bool {
         PL::P(bytes) if auth.class == TagClass::Context && auth.id == 0 => {
             String::from_utf8_lossy(bytes).to_string()
         }
-        _ => return false,
+        _ => return (false, false),
     };
-    if pass != password {
-        return false;
+
+    // Anonymous: empty DN + empty password (common MFP default).
+    if name.trim().is_empty() && pass.is_empty() {
+        return (allow_anonymous, false);
+    }
+
+    if pass != password || password.is_empty() {
+        return (false, false);
     }
     let name_l = name.to_ascii_lowercase();
-    name_l.is_empty()
+    let user_l = username.to_ascii_lowercase();
+    let ok = name_l.is_empty()
         || name_l == DEFAULT_BIND_DN
-        || name_l == format!("uid={username},dc=novamail")
-        || name_l == format!("cn={username},dc=novamail")
-        || name_l == username.to_ascii_lowercase()
-        || name_l.starts_with(&format!("cn={username},"))
-        || name_l.starts_with(&format!("uid={username},"))
+        || name_l == format!("uid={user_l},dc=novamail")
+        || name_l == format!("cn={user_l},dc=novamail")
+        || name_l == user_l
+        || name_l.starts_with(&format!("cn={user_l},"))
+        || name_l.starts_with(&format!("uid={user_l},"));
+    (ok, ok)
+}
+
+async fn emit_search_entry(
+    stream: &mut TcpStream,
+    msg_id: i64,
+    dn: &str,
+    attrs: &HashMap<String, Vec<String>>,
+    filter: &LdapFilter,
+    requested_attrs: &[String],
+) -> ContactsResult<()> {
+    if !filter_matches(filter, attrs) {
+        return Ok(());
+    }
+    let out = if requested_attrs.len() == 1 && requested_attrs[0] == "1.1" {
+        HashMap::new()
+    } else if requested_attrs.is_empty() {
+        attrs.clone()
+    } else {
+        attrs
+            .iter()
+            .filter(|(k, _)| {
+                requested_attrs
+                    .iter()
+                    .any(|want| want.eq_ignore_ascii_case(k))
+            })
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    };
+    write_tag(stream, search_entry_message(msg_id, dn, &out)).await
+}
+
+fn dn_in_scope(dn_l: &str, base_l: &str, scope: u64) -> bool {
+    let under_base = base_l.is_empty()
+        || base_l == ROOT_DN
+        || base_l == DEFAULT_BASE_DN
+        || dn_l == base_l
+        || dn_l.ends_with(&format!(",{base_l}"));
+    if !under_base {
+        return false;
+    }
+    match scope {
+        0 => dn_l == base_l,
+        1 => {
+            // immediate children of base
+            let parent = dn_l.split_once(',').map(|(_, p)| p).unwrap_or("");
+            parent == base_l && dn_l != base_l
+        }
+        _ => true, // subtree
+    }
 }
 
 async fn handle_search(
@@ -332,39 +475,120 @@ async fn handle_search(
     .unwrap_or_default();
     let base_l = base.to_ascii_lowercase();
 
-    // Root / base entries for discovery.
-    if base_l.is_empty() || base_l == ROOT_DN {
-        let mut root = HashMap::new();
-        root.insert(
-            "objectClass".into(),
-            vec!["top".into(), "organization".into(), "dcObject".into()],
-        );
-        root.insert("o".into(), vec!["NovaMail".into()]);
-        root.insert("dc".into(), vec!["novamail".into()]);
-        write_tag(stream, search_entry_message(msg_id, ROOT_DN, &root)).await?;
+    // scope: 0 baseObject, 1 singleLevel, 2 wholeSubtree
+    let scope = parts
+        .get(1)
+        .and_then(|t| match &t.payload {
+            PL::P(bytes) => bytes.last().copied().map(u64::from),
+            _ => None,
+        })
+        .unwrap_or(2);
 
-        let mut ou = HashMap::new();
-        ou.insert(
-            "objectClass".into(),
-            vec!["top".into(), "organizationalUnit".into()],
-        );
-        ou.insert("ou".into(), vec!["people".into()]);
-        write_tag(stream, search_entry_message(msg_id, DEFAULT_BASE_DN, &ou)).await?;
+    let filter = parts
+        .get(6)
+        .map(parse_filter)
+        .unwrap_or(LdapFilter::MatchAll);
+
+    let requested_attrs: Vec<String> = parts
+        .get(7)
+        .and_then(|t| t.clone().expect_constructed())
+        .into_iter()
+        .flatten()
+        .filter_map(|t| octet_string(&t))
+        .filter(|a| !a.is_empty() && a != "*")
+        .collect();
+
+    let mut root = HashMap::new();
+    root.insert(
+        "objectClass".into(),
+        vec!["top".into(), "organization".into(), "dcObject".into()],
+    );
+    root.insert("o".into(), vec!["NovaMail".into()]);
+    root.insert("dc".into(), vec!["novamail".into()]);
+    root.insert(
+        "namingContexts".into(),
+        vec![ROOT_DN.into(), DEFAULT_BASE_DN.into()],
+    );
+    root.insert("supportedLDAPVersion".into(), vec!["3".into()]);
+
+    let mut ou = HashMap::new();
+    ou.insert(
+        "objectClass".into(),
+        vec!["top".into(), "organizationalUnit".into()],
+    );
+    ou.insert("ou".into(), vec!["people".into()]);
+
+    // Root DSE
+    if base_l.is_empty() && scope == 0 {
+        emit_search_entry(stream, msg_id, "", &root, &filter, &requested_attrs).await?;
+        write_tag(stream, ldap_result_message(msg_id, 5, 0, "")).await?;
+        return Ok(());
+    }
+
+    if base_l.is_empty() || base_l == ROOT_DN {
+        if scope != 1 || base_l == ROOT_DN || base_l.is_empty() {
+            if scope != 1 || base_l == ROOT_DN {
+                // include root itself on subtree / base
+                if scope != 1 {
+                    emit_search_entry(stream, msg_id, ROOT_DN, &root, &filter, &requested_attrs)
+                        .await?;
+                }
+            }
+        }
+        if scope == 0 && base_l == ROOT_DN {
+            emit_search_entry(stream, msg_id, ROOT_DN, &root, &filter, &requested_attrs).await?;
+            write_tag(stream, ldap_result_message(msg_id, 5, 0, "")).await?;
+            return Ok(());
+        }
+        if scope == 1 && (base_l.is_empty() || base_l == ROOT_DN) {
+            emit_search_entry(
+                stream,
+                msg_id,
+                DEFAULT_BASE_DN,
+                &ou,
+                &filter,
+                &requested_attrs,
+            )
+            .await?;
+            write_tag(stream, ldap_result_message(msg_id, 5, 0, "")).await?;
+            return Ok(());
+        }
+        if scope == 2 {
+            emit_search_entry(
+                stream,
+                msg_id,
+                DEFAULT_BASE_DN,
+                &ou,
+                &filter,
+                &requested_attrs,
+            )
+            .await?;
+        }
+    }
+
+    if base_l == DEFAULT_BASE_DN && scope == 0 {
+        emit_search_entry(
+            stream,
+            msg_id,
+            DEFAULT_BASE_DN,
+            &ou,
+            &filter,
+            &requested_attrs,
+        )
+        .await?;
+        write_tag(stream, ldap_result_message(msg_id, 5, 0, "")).await?;
+        return Ok(());
     }
 
     let contacts = store.list().unwrap_or_default();
     for contact in contacts {
         let dn = contact_dn(&contact);
-        if !base_l.is_empty()
-            && base_l != ROOT_DN
-            && base_l != DEFAULT_BASE_DN
-            && dn.to_ascii_lowercase() != base_l
-            && !dn.to_ascii_lowercase().ends_with(&format!(",{base_l}"))
-        {
+        let dn_l = dn.to_ascii_lowercase();
+        if !dn_in_scope(&dn_l, &base_l, scope) {
             continue;
         }
         let attrs = contact_attrs(&contact);
-        write_tag(stream, search_entry_message(msg_id, &dn, &attrs)).await?;
+        emit_search_entry(stream, msg_id, &dn, &attrs, &filter, &requested_attrs).await?;
     }
 
     write_tag(stream, ldap_result_message(msg_id, 5, 0, "")).await?;
@@ -483,9 +707,10 @@ fn contact_dn(contact: &ContactDto) -> String {
 }
 
 fn contact_attrs(contact: &ContactDto) -> HashMap<String, Vec<String>> {
+    // Canonical LDAP attribute names (caseExact for wire; clients match case-insensitively).
     let mut attrs: HashMap<String, Vec<String>> = HashMap::new();
     attrs.insert(
-        "objectclass".into(),
+        "objectClass".into(),
         vec![
             "top".into(),
             "person".into(),
@@ -495,10 +720,10 @@ fn contact_attrs(contact: &ContactDto) -> HashMap<String, Vec<String>> {
     );
     attrs.insert("cn".into(), vec![contact.display_name.clone()]);
     if !contact.display_name.is_empty() {
-        attrs.insert("displayname".into(), vec![contact.display_name.clone()]);
+        attrs.insert("displayName".into(), vec![contact.display_name.clone()]);
     }
     if !contact.given_name.is_empty() {
-        attrs.insert("givenname".into(), vec![contact.given_name.clone()]);
+        attrs.insert("givenName".into(), vec![contact.given_name.clone()]);
     }
     let sn = if contact.family_name.is_empty() {
         contact.display_name.clone()
@@ -510,10 +735,10 @@ fn contact_attrs(contact: &ContactDto) -> HashMap<String, Vec<String>> {
         attrs.insert("mail".into(), contact.emails.clone());
     }
     if !contact.phones.is_empty() {
-        attrs.insert("telephonenumber".into(), contact.phones.clone());
+        attrs.insert("telephoneNumber".into(), contact.phones.clone());
     }
     if !contact.faxes.is_empty() {
-        attrs.insert("facsimiletelephonenumber".into(), contact.faxes.clone());
+        attrs.insert("facsimileTelephoneNumber".into(), contact.faxes.clone());
     }
     if !contact.organization.is_empty() {
         attrs.insert("o".into(), vec![contact.organization.clone()]);
@@ -535,7 +760,7 @@ fn contact_attrs(contact: &ContactDto) -> HashMap<String, Vec<String>> {
             attrs.insert("st".into(), vec![addr.region.clone()]);
         }
         if !addr.postal_code.is_empty() {
-            attrs.insert("postalcode".into(), vec![addr.postal_code.clone()]);
+            attrs.insert("postalCode".into(), vec![addr.postal_code.clone()]);
         }
         if !addr.country.is_empty() {
             attrs.insert("c".into(), vec![addr.country.clone()]);
@@ -620,12 +845,9 @@ fn attrs_to_contact(
         display_name,
         given_name,
         family_name,
-        emails: attrs.get("mail").cloned().unwrap_or_default(),
-        phones: attrs.get("telephonenumber").cloned().unwrap_or_default(),
-        faxes: attrs
-            .get("facsimiletelephonenumber")
-            .cloned()
-            .unwrap_or_default(),
+        emails: attr_list(attrs, "mail"),
+        phones: attr_list(attrs, "telephoneNumber"),
+        faxes: attr_list(attrs, "facsimileTelephoneNumber"),
         organization: first(attrs, "o").unwrap_or_default(),
         job_title: first(attrs, "title").unwrap_or_default(),
         addresses,
@@ -637,8 +859,20 @@ fn attrs_to_contact(
     }
 }
 
+fn attr_list(attrs: &HashMap<String, Vec<String>>, key: &str) -> Vec<String> {
+    attrs
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
 fn first(attrs: &HashMap<String, Vec<String>>, key: &str) -> Option<String> {
-    attrs.get(key).and_then(|v| v.first()).cloned()
+    attrs
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .and_then(|(_, v)| v.first())
+        .cloned()
 }
 
 fn octet_string(tag: &StructureTag) -> Option<String> {
@@ -811,8 +1045,8 @@ mod tests {
             given_name: "Ada".into(),
             family_name: "Lovelace".into(),
             emails: vec!["ada@example.com".into()],
-            phones: vec![],
-            faxes: vec![],
+            phones: vec!["030111".into()],
+            faxes: vec!["030999".into()],
             organization: "Analytical".into(),
             job_title: "Engineer".into(),
             addresses: vec![],
@@ -825,7 +1059,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         drop(listener);
-        let server = LdapServer::new(store).with_addr(addr.to_string());
+        let server = LdapServer::new(store)
+            .with_addr(addr.to_string());
+        server.set_also_listen_389(false);
         server.set_credentials("novamail", "secret");
         server.start().await.unwrap();
 
@@ -844,6 +1080,76 @@ mod tests {
                 .any(|c| c.emails.iter().any(|e| e == "ada@example.com")),
             "expected Ada in {found:?}"
         );
+        let ada = found
+            .iter()
+            .find(|c| c.display_name.contains("Ada"))
+            .expect("ada");
+        assert!(
+            ada.faxes.iter().any(|f| f == "030999"),
+            "canonical facsimileTelephoneNumber must round-trip: {ada:?}"
+        );
+        assert!(
+            ada.phones.iter().any(|p| p == "030111"),
+            "canonical telephoneNumber must round-trip: {ada:?}"
+        );
+
+        // Filter must exclude non-matches (Ricoh-style search).
+        let filtered = crate::search_ldap(&LdapSearchRequest {
+            url: format!("ldap://{addr}"),
+            bind_dn: Some(DEFAULT_BIND_DN.into()),
+            password: Some("secret".into()),
+            base_dn: DEFAULT_BASE_DN.into(),
+            filter: "(cn=*NoSuchPerson*)".into(),
+        })
+        .await
+        .unwrap();
+        assert!(
+            filtered.is_empty(),
+            "filter should exclude Ada, got {filtered:?}"
+        );
+
+        let _ = server.stop();
+    }
+
+    #[tokio::test]
+    async fn anonymous_read_only_when_enabled() {
+        let store = Arc::new(MemStore(Mutex::new(vec![ContactDto {
+            id: Uuid::new_v4(),
+            display_name: "Fax Desk".into(),
+            given_name: String::new(),
+            family_name: "Desk".into(),
+            emails: vec![],
+            phones: vec![],
+            faxes: vec!["040123".into()],
+            organization: String::new(),
+            job_title: String::new(),
+            addresses: vec![],
+            custom_fields: vec![],
+            photo_base64: None,
+            ldap_dn: None,
+            notes: String::new(),
+            updated_at: 1,
+        }])));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let server = LdapServer::new(store).with_addr(addr.to_string());
+        server.set_also_listen_389(false);
+        server.set_allow_anonymous(true);
+        server.set_credentials("novamail", "secret");
+        server.start().await.unwrap();
+
+        let found = crate::search_ldap(&LdapSearchRequest {
+            url: format!("ldap://{addr}"),
+            bind_dn: Some(String::new()),
+            password: Some(String::new()),
+            base_dn: DEFAULT_BASE_DN.into(),
+            filter: "(facsimileTelephoneNumber=*)".into(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].faxes, vec!["040123".to_string()]);
         let _ = server.stop();
     }
 }

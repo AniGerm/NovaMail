@@ -559,6 +559,9 @@ export const de = {
   shareModeTlsHint:
     "Im LAN vorerst unverschlüsselt (ldap:// / http://). Für Zugriff von außen VPN nutzen.",
   ldapServerUrlLabel: "LDAP-URL (für NovaMail-Clients)",
+  ldapServerUrlsLabel: "Alle LDAP-Listen-URLs",
+  ldapRicohHint:
+    "Ricoh / MFP: Base DN ou=people,dc=novamail, Bind DN cn=novamail,dc=novamail, Fax-Attribut facsimileTelephoneNumber. Port 389 bevorzugen, falls angezeigt, sonst 1389. Suchfilter (cn/sn/Fax) werden ausgewertet.",
   ldapServerBaseDn: "Base DN",
   ldapServerBindDn: "Bind DN",
   cardDavRunning: "LDAP/CardDAV aktiv · {count} Kontakte",

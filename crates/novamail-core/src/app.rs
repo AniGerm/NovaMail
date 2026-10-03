@@ -1608,6 +1608,20 @@ impl AppState {
         self.carddav
             .set_credentials(username.clone(), password.clone());
         self.ldap_server.set_credentials(username, password);
+
+        // LDAP hub options for Ricoh MFP / generic clients (defaults are safe).
+        let also_389 = self
+            .db
+            .get_setting("contacts.ldap_also_389")?
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(true);
+        let allow_anon = self
+            .db
+            .get_setting("contacts.ldap_allow_anonymous")?
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        self.ldap_server.set_also_listen_389(also_389);
+        self.ldap_server.set_allow_anonymous(allow_anon);
         Ok(())
     }
 
