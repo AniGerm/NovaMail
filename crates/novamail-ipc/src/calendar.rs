@@ -108,16 +108,23 @@ pub struct CalendarEventDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCalendarEventRequest {
+    #[serde(default)]
     pub id: Option<Uuid>,
+    #[serde(default)]
     pub calendar_account_id: Option<Uuid>,
+    #[serde(default)]
     pub collection_id: Option<Uuid>,
     pub title: String,
     pub starts_at: i64,
+    #[serde(default)]
     pub ends_at: Option<i64>,
+    #[serde(default)]
     pub location: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub all_day: bool,
+    #[serde(default)]
     pub source_message_id: Option<Uuid>,
     #[serde(default)]
     pub reminders: Vec<CalendarReminderDto>,
@@ -143,14 +150,18 @@ pub struct CalendarTaskDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCalendarTaskRequest {
+    #[serde(default)]
     pub id: Option<Uuid>,
+    #[serde(default)]
     pub calendar_account_id: Option<Uuid>,
     pub title: String,
+    #[serde(default)]
     pub due_at: Option<i64>,
     #[serde(default)]
     pub completed: bool,
     #[serde(default)]
     pub notes: String,
+    #[serde(default)]
     pub source_message_id: Option<Uuid>,
 }
 
@@ -205,4 +216,23 @@ pub enum InvitationResponse {
 pub struct RespondInvitationRequest {
     pub id: Uuid,
     pub response: InvitationResponse,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upsert_task_accepts_partial_json() {
+        // Frontend create omits optional ids — must not fail deserialize.
+        let req: UpsertCalendarTaskRequest = serde_json::from_str(
+            r#"{"title":"Buy milk","dueAt":1700000000,"completed":false,"notes":""}"#,
+        )
+        .expect("partial task upsert JSON");
+        assert_eq!(req.title, "Buy milk");
+        assert_eq!(req.due_at, Some(1_700_000_000));
+        assert!(req.id.is_none());
+        assert!(req.calendar_account_id.is_none());
+        assert!(req.source_message_id.is_none());
+    }
 }
