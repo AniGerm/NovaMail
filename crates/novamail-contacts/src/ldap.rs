@@ -12,9 +12,12 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
         .map_err(|e| ContactsError::Ldap(e.to_string()))?;
     ldap3::drive!(conn);
 
-    if let Some(bind_dn) = &request.bind_dn {
+    // Bind when credentials are provided. Empty DN + empty password = anonymous
+    // (needed for Ricoh MFP hubs that allow read-only anonymous search).
+    if request.bind_dn.is_some() || request.password.is_some() {
+        let bind_dn = request.bind_dn.clone().unwrap_or_default();
         let password = request.password.clone().unwrap_or_default();
-        ldap.simple_bind(bind_dn, &password)
+        ldap.simple_bind(&bind_dn, &password)
             .await
             .map_err(|e| ContactsError::Ldap(e.to_string()))?
             .success()
@@ -142,12 +145,14 @@ pub async fn search_ldap(request: &LdapSearchRequest) -> ContactsResult<Vec<Cont
 }
 
 fn first_attr(entry: &SearchEntry, name: &str) -> Option<String> {
-    entry
-        .attrs
-        .get(name)
-        .and_then(|values| values.first().cloned())
+    all_attr(entry, name).into_iter().next()
 }
 
 fn all_attr(entry: &SearchEntry, name: &str) -> Vec<String> {
-    entry.attrs.get(name).cloned().unwrap_or_default()
+    entry
+        .attrs
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, values)| values.clone())
+        .unwrap_or_default()
 }

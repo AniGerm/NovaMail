@@ -561,6 +561,9 @@ export const en: Translations = {
   shareModeTlsHint:
     "Cleartext on the LAN for now (ldap:// / http://). Use a VPN for remote access.",
   ldapServerUrlLabel: "LDAP URL (for NovaMail clients)",
+  ldapServerUrlsLabel: "All LDAP listen URLs",
+  ldapRicohHint:
+    "Ricoh / MFP: use Base DN ou=people,dc=novamail, Bind DN cn=novamail,dc=novamail, fax attribute facsimileTelephoneNumber. Prefer port 389 if listed; otherwise 1389. Search filters are evaluated (cn/sn/fax).",
   ldapServerBaseDn: "Base DN",
   ldapServerBindDn: "Bind DN",
   cardDavRunning: "LDAP/CardDAV on · {count} contacts",

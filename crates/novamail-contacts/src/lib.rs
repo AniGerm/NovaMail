@@ -6,6 +6,7 @@
 mod carddav;
 mod error;
 mod ldap;
+mod ldap_filter;
 mod ldap_server;
 mod vcard;
 

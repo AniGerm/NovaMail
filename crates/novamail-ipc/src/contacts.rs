@@ -215,7 +215,14 @@ pub enum ContactsShareMode {
 #[serde(rename_all = "camelCase")]
 pub struct LdapServerStatus {
     pub running: bool,
+    /// Primary advertised URL (usually port 1389).
     pub listen_url: String,
+    /// All bound URLs (may include port 389 when available).
+    #[serde(default)]
+    pub listen_urls: Vec<String>,
+    /// When true, empty DN + empty password is accepted for read-only search.
+    #[serde(default)]
+    pub allow_anonymous: bool,
     pub base_dn: String,
     pub bind_dn: String,
     pub username: String,

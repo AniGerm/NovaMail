@@ -166,6 +166,20 @@ async fn handle(
     username: &str,
     password: &str,
 ) -> Response<Full<Bytes>> {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let depth = req
+        .headers()
+        .get("Depth")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("1")
+        .to_string();
+
+    // Discovery must work before auth so clients can locate the address book.
+    if path == "/.well-known/carddav" {
+        return redirect(BOOK_PATH);
+    }
+
     if !authorized(&req, username, password) {
         return Response::builder()
             .status(StatusCode::UNAUTHORIZED)
@@ -173,14 +187,6 @@ async fn handle(
             .header("Content-Type", "text/plain; charset=utf-8")
             .body(Full::new(Bytes::from("unauthorized")))
             .unwrap();
-    }
-
-    let method = req.method().clone();
-    let path = req.uri().path().to_string();
-
-    // CardDAV discovery / well-known
-    if path == "/.well-known/carddav" {
-        return redirect(BOOK_PATH);
     }
 
     if path == "/" || path == "/addressbooks/" {
@@ -206,11 +212,10 @@ async fn handle(
         if method == Method::OPTIONS {
             return options();
         }
-        if method.as_str() == "PROPFIND" || method == Method::GET {
-            return addressbook_listing(&store);
-        }
-        if method.as_str() == "REPORT" {
-            return addressbook_listing(&store);
+        if method.as_str() == "PROPFIND" || method == Method::GET || method.as_str() == "REPORT" {
+            let include_members = depth != "0";
+            let include_address_data = method.as_str() == "REPORT" || method == Method::GET;
+            return addressbook_listing(&store, include_members, include_address_data);
         }
         return text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
     }
@@ -262,7 +267,11 @@ async fn handle(
     }
 }
 
-fn addressbook_listing(store: &Arc<dyn ContactStore>) -> Response<Full<Bytes>> {
+fn addressbook_listing(
+    store: &Arc<dyn ContactStore>,
+    include_members: bool,
+    include_address_data: bool,
+) -> Response<Full<Bytes>> {
     let contacts = store.list().unwrap_or_default();
     // Stable collection tag so CardDAV clients detect remote edits (phone/printer)
     // and re-sync instead of caching forever.
@@ -289,25 +298,33 @@ fn addressbook_listing(store: &Arc<dyn ContactStore>) -> Response<Full<Bytes>> {
 "#,
         etag = collection_tag
     ));
-    for contact in contacts {
-        let href = format!("{BOOK_PATH}{}.vcf", contact.id);
-        let vcard = contact_to_vcard(&contact);
-        let escaped = xml_escape(&vcard);
-        responses.push_str(&format!(
-            r#"  <d:response>
+    if include_members {
+        for contact in contacts {
+            let href = format!("{BOOK_PATH}{}.vcf", contact.id);
+            let address_data = if include_address_data {
+                let vcard = contact_to_vcard(&contact);
+                format!(
+                    "\n        <card:address-data>{}</card:address-data>",
+                    xml_escape(&vcard)
+                )
+            } else {
+                String::new()
+            };
+            responses.push_str(&format!(
+                r#"  <d:response>
     <d:href>{href}</d:href>
     <d:propstat>
       <d:prop>
         <d:getetag>"{etag}"</d:getetag>
-        <d:getcontenttype>text/vcard</d:getcontenttype>
-        <card:address-data>{escaped}</card:address-data>
+        <d:getcontenttype>text/vcard</d:getcontenttype>{address_data}
       </d:prop>
       <d:status>HTTP/1.1 200 OK</d:status>
     </d:propstat>
   </d:response>
 "#,
-            etag = contact.updated_at
-        ));
+                etag = contact.updated_at
+            ));
+        }
     }
     let body = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
