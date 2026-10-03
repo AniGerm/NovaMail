@@ -29,6 +29,7 @@ import { ReadingPane } from "@/features/mail/ReadingPane";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
+import { PanelResizeHandle } from "@/shared/ui/PanelResizeHandle";
 import type {
   AccountDto,
   AiSettings,
@@ -72,6 +73,10 @@ export function AppShell() {
     density,
     inboxViewMode,
     setInboxViewMode,
+    sidebarWidth,
+    setSidebarWidth,
+    listWidth,
+    setListWidth,
   } = useUiStore();
 
   const [replyTo, setReplyTo] = useState<MessageDetailDto | null>(null);
@@ -1188,6 +1193,7 @@ export function AppShell() {
           calendarSelected={calendarOpen}
           syncStatus={syncStatus}
           themeMode={theme}
+          width={sidebarWidth}
           onSelectUnified={() => handleSelectAccountFilter(null)}
           onSelectAccount={handleSelectAccountFilter}
           onSelectMailbox={handleSelectMailbox}
@@ -1203,6 +1209,13 @@ export function AppShell() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenContacts={() => setContactsOpen(true)}
           onOpenTriage={() => setTriageOpen(true)}
+        />
+        <PanelResizeHandle
+          value={sidebarWidth}
+          min={180}
+          max={420}
+          onChange={setSidebarWidth}
+          label={t("resizeSidebar")}
         />
 
         {calendarOpen ? (
@@ -1245,7 +1258,7 @@ export function AppShell() {
           </div>
         ) : (
           <>
-            <div className="w-[380px] shrink-0">
+            <div className="min-w-0 shrink-0" style={{ width: listWidth }}>
               <MessageList
                 messages={messages}
                 threads={threads}
@@ -1273,6 +1286,13 @@ export function AppShell() {
                 searchQuery={searchQuery}
               />
             </div>
+            <PanelResizeHandle
+              value={listWidth}
+              min={260}
+              max={640}
+              onChange={setListWidth}
+              label={t("resizeMessageList")}
+            />
             <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
               <ReadingPane
                 message={messageQuery.data}

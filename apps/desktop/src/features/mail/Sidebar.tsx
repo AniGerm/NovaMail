@@ -54,6 +54,8 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenContacts: () => void;
   onOpenTriage: () => void;
+  /** Optional column width in px (resizable main layout). */
+  width?: number;
 }
 
 const ROLE_ORDER = ["inbox", "sent", "drafts", "junk", "trash"];
@@ -109,6 +111,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenContacts,
   onOpenTriage,
+  width,
 }: SidebarProps) {
   const t = useT();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -188,7 +191,8 @@ export function Sidebar({
   return (
     <aside
       aria-label={t("navigation")}
-      className="nova-slide-in flex h-full w-[240px] shrink-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_70%,transparent)] backdrop-blur-[var(--nova-blur)]"
+      className="nova-slide-in flex h-full shrink-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_70%,transparent)] backdrop-blur-[var(--nova-blur)]"
+      style={{ width: width ?? 240 }}
     >
       <div className="px-4 pb-2 pt-5">
         <div className="mb-4 flex items-center justify-between gap-2">

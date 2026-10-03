@@ -1251,21 +1251,15 @@ impl AppState {
         Ok(staged.to_string_lossy().into_owned())
     }
 
-    /// Reveal the attachment's folder in the system file manager.
+    /// Stage attachment and return the staged file path for “reveal in folder”.
     pub async fn reveal_attachment(
         &self,
         attachment_id: Uuid,
         message_id: Option<Uuid>,
         filename: Option<String>,
     ) -> CoreResult<String> {
-        let path = self
-            .ensure_attachment_path(attachment_id, message_id, filename)
-            .await?;
-        let parent = std::path::Path::new(&path)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.clone());
-        Ok(parent)
+        self.stage_attachment_for_open(attachment_id, message_id, filename)
+            .await
     }
 
     pub fn total_inbox_unread(&self) -> CoreResult<u32> {

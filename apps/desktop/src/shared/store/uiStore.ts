@@ -25,6 +25,10 @@ interface UiState {
   autoCheckUpdates: boolean;
   /** Persist flat vs conversation list preference. */
   inboxViewMode: InboxViewModePref;
+  /** Main-view sidebar column width (px). */
+  sidebarWidth: number;
+  /** Main-view message list column width (px). */
+  listWidth: number;
   selectedMessageId: string | null;
   composerOpen: boolean;
   accountSetupOpen: boolean;
@@ -42,6 +46,8 @@ interface UiState {
   setDensity: (density: Density) => void;
   setAutoCheckUpdates: (value: boolean) => void;
   setInboxViewMode: (mode: InboxViewModePref) => void;
+  setSidebarWidth: (width: number) => void;
+  setListWidth: (width: number) => void;
   selectMessage: (id: string | null) => void;
   setComposerOpen: (open: boolean) => void;
   setAccountSetupOpen: (open: boolean) => void;
@@ -64,6 +70,8 @@ export const useUiStore = create<UiState>()(
       density: "comfortable",
       autoCheckUpdates: true,
       inboxViewMode: "threads",
+      sidebarWidth: 240,
+      listWidth: 380,
       selectedMessageId: null,
       composerOpen: false,
       accountSetupOpen: false,
@@ -82,6 +90,8 @@ export const useUiStore = create<UiState>()(
       setDensity: (density) => set({ density }),
       setAutoCheckUpdates: (autoCheckUpdates) => set({ autoCheckUpdates }),
       setInboxViewMode: (inboxViewMode) => set({ inboxViewMode }),
+      setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
+      setListWidth: (listWidth) => set({ listWidth }),
       selectMessage: (selectedMessageId) => set({ selectedMessageId }),
       setComposerOpen: (composerOpen) => set({ composerOpen }),
       setAccountSetupOpen: (accountSetupOpen) => set({ accountSetupOpen }),
@@ -103,6 +113,8 @@ export const useUiStore = create<UiState>()(
         density: state.density,
         autoCheckUpdates: state.autoCheckUpdates,
         inboxViewMode: state.inboxViewMode,
+        sidebarWidth: state.sidebarWidth,
+        listWidth: state.listWidth,
       }),
     },
   ),
