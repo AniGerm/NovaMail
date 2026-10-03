@@ -294,9 +294,18 @@ export function AppShell() {
     void api.shellSetUiLocale(locale).catch(() => undefined);
   }, [desktop, locale]);
 
-  // Preview may stay unread (blue dot). Mark read only on re-click or fullscreen.
+  // Auto-preview may stay unread. User click / fullscreen / pane engagement → read.
   const markMessageReadLocally = useCallback(
-    (id: string, mailboxId?: string | null) => {
+    (id: string, mailboxId?: string | null, threadId?: string | null) => {
+      const resolvedThreadId =
+        threadId ??
+        (
+          queryClient.getQueryData(["message", id]) as
+            | MessageDetailDto
+            | undefined
+        )?.summary.threadId ??
+        messages.find((m) => m.id === id)?.threadId ??
+        null;
       queryClient.setQueryData(
         ["message", id],
         (old: MessageDetailDto | undefined) =>
@@ -320,6 +329,29 @@ export function AppShell() {
           };
         },
       );
+      if (resolvedThreadId) {
+        queryClient.setQueriesData(
+          { queryKey: ["messages", "threads"] },
+          (old: unknown) => {
+            if (!old || typeof old !== "object") return old;
+            const data = old as {
+              threads?: Array<{ id: string; unreadCount: number }>;
+            };
+            if (!Array.isArray(data.threads)) return old;
+            return {
+              ...data,
+              threads: data.threads.map((thread) =>
+                thread.id === resolvedThreadId && thread.unreadCount > 0
+                  ? {
+                      ...thread,
+                      unreadCount: Math.max(0, thread.unreadCount - 1),
+                    }
+                  : thread,
+              ),
+            };
+          },
+        );
+      }
       if (mailboxId) {
         queryClient.setQueryData(
           ["mailboxes", "all"],
@@ -339,34 +371,47 @@ export function AppShell() {
         void queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
       });
     },
-    [queryClient],
+    [messages, queryClient],
+  );
+
+  const markMessageReadById = useCallback(
+    (id: string) => {
+      const detail =
+        messageQuery.data?.summary.id === id ? messageQuery.data : undefined;
+      if (detail) {
+        if (!detail.summary.unread) return;
+        markMessageReadLocally(
+          detail.summary.id,
+          detail.summary.mailboxId,
+          detail.summary.threadId,
+        );
+        return;
+      }
+      const fromList = messages.find((m) => m.id === id);
+      if (!fromList?.unread) return;
+      markMessageReadLocally(
+        fromList.id,
+        fromList.mailboxId,
+        fromList.threadId,
+      );
+    },
+    [markMessageReadLocally, messageQuery.data, messages],
   );
 
   const markSelectedReadIfNeeded = useCallback(() => {
-    const id = selectedMessageId;
-    if (!id) return;
-    const detail =
-      messageQuery.data?.summary.id === id ? messageQuery.data : undefined;
-    if (detail) {
-      if (!detail.summary.unread) return;
-      markMessageReadLocally(detail.summary.id, detail.summary.mailboxId);
-      return;
-    }
-    // Detail may still be loading (common for auto-selected first mail).
-    const fromList = messages.find((m) => m.id === id);
-    if (!fromList?.unread) return;
-    markMessageReadLocally(fromList.id, fromList.mailboxId);
-  }, [markMessageReadLocally, messageQuery.data, messages, selectedMessageId]);
+    if (!selectedMessageId) return;
+    markMessageReadById(selectedMessageId);
+  }, [markMessageReadById, selectedMessageId]);
 
   const handleSelectMessage = useCallback(
     (id: string | null) => {
-      if (id && id === selectedMessageId) {
-        // Re-click already previewed mail → clear blue unread dot.
-        markSelectedReadIfNeeded();
+      if (id) {
+        // First active user click opens the mail → clear unread immediately.
+        markMessageReadById(id);
       }
       selectMessage(id);
     },
-    [markSelectedReadIfNeeded, selectMessage, selectedMessageId],
+    [markMessageReadById, selectMessage],
   );
 
   const openFocusForMessage = useCallback(
