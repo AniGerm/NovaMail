@@ -44,6 +44,11 @@ pub fn run() {
     novamail_mail::ensure_crypto_provider();
 
     tauri::Builder::default()
+        // Must be first: second launches notify this process and exit before tray setup.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tracing::info!("second NovaMail launch — focusing existing window");
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         // Notification plugin: init is best-effort — some hosts lack a notification bus.
         .plugin(tauri_plugin_notification::init())
@@ -62,11 +67,7 @@ pub fn run() {
                         app.exit(0);
                     }
                     "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
+                        show_main_window(app);
                     }
                     _ => {}
                 })
@@ -77,12 +78,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
+                        show_main_window(tray.app_handle());
                     }
                 });
             let base_icon = app.default_window_icon().map(|icon| {
@@ -494,6 +490,15 @@ fn persist_window_geometry_debounced(window: &tauri::Window) {
         PENDING.store(false, Ordering::SeqCst);
         persist_window_geometry(&window);
     });
+}
+
+/// Show/focus the main window (tray click, menu, or second-launch handoff).
+fn show_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
 }
 
 /// Update tray icon badge + window taskbar badge with inbox unread count.
