@@ -634,6 +634,11 @@ export const de = {
   noContactsYet: "Noch keine Kontakte",
   triageTitle: "Schnellsortierung",
   triageHotkeys: "Tasten: B behalten · L löschen · V Vorschau · Esc schließen",
+  triageNewBadge: "Neu",
+  triageOlderHintShort: "Ältere Nachrichten",
+  triageOlderHint:
+    "Alle neuen Nachrichten sind gesichtet. Es folgen ältere Nachrichten.",
+  triageDismissHint: "Hinweis schließen",
   loadingPreview: "Vorschau wird geladen…",
   triageDone: "Posteingang sortiert. Keine weiteren Nachrichten in dieser Warteschlange.",
   hasAttachments: "Mit Anhängen",
