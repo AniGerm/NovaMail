@@ -10,6 +10,7 @@ export function Dialog({
   onClose,
   className,
   headerActions,
+  dense = false,
 }: PropsWithChildren<{
   open: boolean;
   title: string;
@@ -17,6 +18,8 @@ export function Dialog({
   onClose: () => void;
   className?: string;
   headerActions?: ReactNode;
+  /** Single-line title and tighter spacing. */
+  dense?: boolean;
 }>) {
   if (!open) return null;
   return (
@@ -31,16 +34,31 @@ export function Dialog({
           className,
         )}
       >
-        <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
+        <div
+          className={cn(
+            "mb-4 flex shrink-0 items-start justify-between gap-3",
+            dense && "mb-1 items-center",
+          )}
+        >
           <div className="min-w-0">
             <h2
               id="nova-dialog-title"
-              className="font-[family-name:var(--nova-font-display)] text-xl"
+              className={cn(
+                "font-[family-name:var(--nova-font-display)] text-xl",
+                dense && "truncate text-sm font-medium leading-tight",
+              )}
             >
               {title}
             </h2>
             {description ? (
-              <p className="mt-1 text-sm text-[var(--nova-ink-muted)]">{description}</p>
+              <p
+                className={cn(
+                  "mt-1 text-sm text-[var(--nova-ink-muted)]",
+                  dense && "truncate text-xs",
+                )}
+              >
+                {description}
+              </p>
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">

@@ -507,6 +507,8 @@ export function ReadingPane({
     }, 250);
   }
 
+  const toolClass = focusMode ? "h-8 w-8" : undefined;
+
   return (
     <article
       aria-label={t("readingPane")}
@@ -532,23 +534,47 @@ export function ReadingPane({
         }
       }}
     >
-      <header className="shrink-0 border-b border-[var(--nova-border)] px-8 py-5">
-        <div className="mb-3 flex items-start justify-between gap-4">
+      <header
+        className={
+          focusMode
+            ? "shrink-0 border-b border-[var(--nova-border)] px-3 py-1"
+            : "shrink-0 border-b border-[var(--nova-border)] px-8 py-5"
+        }
+      >
+        <div
+          className={
+            focusMode
+              ? "flex flex-wrap items-center gap-x-2 gap-y-0.5"
+              : "mb-3 flex items-start justify-between gap-4"
+          }
+        >
           {focusMode ? (
-            <div className="min-w-0 flex-1" />
+            <p className="min-w-0 flex-1 truncate text-xs text-[var(--nova-ink-muted)]">
+              <span className="font-medium text-[var(--nova-ink)]">
+                {displayName(current.summary.from)}
+              </span>
+              {" <"}
+              {current.summary.from.email}
+              {"> · "}
+              {formatRelative(current.summary.date, locale)}
+              {" · "}
+              {current.summary.accountEmail}
+              {current.summary.localOnly ? ` · ${t("localOnlyBadge")}` : ""}
+            </p>
           ) : (
             <h2 className="max-w-3xl font-[family-name:var(--nova-font-display)] text-2xl leading-tight">
               {current.summary.subject || t("noSubject")}
             </h2>
           )}
-          <div className="relative flex items-center gap-1">
+          <div className="relative flex shrink-0 items-center gap-0.5">
             {onOpenFocus && !focusMode ? (
-              <IconButton label={t("openFullscreen")} onClick={onOpenFocus}>
+              <IconButton className={toolClass} label={t("openFullscreen")} onClick={onOpenFocus}>
                 <Maximize2 />
               </IconButton>
             ) : null}
             <div className="relative">
               <IconButton
+                className={toolClass}
                 label={t("shareMessage")}
                 onClick={() => {
                   setSnoozeOpen(false);
@@ -592,7 +618,7 @@ export function ReadingPane({
                 </div>
               ) : null}
             </div>
-            <IconButton label={t("starMessage")} onClick={onToggleStar}>
+            <IconButton className={toolClass} label={t("starMessage")} onClick={onToggleStar}>
               <Star
                 className={
                   current.summary.starred
@@ -601,25 +627,26 @@ export function ReadingPane({
                 }
               />
             </IconButton>
-            <IconButton label={t("reply")} onClick={onReply}>
+            <IconButton className={toolClass} label={t("reply")} onClick={onReply}>
               <Reply />
             </IconButton>
-            <IconButton label={t("forward")} onClick={onForward}>
+            <IconButton className={toolClass} label={t("forward")} onClick={onForward}>
               <Forward />
             </IconButton>
             {onArchive ? (
-              <IconButton label={t("archive")} onClick={onArchive}>
+              <IconButton className={toolClass} label={t("archive")} onClick={onArchive}>
                 <Archive />
               </IconButton>
             ) : null}
             {onDelete ? (
-              <IconButton label={t("delete")} onClick={onDelete}>
+              <IconButton className={toolClass} label={t("delete")} onClick={onDelete}>
                 <Trash2 />
               </IconButton>
             ) : null}
             {onSnooze ? (
               <>
                 <IconButton
+                  className={toolClass}
                   label={t("snooze")}
                   onClick={() => setSnoozeOpen((open) => !open)}
                 >
@@ -655,11 +682,11 @@ export function ReadingPane({
               </>
             ) : null}
             {inSpamFolder ? (
-              <IconButton label={t("markNotSpam")} onClick={onMarkNotSpam}>
+              <IconButton className={toolClass} label={t("markNotSpam")} onClick={onMarkNotSpam}>
                 <ShieldCheck />
               </IconButton>
             ) : (
-              <IconButton label={t("markSpam")} onClick={onMarkSpam}>
+              <IconButton className={toolClass} label={t("markSpam")} onClick={onMarkSpam}>
                 <ShieldAlert />
               </IconButton>
             )}
@@ -668,18 +695,26 @@ export function ReadingPane({
                 type="button"
                 size="sm"
                 variant="ghost"
+                className={focusMode ? "h-8 min-w-0 px-2 text-xs" : undefined}
                 onClick={() => onCreateEvent()}
               >
                 {t("asEvent")}
               </Button>
             ) : null}
             {onCreateTask ? (
-              <Button type="button" size="sm" variant="ghost" onClick={onCreateTask}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className={focusMode ? "h-8 min-w-0 px-2 text-xs" : undefined}
+                onClick={onCreateTask}
+              >
                 {t("asTask")}
               </Button>
             ) : null}
           </div>
         </div>
+        {focusMode ? null : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--nova-ink-muted)]">
           <span className="font-medium text-[var(--nova-ink)]">
             {displayName(current.summary.from)}
@@ -695,6 +730,7 @@ export function ReadingPane({
           <span>·</span>
           <span>{current.summary.accountEmail}</span>
         </div>
+        )}
         {aiError ? (
           <p className="mt-3 text-sm text-[var(--nova-danger)]" role="alert">
             {aiError}
