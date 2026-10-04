@@ -58,7 +58,9 @@ export function AppShell() {
     accountSetupOpen,
     setAccountSetupOpen,
     settingsOpen,
+    settingsSection,
     setSettingsOpen,
+    openSettings,
     contactsOpen,
     setContactsOpen,
     triageOpen,
@@ -1642,6 +1644,7 @@ export function AppShell() {
       />
       <SettingsDialog
         open={settingsOpen}
+        initialTab={settingsSection}
         onClose={() => {
           setSettingsOpen(false);
           void queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
@@ -1661,6 +1664,7 @@ export function AppShell() {
         prefill={contactPrefill}
         onPrefillConsumed={clearContactPrefill}
         onContactSaved={advanceContactQueue}
+        onOpenSettings={() => openSettings("contacts")}
         onClose={() => {
           setContactsOpen(false);
           setContactPrefill(null);

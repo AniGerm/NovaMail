@@ -7,6 +7,13 @@ import type { ThemeMode } from "@/shared/theme/resolveTheme";
 
 type Density = "comfortable" | "compact";
 export type InboxViewModePref = "threads" | "flat";
+export type SettingsSection =
+  | "general"
+  | "accounts"
+  | "ai"
+  | "mail"
+  | "privacy"
+  | "contacts";
 
 export type { ThemeMode };
 
@@ -33,6 +40,7 @@ interface UiState {
   composerOpen: boolean;
   accountSetupOpen: boolean;
   settingsOpen: boolean;
+  settingsSection: SettingsSection;
   contactsOpen: boolean;
   triageOpen: boolean;
   commandPaletteOpen: boolean;
@@ -52,6 +60,7 @@ interface UiState {
   setComposerOpen: (open: boolean) => void;
   setAccountSetupOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  openSettings: (section: SettingsSection) => void;
   setContactsOpen: (open: boolean) => void;
   setTriageOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -76,6 +85,7 @@ export const useUiStore = create<UiState>()(
       composerOpen: false,
       accountSetupOpen: false,
       settingsOpen: false,
+      settingsSection: "general",
       contactsOpen: false,
       triageOpen: false,
       commandPaletteOpen: false,
@@ -95,7 +105,14 @@ export const useUiStore = create<UiState>()(
       selectMessage: (selectedMessageId) => set({ selectedMessageId }),
       setComposerOpen: (composerOpen) => set({ composerOpen }),
       setAccountSetupOpen: (accountSetupOpen) => set({ accountSetupOpen }),
-      setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      setSettingsOpen: (settingsOpen) =>
+        set(
+          settingsOpen
+            ? { settingsOpen: true, settingsSection: "general" }
+            : { settingsOpen: false },
+        ),
+      openSettings: (settingsSection) =>
+        set({ settingsOpen: true, settingsSection }),
       setContactsOpen: (contactsOpen) => set({ contactsOpen }),
       setTriageOpen: (triageOpen) => set({ triageOpen }),
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),

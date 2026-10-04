@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft,
   Camera,
   Plus,
   Settings2,
@@ -16,7 +15,7 @@ import {
   Select,
 } from "@novamail/ui";
 
-import { api, formatApiError } from "@/shared/api/client";
+import { api, isDesktopShell } from "@/shared/api/client";
 import type {
   AppError,
   ContactAddress,
@@ -26,13 +25,16 @@ import type {
   ContactPrefill,
   ContactSortBy,
   ContactsBookSettings,
-  ContactsShareMode,
   ContactsShareStatus,
+  RecipientSuggestion,
   UpsertContactRequest,
 } from "@/shared/api/types";
+import {
+  historyFieldPatch,
+  mergeEmailList,
+  suggestQueryToken,
+} from "@/features/contacts/contactSuggest";
 import { useT } from "@/shared/i18n/useT";
-
-type Panel = "main" | "settings";
 
 type Draft = {
   id?: string | null;
@@ -60,75 +62,6 @@ const emptyAddress = (label = ""): ContactAddress => ({
   country: "",
 });
 
-
-function DirectoryListenStatus({
-  share,
-  busy,
-  onRestart,
-}: {
-  share: ContactsShareStatus;
-  busy: boolean;
-  onRestart: () => void;
-}) {
-  const t = useT();
-  const ldap = share.ldapServer;
-  const card = share.carddav;
-  const urls =
-    ldap.running && ldap.listenUrls && ldap.listenUrls.length > 0
-      ? ldap.listenUrls
-      : ldap.running && ldap.listenUrl
-        ? [ldap.listenUrl]
-        : [];
-  return (
-    <div
-      className="grid gap-1.5 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface-2)] p-3"
-      role="status"
-      data-ldap-running={ldap.running ? "yes" : "no"}
-      data-carddav-running={card.running ? "yes" : "no"}
-    >
-      <p
-        className={
-          ldap.running
-            ? "text-sm font-semibold text-[var(--nova-success)]"
-            : "text-sm font-semibold text-[var(--nova-danger)]"
-        }
-      >
-        {ldap.running ? t("ldapRunning") : t("ldapDown")}
-      </p>
-      {urls.map((url) => (
-        <p key={url} className="break-all font-mono text-xs">
-          {url}
-        </p>
-      ))}
-      {!ldap.running && ldap.lastError ? (
-        <p className="text-xs text-[var(--nova-danger)]">{ldap.lastError}</p>
-      ) : null}
-      <p
-        className={
-          card.running
-            ? "text-sm font-semibold text-[var(--nova-success)]"
-            : "text-sm font-semibold text-[var(--nova-danger)]"
-        }
-      >
-        {card.running ? t("cardDavUp") : t("cardDavDown")}
-        {card.running && card.addressbookUrl ? ` · ${card.addressbookUrl}` : ""}
-      </p>
-      {!card.running && card.lastError ? (
-        <p className="text-xs text-[var(--nova-danger)]">{card.lastError}</p>
-      ) : null}
-      {!ldap.running || !card.running ? (
-        <Button
-          type="button"
-          size="sm"
-          disabled={busy}
-          onClick={onRestart}
-        >
-          {t("directoryRestart")}
-        </Button>
-      ) : null}
-    </div>
-  );
-}
 
 function DirectoryStatusDot({
   share,
@@ -350,6 +283,7 @@ export function ContactsDialog({
   prefill = null,
   onPrefillConsumed,
   onContactSaved,
+  onOpenSettings,
 }: {
   open: boolean;
   onClose: () => void;
@@ -357,9 +291,10 @@ export function ContactsDialog({
   onPrefillConsumed?: () => void;
   /** Fired after a successful save (e.g. advance multi-recipient queue). */
   onContactSaved?: () => void;
+  /** Opens the address-book tab in the main settings dialog. */
+  onOpenSettings?: () => void;
 }) {
   const t = useT();
-  const [panel, setPanel] = useState<Panel>("main");
   const [contacts, setContacts] = useState<ContactDto[]>([]);
   const [bookSettings, setBookSettings] =
     useState<ContactsBookSettings>(defaultBookSettings);
@@ -367,15 +302,13 @@ export function ContactsDialog({
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [share, setShare] = useState<ContactsShareStatus | null>(null);
-  const [clientUrl, setClientUrl] = useState("ldap://192.168.1.10:1389");
-  const [clientBind, setClientBind] = useState("cn=novamail,dc=novamail");
-  const [clientBase, setClientBase] = useState("ou=people,dc=novamail");
-  const [clientPassword, setClientPassword] = useState("");
-  const [ldapUrl, setLdapUrl] = useState("ldaps://ldap.example.com");
-  const [ldapBase, setLdapBase] = useState("ou=people,dc=example,dc=com");
-  const [ldapFilter, setLdapFilter] = useState("(objectClass=inetOrgPerson)");
-  const [ldapBind, setLdapBind] = useState("");
-  const [ldapPassword, setLdapPassword] = useState("");
+  const [suggestField, setSuggestField] = useState<
+    "given" | "family" | "email" | null
+  >(null);
+  const [suggestQuery, setSuggestQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<RecipientSuggestion[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestIndex, setSuggestIndex] = useState(0);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -385,37 +318,18 @@ export function ContactsDialog({
   } | null>(null);
 
   async function refresh(nextQuery = query) {
-    const [list, shareStatus, ldap, book] = await Promise.all([
+    const [list, shareStatus, book] = await Promise.all([
       api.contactsList(nextQuery || null),
       api.contactsShareStatus().catch(() => null),
-      api.ldapGetSettings().catch(() => null),
       api.contactsBookSettings().catch(() => defaultBookSettings()),
     ]);
     setContacts(list);
-    if (shareStatus) {
-      setShare(shareStatus);
-      if (shareStatus.client?.url) setClientUrl(shareStatus.client.url);
-      if (shareStatus.client?.bindDn) setClientBind(shareStatus.client.bindDn);
-      if (shareStatus.client?.baseDn) setClientBase(shareStatus.client.baseDn);
-      if (shareStatus.mode === "server" && shareStatus.ldapServer.listenUrl) {
-        // Keep client fields aligned with this hub for copy/paste to other PCs.
-        setClientUrl(shareStatus.ldapServer.listenUrl);
-        setClientBind(shareStatus.ldapServer.bindDn);
-        setClientBase(shareStatus.ldapServer.baseDn);
-      }
-    }
+    if (shareStatus) setShare(shareStatus);
     setBookSettings(book);
-    if (ldap && shareStatus?.mode !== "client") {
-      setLdapUrl(ldap.url || ldapUrl);
-      setLdapBase(ldap.baseDn || ldapBase);
-      setLdapFilter(ldap.filter || ldapFilter);
-      setLdapBind(ldap.bindDn || "");
-    }
   }
 
   useEffect(() => {
     if (!open) return;
-    setPanel("main");
     refresh().catch((err) => setError((err as AppError).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query]);
@@ -436,11 +350,41 @@ export function ContactsDialog({
     if (!open || !prefill) return;
     setSelectedId(null);
     setDraft(prefillToDraft(prefill, t("addressLabelWork")));
-    setPanel("main");
     setError(null);
     setStatusInfo(null);
     onPrefillConsumed?.();
   }, [open, prefill, onPrefillConsumed, t]);
+
+  useEffect(() => {
+    if (!open || !isDesktopShell()) return;
+    const q = suggestQueryToken(suggestQuery);
+    if (!suggestField || q.length < 2) {
+      setSuggestions([]);
+      setSuggestOpen(false);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void api
+        .recipientsSuggest(q, 8)
+        .then((items) => {
+          if (cancelled) return;
+          setSuggestions(items);
+          setSuggestIndex(0);
+          setSuggestOpen(items.length > 0);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSuggestions([]);
+            setSuggestOpen(false);
+          }
+        });
+    }, 160);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [open, suggestField, suggestQuery]);
 
   const selected = useMemo(
     () => contacts.find((c) => c.id === selectedId) ?? null,
@@ -468,7 +412,7 @@ export function ContactsDialog({
     });
     setError(null);
     setStatusInfo(null);
-    setPanel("main");
+    setSuggestOpen(false);
   }
 
   function selectContact(contact: ContactDto) {
@@ -480,7 +424,7 @@ export function ContactsDialog({
     setDraft(next);
     setError(null);
     setStatusInfo(null);
-    setPanel("main");
+    setSuggestOpen(false);
   }
 
   async function handleSave(event: React.FormEvent) {
@@ -503,148 +447,6 @@ export function ContactsDialog({
     }
   }
 
-  async function setShareMode(mode: ContactsShareMode) {
-    // Optimistic update so the select does not snap back to "local" while saving.
-    setShare((prev) =>
-      prev
-        ? { ...prev, mode }
-        : {
-            mode,
-            carddav: {
-              running: false,
-              listenUrl: "",
-              addressbookUrl: "",
-              contactCount: 0,
-              username: "",
-              password: "",
-            },
-            ldapServer: {
-              running: false,
-              listenUrl: "",
-              baseDn: clientBase,
-              bindDn: clientBind,
-              username: "",
-              password: "",
-              contactCount: 0,
-            },
-            client: null,
-          },
-    );
-    setBusy(true);
-    setError(null);
-    setStatusInfo(null);
-    try {
-      const status = await api.contactsSetShareMode({
-        mode,
-        clientUrl: mode === "client" ? clientUrl : null,
-        clientBindDn: mode === "client" ? clientBind : null,
-        clientPassword: mode === "client" ? clientPassword || null : null,
-        clientBaseDn: mode === "client" ? clientBase : null,
-      });
-      setShare(status);
-      const ldapUp = Boolean(status.ldapServer?.running);
-      const carddavUp = Boolean(status.carddav?.running);
-      if (mode === "server" && !ldapUp) {
-        setError(
-          status.ldapServer?.lastError
-            ? `${t("ldapDown")}: ${status.ldapServer.lastError}`
-            : t("shareModeServicesDown"),
-        );
-      } else if (mode === "server" && !carddavUp) {
-        setError(
-          status.carddav?.lastError
-            ? `${t("cardDavDown")}: ${status.carddav.lastError}`
-            : t("shareModeServicesDown"),
-        );
-      }
-    } catch (err) {
-      setError(formatApiError(err, t("shareModeSaveFailed")));
-      // Re-read backend truth instead of blindly reverting the UI.
-      try {
-        const latest = await api.contactsShareStatus();
-        setShare(latest);
-      } catch {
-        setShare((prev) => (prev ? { ...prev, mode: "local" } : prev));
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runClientSync() {
-    setBusy(true);
-    setError(null);
-    setStatusInfo(null);
-    try {
-      const status = await api.contactsSetShareMode({
-        mode: "client",
-        clientUrl,
-        clientBindDn: clientBind,
-        clientPassword: clientPassword || null,
-        clientBaseDn: clientBase,
-      });
-      setShare(status);
-      const result = await api.contactsClientSync();
-      await refresh();
-      setStatusInfo(
-        t("clientSyncResult", {
-          imported: result.imported,
-          updated: result.updated,
-          total: result.total,
-        }),
-      );
-    } catch (err) {
-      setError(formatApiError(err, t("shareModeSaveFailed")));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runLdapSync() {
-    setBusy(true);
-    setError(null);
-    setStatusInfo(null);
-    try {
-      const result = await api.ldapSync({
-        url: ldapUrl,
-        baseDn: ldapBase,
-        filter: ldapFilter,
-        bindDn: ldapBind || null,
-        password: ldapPassword || null,
-        saveSettings: true,
-      });
-      await refresh();
-      setStatusInfo(
-        t("ldapSyncResult", {
-          imported: result.imported,
-          updated: result.updated,
-          total: result.total,
-        }),
-      );
-      if (share?.mode !== "server") {
-        await setShareMode("server");
-      }
-    } catch (err) {
-      setError((err as AppError).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveBookSettings() {
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await api.contactsSetBookSettings(bookSettings);
-      setBookSettings(saved);
-      setStatusInfo(t("bookSettingsSaved"));
-    } catch (err) {
-      setError((err as AppError).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function onPhotoSelected(file: File | null) {
     if (!file) return;
     if (file.size > 220_000) {
@@ -660,365 +462,159 @@ export function ContactsDialog({
     setDraft((prev) => ({ ...prev, photoBase64: btoa(binary) }));
   }
 
-  const description =
-    panel === "settings"
-      ? t("contactsSettingsHint")
-      : t("addressBookDescription");
+  function trackSuggest(
+    field: "given" | "family" | "email",
+    value: string,
+  ) {
+    setSuggestField(field);
+    setSuggestQuery(value);
+  }
+
+  function suggestKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (!suggestOpen || suggestions.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSuggestIndex((index) => (index + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSuggestIndex(
+        (index) => (index - 1 + suggestions.length) % suggestions.length,
+      );
+    } else if (event.key === "Enter" && suggestions[suggestIndex]) {
+      event.preventDefault();
+      void applySuggestion(suggestions[suggestIndex]!);
+    } else if (event.key === "Escape") {
+      setSuggestOpen(false);
+    }
+  }
+
+  async function applySuggestion(item: RecipientSuggestion) {
+    setSuggestOpen(false);
+    setSuggestions([]);
+    if (item.contactId || item.inContacts) {
+      try {
+        const list = await api.contactsList(item.email || item.name || null);
+        const found =
+          list.find((contact) => contact.id === item.contactId) ??
+          list.find((contact) =>
+            contact.emails.some(
+              (email) => email.toLowerCase() === item.email.toLowerCase(),
+            ),
+          );
+        if (found) {
+          setSelectedId(found.id);
+          const next = contactToDraft(found);
+          if (!found.addresses?.length) {
+            next.addresses = [emptyAddress(t("addressLabelWork"))];
+          }
+          setDraft(next);
+          return;
+        }
+      } catch {
+        /* fall through to the history fields we already have */
+      }
+    }
+    const patch = historyFieldPatch(item);
+    setDraft((prev) => ({
+      ...prev,
+      givenName: patch.givenName || prev.givenName,
+      familyName: patch.familyName || prev.familyName,
+      displayName: patch.displayName || prev.displayName,
+      emails: mergeEmailList(prev.emails, patch.email),
+    }));
+  }
+
+  function suggestionList(field: "given" | "family" | "email") {
+    if (!suggestOpen || suggestField !== field || suggestions.length === 0) {
+      return null;
+    }
+    return (
+      <ul
+        role="listbox"
+        aria-label={t("contactSuggestions")}
+        className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-56 overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] py-1 shadow-[var(--nova-shadow)]"
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        {suggestions.map((item, index) => (
+          <li key={`${item.email}-${item.source}-${index}`}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={index === suggestIndex}
+              className={
+                index === suggestIndex
+                  ? "flex w-full flex-col items-start gap-0.5 bg-[var(--nova-accent-soft)] px-3 py-2 text-left"
+                  : "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-[var(--nova-surface-2)]"
+              }
+              onMouseEnter={() => setSuggestIndex(index)}
+              onClick={() => {
+                void applySuggestion(item);
+              }}
+            >
+              <span className="text-sm font-medium">
+                {item.name || item.email}
+              </span>
+              <span className="text-xs text-[var(--nova-ink-muted)]">
+                {item.name ? `${item.email} · ` : ""}
+                {item.inContacts
+                  ? t("recipientFromContacts")
+                  : t("recipientFromHistory")}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  async function restartDirectory() {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await api.contactsSetShareMode({ mode: "server" });
+      setShare(status);
+      if (!status.ldapServer.running) {
+        setError(
+          status.ldapServer.lastError
+            ? `${t("ldapDown")}: ${status.ldapServer.lastError}`
+            : t("shareModeServicesDown"),
+        );
+      }
+    } catch (err) {
+      setError((err as AppError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title={panel === "settings" ? t("contactsSettings") : t("addressBook")}
-      description={description}
+      title={t("addressBook")}
+      description={t("addressBookDescription")}
       className="max-w-5xl"
       headerActions={
-        panel === "main" ? (
-          <>
-            {share?.mode === "server" ? (
-              <DirectoryStatusDot
-                share={share}
-                busy={busy}
-                onRestart={() => {
-                  void setShareMode("server");
-                }}
-              />
-            ) : null}
-            <IconButton
-              label={t("contactsSettings")}
-              onClick={() => {
-                setPanel("settings");
-                setStatusInfo(null);
-                setError(null);
+        <>
+          {share?.mode === "server" ? (
+            <DirectoryStatusDot
+              share={share}
+              busy={busy}
+              onRestart={() => {
+                void restartDirectory();
               }}
-            >
-              <Settings2 size={18} />
-            </IconButton>
-          </>
-        ) : (
+            />
+          ) : null}
           <IconButton
-            label={t("backToContacts")}
-            onClick={() => setPanel("main")}
+            label={t("contactsSettings")}
+            onClick={() => onOpenSettings?.()}
           >
-            <ArrowLeft size={18} />
+            <Settings2 size={18} />
           </IconButton>
-        )
+        </>
       }
     >
-      {panel === "settings" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 text-sm">
-          <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-            <h3 className="font-medium">{t("nameOrder")}</h3>
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
-                {t("nameOrder")}
-                <Select
-                  value={bookSettings.nameOrder}
-                  onChange={(e) =>
-                    setBookSettings((prev) => ({
-                      ...prev,
-                      nameOrder: e.target.value as ContactNameOrder,
-                    }))
-                  }
-                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
-                >
-                  <option value="givenFamily">{t("nameOrderGivenFamily")}</option>
-                  <option value="familyGiven">{t("nameOrderFamilyGiven")}</option>
-                </Select>
-              </label>
-              <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
-                {t("contactSortBy")}
-                <Select
-                  value={bookSettings.sortBy}
-                  onChange={(e) =>
-                    setBookSettings((prev) => ({
-                      ...prev,
-                      sortBy: e.target.value as ContactSortBy,
-                    }))
-                  }
-                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
-                >
-                  <option value="familyName">{t("contactSortFamily")}</option>
-                  <option value="givenName">{t("contactSortGiven")}</option>
-                  <option value="displayName">{t("contactSortDisplay")}</option>
-                  <option value="organization">
-                    {t("contactSortOrganization")}
-                  </option>
-                </Select>
-              </label>
-              <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)] md:col-span-2">
-                {t("sortDirection")}
-                <Select
-                  value={bookSettings.sortAscending ? "asc" : "desc"}
-                  onChange={(e) =>
-                    setBookSettings((prev) => ({
-                      ...prev,
-                      sortAscending: e.target.value === "asc",
-                    }))
-                  }
-                  className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
-                >
-                  <option value="asc">{t("contactSortAscending")}</option>
-                  <option value="desc">{t("contactSortDescending")}</option>
-                </Select>
-              </label>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                void saveBookSettings();
-              }}
-            >
-              {t("saveBookSettings")}
-            </Button>
-          </section>
-
-          <section className="grid gap-3 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-            <h3 className="font-medium">{t("cardDavServer")}</h3>
-
-            <label className="grid gap-1 text-xs text-[var(--nova-ink-muted)]">
-              {t("shareModeLabel")}
-              <Select
-                value={share?.mode ?? "local"}
-                disabled={busy}
-                onChange={(e) => {
-                  void setShareMode(e.target.value as ContactsShareMode);
-                }}
-                className="h-9 rounded-[var(--nova-radius-sm)] px-2 text-sm"
-              >
-                <option value="local">{t("shareModeLocal")}</option>
-                <option value="server">{t("shareModeServer")}</option>
-                <option value="client">{t("shareModeClient")}</option>
-              </Select>
-            </label>
-            {error ? (
-              <p className="text-xs text-[var(--nova-danger)]" role="alert">
-                {error}
-              </p>
-            ) : null}
-            {statusInfo ? (
-              <p className="text-xs text-[var(--nova-accent)]" role="status">
-                {statusInfo}
-              </p>
-            ) : null}
-
-            {(share?.mode ?? "local") === "local" ? (
-              <p className="text-xs text-[var(--nova-ink-muted)]">
-                {t("shareModeLocalHint")}
-              </p>
-            ) : null}
-
-            {share?.mode === "server" ? (
-              <>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeServerHint")}
-                </p>
-                <DirectoryListenStatus
-                  share={share}
-                  busy={busy}
-                  onRestart={() => {
-                    void setShareMode("server");
-                  }}
-                />
-                <label className="grid gap-1 text-xs">
-                  <span>{t("ldapServerUrlLabel")}</span>
-                  <Input
-                    readOnly
-                    value={share.ldapServer.listenUrl}
-                    onFocus={(e) => e.currentTarget.select()}
-                  />
-                </label>
-                {(share.ldapServer.listenUrls?.length ?? 0) > 1 ? (
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("ldapServerUrlsLabel")}</span>
-                    <Input
-                      readOnly
-                      value={(share.ldapServer.listenUrls ?? []).join(" · ")}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  </label>
-                ) : null}
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("ldapRicohHint")}
-                </p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("ldapServerBindDn")}</span>
-                    <Input
-                      readOnly
-                      value={share.ldapServer.bindDn}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("ldapServerBaseDn")}</span>
-                    <Input
-                      readOnly
-                      value={share.ldapServer.baseDn}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  </label>
-                </div>
-                <label className="grid gap-1 text-xs">
-                  <span>{t("cardDavUrlLabel")}</span>
-                  <Input
-                    readOnly
-                    value={share.carddav.addressbookUrl}
-                    onFocus={(e) => e.currentTarget.select()}
-                  />
-                </label>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("cardDavUsername")}</span>
-                    <Input
-                      readOnly
-                      value={share.carddav.username}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("cardDavPassword")}</span>
-                    <Input
-                      readOnly
-                      value={share.carddav.password}
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  </label>
-                </div>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeServerSteps")}
-                </p>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeTlsHint")}
-                </p>
-              </>
-            ) : null}
-
-            {share?.mode === "client" ? (
-              <>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeClientHint")}
-                </p>
-                <label className="grid gap-1 text-xs">
-                  <span>{t("clientHubUrl")}</span>
-                  <Input
-                    value={clientUrl}
-                    onChange={(e) => setClientUrl(e.target.value)}
-                    placeholder={t("clientHubUrlPlaceholder")}
-                    disabled={busy}
-                  />
-                </label>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("ldapServerBindDn")}</span>
-                    <Input
-                      value={clientBind}
-                      onChange={(e) => setClientBind(e.target.value)}
-                      disabled={busy}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs">
-                    <span>{t("ldapServerBaseDn")}</span>
-                    <Input
-                      value={clientBase}
-                      onChange={(e) => setClientBase(e.target.value)}
-                      disabled={busy}
-                    />
-                  </label>
-                </div>
-                <label className="grid gap-1 text-xs">
-                  <span>{t("cardDavPassword")}</span>
-                  <Input
-                    type="password"
-                    value={clientPassword}
-                    onChange={(e) => setClientPassword(e.target.value)}
-                    disabled={busy}
-                  />
-                </label>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    void runClientSync();
-                  }}
-                >
-                  {t("clientSyncNow")}
-                </Button>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeClientSteps")}
-                </p>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {t("shareModeTlsHint")}
-                </p>
-              </>
-            ) : null}
-          </section>
-
-          {share?.mode === "server" ? (
-            <section className="grid gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] p-3">
-              <h3 className="font-medium">{t("ldapSyncTitle")}</h3>
-              <p className="text-xs text-[var(--nova-ink-muted)]">
-                {t("ldapSyncDescription")}
-              </p>
-              <div className="grid gap-2 md:grid-cols-2">
-                <Input
-                  value={ldapUrl}
-                  onChange={(e) => setLdapUrl(e.target.value)}
-                  placeholder={t("ldapUrl")}
-                />
-                <Input
-                  value={ldapBase}
-                  onChange={(e) => setLdapBase(e.target.value)}
-                  placeholder={t("ldapBaseDn")}
-                />
-                <Input
-                  value={ldapFilter}
-                  onChange={(e) => setLdapFilter(e.target.value)}
-                  placeholder={t("ldapFilter")}
-                />
-                <Input
-                  value={ldapBind}
-                  onChange={(e) => setLdapBind(e.target.value)}
-                  placeholder={t("ldapBindDn")}
-                />
-                <Input
-                  type="password"
-                  value={ldapPassword}
-                  onChange={(e) => setLdapPassword(e.target.value)}
-                  placeholder={t("ldapPassword")}
-                  className="md:col-span-2"
-                />
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={busy}
-                onClick={() => {
-                  void runLdapSync();
-                }}
-              >
-                {t("ldapSyncNow")}
-              </Button>
-            </section>
-          ) : null}
-
-          {statusInfo ? (
-            <p className="text-[var(--nova-accent)]" role="status">
-              {statusInfo}
-            </p>
-          ) : null}
-          {error ? (
-            <p className="text-[var(--nova-danger)]" role="alert">
-              {error}
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden text-sm lg:grid-cols-[240px_minmax(0,1fr)]">
+              <div className="grid min-h-0 flex-1 gap-4 overflow-hidden text-sm lg:grid-cols-[240px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col gap-3 border-b border-[var(--nova-border)] pb-3 lg:border-b-0 lg:border-r lg:pr-3 lg:pb-0">
             <div className="flex items-center gap-2">
               <Input
@@ -1135,49 +731,89 @@ export function ContactsDialog({
               <div className="grid gap-2 md:grid-cols-2">
                 {bookSettings.nameOrder === "familyGiven" ? (
                   <>
-                    <Input
-                      placeholder={t("familyName")}
-                      value={draft.familyName}
-                      onChange={(e) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          familyName: e.target.value,
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder={t("givenName")}
-                      value={draft.givenName}
-                      onChange={(e) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          givenName: e.target.value,
-                        }))
-                      }
-                    />
+                    <div className="relative">
+                      <Input
+                        placeholder={t("familyName")}
+                        value={draft.familyName}
+                        role="combobox"
+                        aria-expanded={suggestOpen && suggestField === "family"}
+                        aria-autocomplete="list"
+                        onFocus={() => trackSuggest("family", draft.familyName)}
+                        onBlur={() => {
+                          window.setTimeout(() => setSuggestOpen(false), 120);
+                        }}
+                        onKeyDown={suggestKeyDown}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDraft((prev) => ({ ...prev, familyName: value }));
+                          trackSuggest("family", value);
+                        }}
+                      />
+                      {suggestionList("family")}
+                    </div>
+                    <div className="relative">
+                      <Input
+                        placeholder={t("givenName")}
+                        value={draft.givenName}
+                        role="combobox"
+                        aria-expanded={suggestOpen && suggestField === "given"}
+                        aria-autocomplete="list"
+                        onFocus={() => trackSuggest("given", draft.givenName)}
+                        onBlur={() => {
+                          window.setTimeout(() => setSuggestOpen(false), 120);
+                        }}
+                        onKeyDown={suggestKeyDown}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDraft((prev) => ({ ...prev, givenName: value }));
+                          trackSuggest("given", value);
+                        }}
+                      />
+                      {suggestionList("given")}
+                    </div>
                   </>
                 ) : (
                   <>
-                    <Input
-                      placeholder={t("givenName")}
-                      value={draft.givenName}
-                      onChange={(e) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          givenName: e.target.value,
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder={t("familyName")}
-                      value={draft.familyName}
-                      onChange={(e) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          familyName: e.target.value,
-                        }))
-                      }
-                    />
+                    <div className="relative">
+                      <Input
+                        placeholder={t("givenName")}
+                        value={draft.givenName}
+                        role="combobox"
+                        aria-expanded={suggestOpen && suggestField === "given"}
+                        aria-autocomplete="list"
+                        onFocus={() => trackSuggest("given", draft.givenName)}
+                        onBlur={() => {
+                          window.setTimeout(() => setSuggestOpen(false), 120);
+                        }}
+                        onKeyDown={suggestKeyDown}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDraft((prev) => ({ ...prev, givenName: value }));
+                          trackSuggest("given", value);
+                        }}
+                      />
+                      {suggestionList("given")}
+                    </div>
+                    <div className="relative">
+                      <Input
+                        placeholder={t("familyName")}
+                        value={draft.familyName}
+                        role="combobox"
+                        aria-expanded={suggestOpen && suggestField === "family"}
+                        aria-autocomplete="list"
+                        onFocus={() => trackSuggest("family", draft.familyName)}
+                        onBlur={() => {
+                          window.setTimeout(() => setSuggestOpen(false), 120);
+                        }}
+                        onKeyDown={suggestKeyDown}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDraft((prev) => ({ ...prev, familyName: value }));
+                          trackSuggest("family", value);
+                        }}
+                      />
+                      {suggestionList("family")}
+                    </div>
                   </>
                 )}
                 <Input
@@ -1197,13 +833,26 @@ export function ContactsDialog({
                     setDraft((prev) => ({ ...prev, jobTitle: e.target.value }))
                   }
                 />
-                <Input
-                  placeholder={t("emailsComma")}
-                  value={draft.emails}
-                  onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, emails: e.target.value }))
-                  }
-                />
+                <div className="relative">
+                  <Input
+                    placeholder={t("emailsComma")}
+                    value={draft.emails}
+                    role="combobox"
+                    aria-expanded={suggestOpen && suggestField === "email"}
+                    aria-autocomplete="list"
+                    onFocus={() => trackSuggest("email", draft.emails)}
+                    onBlur={() => {
+                      window.setTimeout(() => setSuggestOpen(false), 120);
+                    }}
+                    onKeyDown={suggestKeyDown}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setDraft((prev) => ({ ...prev, emails: value }));
+                      trackSuggest("email", value);
+                    }}
+                  />
+                  {suggestionList("email")}
+                </div>
                 <Input
                   placeholder={t("phonesComma")}
                   value={draft.phones}
@@ -1461,7 +1110,6 @@ export function ContactsDialog({
             ) : null}
           </div>
         </div>
-      )}
 
       {pendingDelete ? (
         <div

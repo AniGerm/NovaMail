@@ -12,6 +12,7 @@ import type {
   SpellDictionaryDto,
   UpdateStatusEvent,
 } from "@/shared/api/types";
+import { ContactsSettingsPanel } from "@/features/contacts/ContactsSettingsPanel";
 import { AccountsPanel } from "@/features/settings/AccountsPanel";
 import { OfflineMailboxPanel } from "@/features/settings/OfflineMailboxPanel";
 import { PgpKeysPanel } from "@/features/settings/PgpKeysPanel";
@@ -143,7 +144,13 @@ function applyUpdateEvent(
   }
 }
 
-type SettingsTab = "general" | "accounts" | "ai" | "mail" | "privacy";
+type SettingsTab =
+  | "general"
+  | "accounts"
+  | "ai"
+  | "mail"
+  | "privacy"
+  | "contacts";
 
 export function SettingsDialog({
   open,
@@ -151,12 +158,14 @@ export function SettingsDialog({
   accounts = [],
   onAccountsChanged,
   onAddAccount,
+  initialTab = "general",
 }: {
   open: boolean;
   onClose: () => void;
   accounts?: AccountDto[];
   onAccountsChanged?: () => void;
   onAddAccount?: () => void;
+  initialTab?: SettingsTab;
 }) {
   const t = useT();
   const theme = useUiStore((s) => s.theme);
@@ -266,8 +275,8 @@ export function SettingsDialog({
   }
 
   useEffect(() => {
-    if (open) setSettingsTab("general");
-  }, [open]);
+    if (open) setSettingsTab(initialTab);
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -512,6 +521,7 @@ export function SettingsDialog({
           [
             ["general", t("settingsTabGeneral")],
             ["accounts", t("settingsTabAccounts")],
+            ["contacts", t("settingsTabContacts")],
             ["ai", t("settingsTabAi")],
             ["mail", t("settingsTabMail")],
             ["privacy", t("settingsTabPrivacy")],
@@ -532,6 +542,7 @@ export function SettingsDialog({
         ))}
       </div>
       <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto pt-4 text-sm">
+        {settingsTab === "contacts" ? <ContactsSettingsPanel /> : null}
         {settingsTab === "accounts" ? (
           <AccountsPanel
             accounts={accounts}
