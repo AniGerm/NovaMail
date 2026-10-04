@@ -1505,10 +1505,10 @@ impl AppState {
                 // Persist mode first so the UI keeps "Server" even if a bind fails.
                 self.db.set_setting("contacts.share_mode", "server")?;
                 if let Err(err) = self.carddav.start().await {
-                    tracing::warn!(error = %err, "CardDAV server failed to start");
+                    tracing::error!(error = %err, "CardDAV server failed to start");
                 }
                 if let Err(err) = self.ldap_server.start().await {
-                    tracing::warn!(error = %err, "LDAP server failed to start");
+                    tracing::error!(error = %err, "LDAP server failed to start");
                 }
             }
             ContactsShareMode::Client => {
@@ -1546,6 +1546,27 @@ impl AppState {
                     filter: "(objectClass=inetOrgPerson)".into(),
                 })?;
                 self.db.set_setting("contacts.share_mode", "client")?;
+            }
+        }
+        self.contacts_share_status()
+    }
+
+    /// Start LDAP (0.0.0.0:1389) and CardDAV (0.0.0.0:8765) when this install
+    /// is the shared-address-book hub. The mode is persisted, but listeners
+    /// live only in this process — call this on every launch and whenever the
+    /// UI reads share status.
+    pub async fn resume_directory_servers(&self) -> CoreResult<ContactsShareStatus> {
+        self.ensure_directory_credentials()?;
+        if self.contacts_share_mode()? == ContactsShareMode::Server {
+            if !self.carddav.status().running {
+                if let Err(err) = self.carddav.start().await {
+                    tracing::error!(error = %err, "CardDAV server failed to resume");
+                }
+            }
+            if !self.ldap_server.status().running {
+                if let Err(err) = self.ldap_server.start().await {
+                    tracing::error!(error = %err, "LDAP server failed to resume");
+                }
             }
         }
         self.contacts_share_status()
@@ -4288,9 +4309,83 @@ mod share_mode_tests {
             server.ldap_server.listen_url
         );
         assert!(
-            server.carddav.running || server.ldap_server.running,
-            "at least one service should run"
+            server.ldap_server.running,
+            "LDAP must listen on 0.0.0.0:1389: {:?}",
+            server.ldap_server.last_error
         );
+        assert!(
+            server.carddav.running,
+            "CardDAV must listen on 0.0.0.0:8765: {:?}",
+            server.carddav.last_error
+        );
+        assert!(
+            server.ldap_server.listen_url.contains(":1389"),
+            "advertised LDAP URL should use port 1389: {}",
+            server.ldap_server.listen_url
+        );
+        assert!(
+            !server.ldap_server.listen_url.contains("0.0.0.0"),
+            "advertised LDAP URL must be a host, got {}",
+            server.ldap_server.listen_url
+        );
+        assert_eq!(server.ldap_server.bind_dn, "cn=novamail,dc=novamail");
+        assert_eq!(server.ldap_server.base_dn, "ou=people,dc=novamail");
+        std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:1389".parse().unwrap(),
+            std::time::Duration::from_secs(2),
+        )
+        .expect("LDAP accepts connections on 127.0.0.1:1389");
+        std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8765".parse().unwrap(),
+            std::time::Duration::from_secs(2),
+        )
+        .expect("CardDAV accepts connections on 127.0.0.1:8765");
+
+        // Saved server mode must come back after the process stops the sockets.
+        let local = app
+            .set_contacts_share_mode(SetContactsShareModeRequest {
+                mode: ContactsShareMode::Local,
+                client_url: None,
+                client_bind_dn: None,
+                client_password: None,
+                client_base_dn: None,
+            })
+            .await
+            .expect("local mode");
+        assert!(!local.ldap_server.running);
+        assert!(!local.carddav.running);
+        app.db
+            .set_setting("contacts.share_mode", "server")
+            .expect("persist server mode without binding");
+        assert!(
+            !app.contacts_share_status().unwrap().ldap_server.running,
+            "persisting the mode must not bind by itself"
+        );
+        let resumed = app
+            .resume_directory_servers()
+            .await
+            .expect("resume saved server mode");
+        assert_eq!(resumed.mode, ContactsShareMode::Server);
+        assert!(
+            resumed.ldap_server.running,
+            "resume must bind LDAP: {:?}",
+            resumed.ldap_server.last_error
+        );
+        assert!(
+            resumed.carddav.running,
+            "resume must bind CardDAV: {:?}",
+            resumed.carddav.last_error
+        );
+        std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:1389".parse().unwrap(),
+            std::time::Duration::from_secs(2),
+        )
+        .expect("LDAP listens again after resume");
+        std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8765".parse().unwrap(),
+            std::time::Duration::from_secs(2),
+        )
+        .expect("CardDAV listens again after resume");
 
         let client = app
             .set_contacts_share_mode(SetContactsShareModeRequest {

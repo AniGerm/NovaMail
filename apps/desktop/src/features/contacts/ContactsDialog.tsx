@@ -61,6 +61,75 @@ const emptyAddress = (label = ""): ContactAddress => ({
 });
 
 
+function DirectoryListenStatus({
+  share,
+  busy,
+  onRestart,
+}: {
+  share: ContactsShareStatus;
+  busy: boolean;
+  onRestart: () => void;
+}) {
+  const t = useT();
+  const ldap = share.ldapServer;
+  const card = share.carddav;
+  const urls =
+    ldap.running && ldap.listenUrls && ldap.listenUrls.length > 0
+      ? ldap.listenUrls
+      : ldap.running && ldap.listenUrl
+        ? [ldap.listenUrl]
+        : [];
+  return (
+    <div
+      className="grid gap-1.5 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface-2)] p-3"
+      role="status"
+      data-ldap-running={ldap.running ? "yes" : "no"}
+      data-carddav-running={card.running ? "yes" : "no"}
+    >
+      <p
+        className={
+          ldap.running
+            ? "text-sm font-semibold text-[var(--nova-success)]"
+            : "text-sm font-semibold text-[var(--nova-danger)]"
+        }
+      >
+        {ldap.running ? t("ldapRunning") : t("ldapDown")}
+      </p>
+      {urls.map((url) => (
+        <p key={url} className="break-all font-mono text-xs">
+          {url}
+        </p>
+      ))}
+      {!ldap.running && ldap.lastError ? (
+        <p className="text-xs text-[var(--nova-danger)]">{ldap.lastError}</p>
+      ) : null}
+      <p
+        className={
+          card.running
+            ? "text-sm font-semibold text-[var(--nova-success)]"
+            : "text-sm font-semibold text-[var(--nova-danger)]"
+        }
+      >
+        {card.running ? t("cardDavUp") : t("cardDavDown")}
+        {card.running && card.addressbookUrl ? ` · ${card.addressbookUrl}` : ""}
+      </p>
+      {!card.running && card.lastError ? (
+        <p className="text-xs text-[var(--nova-danger)]">{card.lastError}</p>
+      ) : null}
+      {!ldap.running || !card.running ? (
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy}
+          onClick={onRestart}
+        >
+          {t("directoryRestart")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 const emptyDraft = (): Draft => ({
   id: null,
   givenName: "",
@@ -396,8 +465,18 @@ export function ContactsDialog({
       setShare(status);
       const ldapUp = Boolean(status.ldapServer?.running);
       const carddavUp = Boolean(status.carddav?.running);
-      if (mode === "server" && !ldapUp && !carddavUp) {
-        setError(t("shareModeServicesDown"));
+      if (mode === "server" && !ldapUp) {
+        setError(
+          status.ldapServer?.lastError
+            ? `${t("ldapDown")}: ${status.ldapServer.lastError}`
+            : t("shareModeServicesDown"),
+        );
+      } else if (mode === "server" && !carddavUp) {
+        setError(
+          status.carddav?.lastError
+            ? `${t("cardDavDown")}: ${status.carddav.lastError}`
+            : t("shareModeServicesDown"),
+        );
       }
     } catch (err) {
       setError(formatApiError(err, t("shareModeSaveFailed")));
@@ -646,21 +725,13 @@ export function ContactsDialog({
                 <p className="text-xs text-[var(--nova-ink-muted)]">
                   {t("shareModeServerHint")}
                 </p>
-                <p className="text-xs text-[var(--nova-ink-muted)]">
-                  {share.ldapServer.running && share.carddav.running
-                    ? t("cardDavRunning", {
-                        count: share.ldapServer.contactCount,
-                      })
-                    : t("cardDavPartial", {
-                        ldap: share.ldapServer.running
-                          ? t("serviceOn")
-                          : t("serviceOff"),
-                        carddav: share.carddav.running
-                          ? t("serviceOn")
-                          : t("serviceOff"),
-                        count: share.ldapServer.contactCount,
-                      })}
-                </p>
+                <DirectoryListenStatus
+                  share={share}
+                  busy={busy}
+                  onRestart={() => {
+                    void setShareMode("server");
+                  }}
+                />
                 <label className="grid gap-1 text-xs">
                   <span>{t("ldapServerUrlLabel")}</span>
                   <Input
@@ -858,6 +929,17 @@ export function ContactsDialog({
         </div>
       ) : (
         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden text-sm lg:grid-cols-[240px_minmax(0,1fr)]">
+          {share?.mode === "server" ? (
+            <div className="lg:col-span-2">
+              <DirectoryListenStatus
+                share={share}
+                busy={busy}
+                onRestart={() => {
+                  void setShareMode("server");
+                }}
+              />
+            </div>
+          ) : null}
           <aside className="flex min-h-0 flex-col gap-3 border-b border-[var(--nova-border)] pb-3 lg:border-b-0 lg:border-r lg:pr-3 lg:pb-0">
             <div className="flex items-center gap-2">
               <Input

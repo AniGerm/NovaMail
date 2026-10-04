@@ -189,6 +189,9 @@ pub struct LdapSyncResult {
 #[serde(rename_all = "camelCase")]
 pub struct CardDavServerStatus {
     pub running: bool,
+    /// Set when the last start attempt failed or the listener exited.
+    #[serde(default)]
+    pub last_error: Option<String>,
     pub listen_url: String,
     pub addressbook_url: String,
     pub contact_count: u32,
@@ -215,6 +218,9 @@ pub enum ContactsShareMode {
 #[serde(rename_all = "camelCase")]
 pub struct LdapServerStatus {
     pub running: bool,
+    /// Set when the last start attempt failed or the listener exited.
+    #[serde(default)]
+    pub last_error: Option<String>,
     /// Primary advertised URL (usually port 1389).
     pub listen_url: String,
     /// All bound URLs (may include port 389 when available).

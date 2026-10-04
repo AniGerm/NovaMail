@@ -113,6 +113,25 @@ pub fn run() {
             let app_for_ai = state.app.clone();
             let app_for_offline = state.app.clone();
             let app_for_jobs = state.app.clone();
+            let app_for_directory = state.app.clone();
+            tauri::async_runtime::spawn(async move {
+                match app_for_directory.resume_directory_servers().await {
+                    Ok(status) => {
+                        tracing::info!(
+                            mode = ?status.mode,
+                            ldap = status.ldap_server.running,
+                            ldap_url = %status.ldap_server.listen_url,
+                            carddav = status.carddav.running,
+                            ldap_error = ?status.ldap_server.last_error,
+                            carddav_error = ?status.carddav.last_error,
+                            "directory servers resumed"
+                        );
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "failed to resume directory servers");
+                    }
+                }
+            });
             let handle_jobs = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 // Immediate catch-up after restart, then every 60s.

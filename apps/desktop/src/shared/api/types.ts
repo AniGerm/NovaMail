@@ -540,6 +540,7 @@ export interface ContactsBookSettings {
 
 export interface CardDavServerStatus {
   running: boolean;
+  lastError?: string | null;
   listenUrl: string;
   addressbookUrl: string;
   contactCount: number;
@@ -551,6 +552,7 @@ export type ContactsShareMode = "local" | "server" | "client";
 
 export interface LdapServerStatus {
   running: boolean;
+  lastError?: string | null;
   listenUrl: string;
   /** All bound URLs (may include ldap://host:389 when privileged bind works). */
   listenUrls?: string[];
