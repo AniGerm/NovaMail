@@ -4,7 +4,16 @@ Modern open-source email for Ubuntu Linux.
 
 NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It aims for Thunderbird-class capability, Spark-class UX, and Outlook-class productivity — without cloud lock-in.
 
-**Status:** early / shipping. Core mail, contacts (with LAN LDAP/CardDAV hub), calendar, OpenPGP, and local AI are usable day-to-day on Ubuntu. Releases are tagged on GitHub (`v0.1.x` with `.deb` + AppImage). Test coverage is still thin relative to the codebase, and some areas (WASM plugins, full-text search depth) are scaffolds. Expect rough edges — feedback welcome.
+**Status:** early / shipping. Core mail, contacts (with LAN LDAP/CardDAV hub), calendar, OpenPGP, and local AI are usable day-to-day on Ubuntu. Releases are tagged on GitHub (`v0.1.x` with `.deb` + AppImage). Test coverage is still thin relative to the codebase. Expect rough edges — feedback welcome.
+
+| Area | Maturity |
+| --- | --- |
+| Mail (sync, compose, Quick Sort, search) | Day-to-day |
+| Address book + LAN LDAP/CardDAV hub | Day-to-day |
+| Local AI (Ollama summarize / reply / events) | Day-to-day |
+| Calendar / OpenPGP / spam / rules | Usable |
+| CalDAV write-back, offline quota, FTS depth | Early |
+| WASM plugins (`novamail-plugins`) | Scaffold (API stub, not a product surface yet) |
 
 ## Product features
 
@@ -87,7 +96,8 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Name display / sort options and share settings live under **Settings → Address book** (the address-book window keeps a small green/red LDAP status dot)
 - While creating a contact, suggestions from the address book **and** mail history fill the form (same idea as composer recipient autocomplete)
 - Share modes: **Local only**, **Server (main PC)**, **Client (workstation)**
-- **Server** mode starts an embedded hub on the LAN (NovaMail must stay running):
+- **Server** mode starts an embedded hub on the LAN (NovaMail must stay running).
+  The hub is for **trusted LANs only** (office / home). LDAP and CardDAV are cleartext (`ldap://` / `http://`) with HTTP Basic — **not TLS**. Do not expose ports 1389/389/8765 to the public internet; use a VPN for remote access.
   - **LDAP** on `0.0.0.0:1389` (and `0.0.0.0:389` when the process may bind it) — Bind DN `cn=novamail,dc=novamail`, Base DN `ou=people,dc=novamail`
   - **CardDAV** on `0.0.0.0:8765` (`http://<lan-ip>:8765/addressbooks/novamail/`, user `novamail`)
   - Listeners resume automatically on every launch when the mode is still Server
@@ -99,6 +109,7 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 
 - Runs entirely on your machine via **Ollama** (no mail cloud)
 - Summarize message; suggest reply (two variants: concise / friendly)
+- Reply / summarize / event extraction strip quoted history and leading salutations before the model sees the prompt (threaded mail, Thunderbird-style quote headers)
 - **Detect meeting times** in mail (JSON via Ollama, heuristic offline fallback) and show them as clickable links under the summary — one click creates a calendar event
 - Background insights after sync (cached summary + reply drafts + event suggestions)
 - Facts/constraints field to rewrite suggestions

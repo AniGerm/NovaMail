@@ -5,6 +5,10 @@ NovaMail PCs.
 
 ## When the listeners start
 
+The hub is for **trusted LANs only** (office / home). LDAP and CardDAV are
+cleartext (`ldap://` / `http://`) with HTTP Basic — **not TLS**. Do not expose
+ports 1389/389/8765 to the public internet; use a VPN for remote access.
+
 Open **Settings → Address book** (or the gear in the address book, which jumps
 there), then set **Operating mode → Server (main PC)**. That persists
 `contacts.share_mode=server` and binds:
