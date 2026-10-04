@@ -636,6 +636,11 @@ export const en: Translations = {
   noContactsYet: "No contacts yet",
   triageTitle: "Quick Sort",
   triageHotkeys: "Keys: K keep · D delete · V preview · Esc close",
+  triageNewBadge: "New",
+  triageOlderHintShort: "Older messages",
+  triageOlderHint:
+    "All new messages have been reviewed. Older messages follow.",
+  triageDismissHint: "Dismiss notice",
   loadingPreview: "Loading preview…",
   triageDone: "Inbox sorted. No more messages in this queue.",
   hasAttachments: "Has attachments",

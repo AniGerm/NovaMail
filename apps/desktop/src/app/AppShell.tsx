@@ -26,6 +26,7 @@ import { CalendarPanel } from "@/features/calendar/CalendarPanel";
 import { PlannedPanel } from "@/features/mail/PlannedPanel";
 import { MessageFocusDialog } from "@/features/mail/MessageFocusDialog";
 import { ReadingPane } from "@/features/mail/ReadingPane";
+import { nextIdAfterRemoval } from "@/features/mail/nextAfterDelete";
 import { Sidebar } from "@/features/mail/Sidebar";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { api, isDesktopShell } from "@/shared/api/client";
@@ -646,12 +647,66 @@ export function AppShell() {
     await refresh();
   }, [desktop, refresh, selectMessage, selectedMessageId]);
 
+  const findNextAfterDelete = useCallback(
+    async (deletedId: string): Promise<string | null> => {
+      if (inboxFilters.viewMode === "flat") {
+        return nextIdAfterRemoval(
+          messages.map((message) => message.id),
+          deletedId,
+        );
+      }
+      const threadId =
+        (messageQuery.data?.summary.id === deletedId
+          ? messageQuery.data.summary.threadId
+          : null) ??
+        messages.find((message) => message.id === deletedId)?.threadId ??
+        null;
+      if (!threadId) return null;
+      let siblingIds: string[] = [];
+      try {
+        const siblings = await api.messagesListByThread(threadId);
+        siblingIds = siblings.map((message) => message.id);
+      } catch {
+        siblingIds = [];
+      }
+      const siblingNext = nextIdAfterRemoval(siblingIds, deletedId);
+      if (siblingNext) return siblingNext;
+      const threadIndex = threads.findIndex((thread) => thread.id === threadId);
+      const neighbor = threads[threadIndex + 1] ?? threads[threadIndex - 1];
+      if (!neighbor || neighbor.id === threadId) return null;
+      try {
+        const items = await api.messagesListByThread(neighbor.id);
+        return items.find((message) => message.id !== deletedId)?.id ?? null;
+      } catch {
+        return null;
+      }
+    },
+    [inboxFilters.viewMode, messageQuery.data, messages, threads],
+  );
+
   const handleDelete = useCallback(async () => {
     if (!selectedMessageId || !desktop) return;
-    await api.messagesDelete(selectedMessageId);
-    selectMessage(null);
+    const deletedId = selectedMessageId;
+    const nextId = await findNextAfterDelete(deletedId);
+    await api.messagesDelete(deletedId);
+    selectMessage(nextId);
     await refresh();
-  }, [desktop, refresh, selectMessage, selectedMessageId]);
+  }, [
+    desktop,
+    findNextAfterDelete,
+    refresh,
+    selectMessage,
+    selectedMessageId,
+  ]);
+
+  const loadTriageMessages = useCallback(async () => {
+    const request = buildListRequest(
+      { ...inboxFilters, unreadOnly: false },
+      searchQuery,
+    );
+    const page = await api.messagesList({ ...request, limit: 500, offset: 0 });
+    return page.messages;
+  }, [inboxFilters, searchQuery]);
 
   const handleForward = useCallback(async () => {
     if (!selectedMessageId || !desktop) return;
@@ -1615,6 +1670,7 @@ export function AppShell() {
       <QuickTriage
         open={triageOpen}
         messages={messages}
+        loadMessages={loadTriageMessages}
         onClose={() => setTriageOpen(false)}
         onChanged={refresh}
       />

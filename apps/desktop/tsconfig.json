@@ -22,5 +22,6 @@
       "@novamail/hooks": ["../../packages/hooks/src/index.ts"]
     }
   },
-  "include": ["src", "../../packages/ui/src", "../../packages/hooks/src"]
+  "include": ["src", "../../packages/ui/src", "../../packages/hooks/src"],
+  "exclude": ["src/**/*.test.ts"]
 }
