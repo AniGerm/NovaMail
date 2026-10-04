@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
@@ -41,7 +42,10 @@ pub struct LdapServer {
     password: Arc<parking_lot::Mutex<String>>,
     bound_addrs: parking_lot::Mutex<Vec<String>>,
     shutdown_tx: parking_lot::Mutex<Option<watch::Sender<bool>>>,
-    running: parking_lot::Mutex<bool>,
+    running: Arc<AtomicBool>,
+    /// Prevents two startup paths from binding the same port at once.
+    starting: Arc<AtomicBool>,
+    last_error: Arc<parking_lot::Mutex<Option<String>>>,
 }
 
 impl LdapServer {
@@ -55,7 +59,9 @@ impl LdapServer {
             password: Arc::new(parking_lot::Mutex::new(String::new())),
             bound_addrs: parking_lot::Mutex::new(Vec::new()),
             shutdown_tx: parking_lot::Mutex::new(None),
-            running: parking_lot::Mutex::new(false),
+            running: Arc::new(AtomicBool::new(false)),
+            starting: Arc::new(AtomicBool::new(false)),
+            last_error: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -93,7 +99,8 @@ impl LdapServer {
             .cloned()
             .unwrap_or_else(|| "ldap://127.0.0.1:1389".into());
         LdapServerStatus {
-            running: *self.running.lock(),
+            running: self.running.load(Ordering::Acquire),
+            last_error: self.last_error.lock().clone(),
             listen_url,
             listen_urls,
             allow_anonymous: *self.allow_anonymous.lock(),
@@ -106,14 +113,30 @@ impl LdapServer {
     }
 
     pub async fn start(&self) -> ContactsResult<LdapServerStatus> {
-        if *self.running.lock() {
+        if self.running.load(Ordering::Acquire) {
+            return Ok(self.status());
+        }
+        if self
+            .starting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(self.status());
+        }
+        let result = self.start_bound().await;
+        self.starting.store(false, Ordering::Release);
+        result
+    }
+
+    async fn start_bound(&self) -> ContactsResult<LdapServerStatus> {
+        if self.running.load(Ordering::Acquire) {
             return Ok(self.status());
         }
         let allow_anon = *self.allow_anonymous.lock();
         if self.password.lock().trim().is_empty() && !allow_anon {
-            return Err(ContactsError::Ldap(
-                "LDAP password is empty; set credentials before starting".into(),
-            ));
+            let msg = "LDAP password is empty; set credentials before starting".to_string();
+            *self.last_error.lock() = Some(msg.clone());
+            return Err(ContactsError::Ldap(msg));
         }
 
         let mut candidates = self.listen_addrs.lock().clone();
@@ -132,9 +155,14 @@ impl LdapServer {
                     continue;
                 }
             };
-            match TcpListener::bind(addr).await {
+            match bind_with_retry(addr).await {
                 Ok(listener) => {
-                    bound.push(addr_s);
+                    let local = listener
+                        .local_addr()
+                        .map(|a| a.to_string())
+                        .unwrap_or(addr_s);
+                    tracing::info!(listen = %local, "LDAP listening");
+                    bound.push(local);
                     listeners.push(listener);
                 }
                 Err(e) => {
@@ -144,22 +172,32 @@ impl LdapServer {
             }
         }
         if listeners.is_empty() {
-            return Err(ContactsError::Ldap(format!(
+            let msg = format!(
                 "LDAP bind failed on all addresses: {}",
                 errors.join("; ")
-            )));
+            );
+            *self.last_error.lock() = Some(msg.clone());
+            return Err(ContactsError::Ldap(msg));
+        }
+        if !errors.is_empty() {
+            tracing::warn!(
+                skipped = %errors.join("; "),
+                "LDAP started without every requested port"
+            );
         }
 
         let (tx, rx) = watch::channel(false);
         *self.shutdown_tx.lock() = Some(tx);
         *self.bound_addrs.lock() = bound;
-        *self.running.lock() = true;
+        *self.last_error.lock() = None;
+        self.running.store(true, Ordering::Release);
 
         let store = self.store.clone();
         let username = self.username.clone();
         let password = self.password.clone();
         // Snapshot anonymous flag for this run (toggle requires restart).
         let allow_anonymous = Arc::new(parking_lot::Mutex::new(allow_anon));
+        let alive = Arc::new(AtomicUsize::new(listeners.len()));
 
         for listener in listeners {
             let store = store.clone();
@@ -167,8 +205,22 @@ impl LdapServer {
             let password = password.clone();
             let allow_anonymous = allow_anonymous.clone();
             let rx = rx.clone();
+            let running = self.running.clone();
+            let last_error = self.last_error.clone();
+            let alive = alive.clone();
             tokio::spawn(async move {
-                serve_loop(listener, store, username, password, allow_anonymous, rx).await;
+                serve_loop(
+                    listener,
+                    store,
+                    username,
+                    password,
+                    allow_anonymous,
+                    rx,
+                    running,
+                    last_error,
+                    alive,
+                )
+                .await;
             });
         }
         Ok(self.status())
@@ -178,7 +230,7 @@ impl LdapServer {
         if let Some(tx) = self.shutdown_tx.lock().take() {
             let _ = tx.send(true);
         }
-        *self.running.lock() = false;
+        self.running.store(false, Ordering::Release);
         self.bound_addrs.lock().clear();
         self.status()
     }
@@ -191,6 +243,9 @@ async fn serve_loop(
     password: Arc<parking_lot::Mutex<String>>,
     allow_anonymous: Arc<parking_lot::Mutex<bool>>,
     mut shutdown: watch::Receiver<bool>,
+    running: Arc<AtomicBool>,
+    last_error: Arc<parking_lot::Mutex<Option<String>>>,
+    alive: Arc<AtomicUsize>,
 ) {
     loop {
         tokio::select! {
@@ -216,6 +271,12 @@ async fn serve_loop(
                 }
             }
         }
+    }
+    let left = alive.fetch_sub(1, Ordering::AcqRel);
+    if left == 1 && !*shutdown.borrow() {
+        running.store(false, Ordering::Release);
+        *last_error.lock() = Some("LDAP listener exited unexpectedly".into());
+        tracing::error!("LDAP listener exited unexpectedly");
     }
 }
 
@@ -969,6 +1030,24 @@ fn search_entry_message(
         ..Default::default()
     })
     .into_structure()
+}
+
+/// Retry only when a previous listener has not dropped the socket yet.
+async fn bind_with_retry(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let mut last = None;
+    for attempt in 0..8 {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && attempt < 7 => {
+                last = Some(err);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::AddrInUse, "bind failed")
+    }))
 }
 
 fn advertise_host_port(listen_addr: &str) -> String {

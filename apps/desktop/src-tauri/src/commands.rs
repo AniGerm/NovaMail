@@ -530,10 +530,11 @@ pub fn carddav_status(state: State<'_, DesktopState>) -> Result<CardDavServerSta
 }
 
 #[tauri::command]
-pub fn contacts_share_status(
+pub async fn contacts_share_status(
     state: State<'_, DesktopState>,
 ) -> Result<ContactsShareStatus, AppError> {
-    state.app.contacts_share_status().map_err(map_err)
+    let app = state.app.clone();
+    app.resume_directory_servers().await.map_err(map_err)
 }
 
 #[tauri::command(rename_all = "camelCase")]

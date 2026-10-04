@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -35,10 +36,13 @@ pub trait ContactStore: Send + Sync {
 pub struct CardDavServer {
     store: Arc<dyn ContactStore>,
     listen_addr: String,
+    bound_addr: parking_lot::Mutex<Option<String>>,
     username: parking_lot::Mutex<String>,
     password: parking_lot::Mutex<String>,
     shutdown_tx: parking_lot::Mutex<Option<watch::Sender<bool>>>,
-    running: parking_lot::Mutex<bool>,
+    running: Arc<AtomicBool>,
+    starting: Arc<AtomicBool>,
+    last_error: Arc<parking_lot::Mutex<Option<String>>>,
 }
 
 impl CardDavServer {
@@ -46,10 +50,13 @@ impl CardDavServer {
         Self {
             store,
             listen_addr: DEFAULT_ADDR.into(),
+            bound_addr: parking_lot::Mutex::new(None),
             username: parking_lot::Mutex::new(DEFAULT_USER.into()),
             password: parking_lot::Mutex::new(String::new()),
             shutdown_tx: parking_lot::Mutex::new(None),
-            running: parking_lot::Mutex::new(false),
+            running: Arc::new(AtomicBool::new(false)),
+            starting: Arc::new(AtomicBool::new(false)),
+            last_error: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -66,10 +73,16 @@ impl CardDavServer {
 
     pub fn status(&self) -> CardDavServerStatus {
         let contacts = self.store.list().map(|c| c.len() as u32).unwrap_or(0);
-        let running = *self.running.lock();
-        let advertise = advertise_host_port(&self.listen_addr);
+        let running = self.running.load(Ordering::Acquire);
+        let listen = self
+            .bound_addr
+            .lock()
+            .clone()
+            .unwrap_or_else(|| self.listen_addr.clone());
+        let advertise = advertise_host_port(&listen);
         CardDavServerStatus {
             running,
+            last_error: self.last_error.lock().clone(),
             listen_url: format!("http://{advertise}"),
             addressbook_url: format!("http://{advertise}{BOOK_PATH}"),
             contact_count: contacts,
@@ -79,32 +92,66 @@ impl CardDavServer {
     }
 
     pub async fn start(&self) -> ContactsResult<CardDavServerStatus> {
-        if *self.running.lock() {
+        if self.running.load(Ordering::Acquire) {
+            return Ok(self.status());
+        }
+        if self
+            .starting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(self.status());
+        }
+        let result = self.start_bound().await;
+        self.starting.store(false, Ordering::Release);
+        result
+    }
+
+    async fn start_bound(&self) -> ContactsResult<CardDavServerStatus> {
+        if self.running.load(Ordering::Acquire) {
             return Ok(self.status());
         }
         if self.password.lock().trim().is_empty() {
-            return Err(ContactsError::CardDav(
-                "CardDAV password is empty; set credentials before starting".into(),
-            ));
+            let msg = "CardDAV password is empty; set credentials before starting".to_string();
+            *self.last_error.lock() = Some(msg.clone());
+            return Err(ContactsError::CardDav(msg));
         }
 
-        let addr: SocketAddr = self
-            .listen_addr
-            .parse()
-            .map_err(|e| ContactsError::CardDav(format!("invalid listen addr: {e}")))?;
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|e| ContactsError::CardDav(format!("bind failed: {e}")))?;
+        let addr: SocketAddr = match self.listen_addr.parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                let msg = format!("invalid listen addr: {e}");
+                *self.last_error.lock() = Some(msg.clone());
+                return Err(ContactsError::CardDav(msg));
+            }
+        };
+        let listener = match bind_with_retry(addr).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                let msg = format!("bind failed: {e}");
+                *self.last_error.lock() = Some(msg.clone());
+                return Err(ContactsError::CardDav(msg));
+            }
+        };
+        let local = listener
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| self.listen_addr.clone());
+        tracing::info!(listen = %local, "CardDAV listening");
 
         let (tx, rx) = watch::channel(false);
         *self.shutdown_tx.lock() = Some(tx);
-        *self.running.lock() = true;
+        *self.bound_addr.lock() = Some(local);
+        *self.last_error.lock() = None;
+        self.running.store(true, Ordering::Release);
 
         let store = self.store.clone();
         let username = self.username.lock().clone();
         let password = self.password.lock().clone();
+        let running = self.running.clone();
+        let last_error = self.last_error.clone();
         tokio::spawn(async move {
-            serve_loop(listener, store, username, password, rx).await;
+            serve_loop(listener, store, username, password, rx, running, last_error).await;
         });
 
         Ok(self.status())
@@ -114,7 +161,9 @@ impl CardDavServer {
         if let Some(tx) = self.shutdown_tx.lock().take() {
             let _ = tx.send(true);
         }
-        *self.running.lock() = false;
+        self.running.store(false, Ordering::Release);
+        self.bound_addr.lock().take();
+        *self.last_error.lock() = None;
         self.status()
     }
 }
@@ -125,6 +174,8 @@ async fn serve_loop(
     username: String,
     password: String,
     mut shutdown: watch::Receiver<bool>,
+    running: Arc<AtomicBool>,
+    last_error: Arc<parking_lot::Mutex<Option<String>>>,
 ) {
     let auth = Arc::new((username, password));
     loop {
@@ -157,6 +208,11 @@ async fn serve_loop(
                 }
             }
         }
+    }
+    if !*shutdown.borrow() {
+        running.store(false, Ordering::Release);
+        *last_error.lock() = Some("CardDAV listener exited unexpectedly".into());
+        tracing::error!("CardDAV listener exited unexpectedly");
     }
 }
 
@@ -410,6 +466,23 @@ fn authorized(req: &Request<Incoming>, username: &str, password: &str) -> bool {
         return false;
     };
     user == username && pass == password
+}
+
+async fn bind_with_retry(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let mut last = None;
+    for attempt in 0..8 {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && attempt < 7 => {
+                last = Some(err);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::AddrInUse, "bind failed")
+    }))
 }
 
 /// Host:port shown to users for CardDAV clients (LAN IP when bound to 0.0.0.0).
