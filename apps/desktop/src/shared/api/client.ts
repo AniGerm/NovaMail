@@ -648,9 +648,10 @@ export const api = {
 
 export function isDesktopShell(): boolean {
   if (isTauri()) return true;
-  // Dev-only layout preview. Production builds drop this branch.
+  // Dev-only layout preview. `tsc` does not load Vite's ImportMeta env types.
+  const dev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
   return (
-    import.meta.env.DEV &&
+    dev &&
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).has("preview-shell")
   );
