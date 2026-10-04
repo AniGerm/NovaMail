@@ -130,6 +130,85 @@ function DirectoryListenStatus({
   );
 }
 
+function DirectoryStatusDot({
+  share,
+  busy,
+  onRestart,
+}: {
+  share: ContactsShareStatus;
+  busy: boolean;
+  onRestart: () => void;
+}) {
+  const t = useT();
+  const ldap = share.ldapServer;
+  const card = share.carddav;
+  const urls =
+    ldap.running && ldap.listenUrls && ldap.listenUrls.length > 0
+      ? ldap.listenUrls
+      : ldap.running && ldap.listenUrl
+        ? [ldap.listenUrl]
+        : [];
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full"
+        aria-label={ldap.running ? t("ldapRunning") : t("ldapDown")}
+      >
+        <span
+          className={
+            ldap.running
+              ? "h-2.5 w-2.5 rounded-full bg-[var(--nova-success)] ring-2 ring-transparent transition group-hover:ring-[var(--nova-success)]"
+              : "h-2.5 w-2.5 rounded-full bg-[var(--nova-danger)] ring-2 ring-transparent transition group-hover:ring-[var(--nova-danger)]"
+          }
+        />
+      </button>
+      <div className="invisible absolute right-0 top-full z-30 w-72 pt-1 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+        <div
+          className="grid gap-1 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-2 text-left text-xs shadow-[var(--nova-shadow)]"
+          role="status"
+        >
+          <p
+            className={
+              ldap.running
+                ? "font-medium text-[var(--nova-success)]"
+                : "font-medium text-[var(--nova-danger)]"
+            }
+          >
+            {ldap.running ? t("ldapRunning") : t("ldapDown")}
+          </p>
+          {urls.map((url) => (
+            <p key={url} className="break-all font-mono">
+              {url}
+            </p>
+          ))}
+          {!ldap.running && ldap.lastError ? (
+            <p className="text-[var(--nova-danger)]">{ldap.lastError}</p>
+          ) : null}
+          <p
+            className={
+              card.running
+                ? "text-[var(--nova-success)]"
+                : "text-[var(--nova-danger)]"
+            }
+          >
+            {card.running ? t("cardDavUp") : t("cardDavDown")}
+            {card.running && card.addressbookUrl ? ` · ${card.addressbookUrl}` : ""}
+          </p>
+          {!card.running && card.lastError ? (
+            <p className="text-[var(--nova-danger)]">{card.lastError}</p>
+          ) : null}
+          {!ldap.running || !card.running ? (
+            <Button type="button" size="sm" disabled={busy} onClick={onRestart}>
+              {t("directoryRestart")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </span>
+  );
+}
+
 const emptyDraft = (): Draft => ({
   id: null,
   givenName: "",
@@ -595,16 +674,27 @@ export function ContactsDialog({
       className="max-w-5xl"
       headerActions={
         panel === "main" ? (
-          <IconButton
-            label={t("contactsSettings")}
-            onClick={() => {
-              setPanel("settings");
-              setStatusInfo(null);
-              setError(null);
-            }}
-          >
-            <Settings2 size={18} />
-          </IconButton>
+          <>
+            {share?.mode === "server" ? (
+              <DirectoryStatusDot
+                share={share}
+                busy={busy}
+                onRestart={() => {
+                  void setShareMode("server");
+                }}
+              />
+            ) : null}
+            <IconButton
+              label={t("contactsSettings")}
+              onClick={() => {
+                setPanel("settings");
+                setStatusInfo(null);
+                setError(null);
+              }}
+            >
+              <Settings2 size={18} />
+            </IconButton>
+          </>
         ) : (
           <IconButton
             label={t("backToContacts")}
@@ -929,17 +1019,6 @@ export function ContactsDialog({
         </div>
       ) : (
         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden text-sm lg:grid-cols-[240px_minmax(0,1fr)]">
-          {share?.mode === "server" ? (
-            <div className="lg:col-span-2">
-              <DirectoryListenStatus
-                share={share}
-                busy={busy}
-                onRestart={() => {
-                  void setShareMode("server");
-                }}
-              />
-            </div>
-          ) : null}
           <aside className="flex min-h-0 flex-col gap-3 border-b border-[var(--nova-border)] pb-3 lg:border-b-0 lg:border-r lg:pr-3 lg:pb-0">
             <div className="flex items-center gap-2">
               <Input

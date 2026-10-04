@@ -39,17 +39,14 @@ export function MessageFocusDialog({
 }: MessageFocusDialogProps) {
   const t = useT();
   const title = message?.summary.subject?.trim() || t("noSubject");
-  const description = message
-    ? `${message.summary.from.name?.trim() || message.summary.from.email}`
-    : undefined;
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title={title}
-      description={description}
-      className="h-full w-full max-w-none p-4 sm:p-5"
+      dense
+      className="h-full w-full max-w-none p-3"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ReadingPane
