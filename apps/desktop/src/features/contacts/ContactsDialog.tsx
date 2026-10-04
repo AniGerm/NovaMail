@@ -1304,7 +1304,7 @@ export function ContactsDialog({
 
       {pendingDelete ? (
         <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-[rgba(14,17,20,0.45)] p-4 backdrop-blur-sm"
+          className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-[rgba(14,17,20,0.62)] p-4"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="contact-delete-title"

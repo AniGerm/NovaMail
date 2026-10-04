@@ -647,5 +647,11 @@ export const api = {
 };
 
 export function isDesktopShell(): boolean {
-  return isTauri();
+  if (isTauri()) return true;
+  // Dev-only layout preview. Production builds drop this branch.
+  return (
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("preview-shell")
+  );
 }

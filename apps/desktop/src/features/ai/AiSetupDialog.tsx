@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button, Select } from "@novamail/ui";
+import { Button, Overlay, Select } from "@novamail/ui";
 
 import { api, isDesktopShell } from "@/shared/api/client";
 import type { AiRuntimeStatus, AiSettings, AppError } from "@/shared/api/types";
@@ -170,13 +170,13 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
   );
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(14,17,20,0.45)] p-4 backdrop-blur-sm"
+    <Overlay
+      className="z-[60]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ai-setup-title"
     >
-      <div className="nova-fade-in w-full max-w-lg rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]">
+      <div className="nova-fade-in max-h-full w-full max-w-lg overflow-y-auto rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]">
         <h2
           id="ai-setup-title"
           className="font-[family-name:var(--nova-font-display)] text-2xl"
@@ -364,6 +364,6 @@ export function AiSetupDialog({ open, onCompleted }: AiSetupDialogProps) {
           </div>
         ) : null}
       </div>
-    </div>
+    </Overlay>
   );
 }

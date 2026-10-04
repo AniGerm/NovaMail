@@ -1,5 +1,6 @@
 import type { PropsWithChildren, ReactNode } from "react";
 import { cn } from "./utils";
+import { Overlay } from "./Overlay";
 
 export function Dialog({
   open,
@@ -19,15 +20,14 @@ export function Dialog({
 }>) {
   if (!open) return null;
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(14,17,20,0.45)] p-4 backdrop-blur-sm"
+    <Overlay
       role="dialog"
       aria-modal="true"
       aria-labelledby="nova-dialog-title"
     >
       <div
         className={cn(
-          "relative flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
+          "relative flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]",
           className,
         )}
       >
@@ -58,7 +58,7 @@ export function Dialog({
           {children}
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

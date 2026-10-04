@@ -49,7 +49,7 @@ export function MessageFocusDialog({
       onClose={onClose}
       title={title}
       description={description}
-      className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none p-4 sm:p-5"
+      className="h-full w-full max-w-none p-4 sm:p-5"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ReadingPane

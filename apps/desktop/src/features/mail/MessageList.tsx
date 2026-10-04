@@ -291,9 +291,9 @@ export function MessageList({
   return (
     <section
       aria-label={t("messageList")}
-      className="flex h-full min-w-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_88%,transparent)]"
     >
-      <header className="space-y-3 border-b border-[var(--nova-border)] px-4 py-3">
+      <header className="shrink-0 space-y-3 border-b border-[var(--nova-border)] px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-sm font-semibold tracking-wide text-[var(--nova-ink)]">

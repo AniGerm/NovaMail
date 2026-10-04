@@ -3,6 +3,8 @@ export { Button } from "./Button";
 export { CommandPalette } from "./CommandPalette";
 export type { CommandItem } from "./CommandPalette";
 export { Dialog, DialogActions } from "./Dialog";
+export { Overlay } from "./Overlay";
+export { installViewportLock, repairViewport } from "./viewportLock";
 export { EmptyState } from "./EmptyState";
 export { IconButton } from "./IconButton";
 export { Input } from "./Input";

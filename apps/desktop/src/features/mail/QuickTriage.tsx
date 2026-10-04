@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Eye, EyeOff, Inbox, Paperclip, Sparkles, Trash2, X } from "lucide-react";
 import { useKeyboardShortcuts } from "@novamail/hooks";
-import { Button, IconButton } from "@novamail/ui";
+import { Button, IconButton, Overlay } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import type { AppError, MessageDetailDto, MessageSummaryDto } from "@/shared/api/types";
@@ -194,13 +194,13 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
   const shown = Math.min(index + (done ? 0 : 1), queue.length);
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[color-mix(in_srgb,var(--nova-ink)_55%,transparent)] p-4 backdrop-blur-md"
+    <Overlay
+      className="z-[60]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="triage-title"
     >
-      <div className="nova-fade-in flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--nova-accent-soft)_55%,var(--nova-surface)),var(--nova-surface)_38%)] shadow-[var(--nova-shadow)]">
+      <div className="nova-fade-in flex max-h-full min-h-0 w-full max-w-3xl flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--nova-accent-soft)_55%,var(--nova-surface)),var(--nova-surface)_38%)] shadow-[var(--nova-shadow)]">
         <div
           className="h-1.5 w-full bg-[var(--nova-surface-2)]"
           role="progressbar"
@@ -291,7 +291,7 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
                 </div>
 
                 {previewOpen ? (
-                  <div className="mt-4 max-h-[36vh] overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/30 bg-[var(--nova-accent-soft)]/35 px-4 py-4">
+                  <div className="mt-4 max-h-64 overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/30 bg-[var(--nova-accent-soft)]/35 px-4 py-4">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
                       {t("preview")}
                     </p>
@@ -371,6 +371,6 @@ export function QuickTriage({ open, messages, onClose, onChanged }: QuickTriageP
           </footer>
         )}
       </div>
-    </div>
+    </Overlay>
   );
 }

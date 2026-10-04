@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Paperclip } from "lucide-react";
-import { Button, Input, Select } from "@novamail/ui";
+import { Button, Input, Overlay, Select } from "@novamail/ui";
 
 import { RecipientField } from "@/features/composer/RecipientField";
 import {
@@ -325,15 +325,14 @@ export function Composer({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(14,17,20,0.35)] p-4 backdrop-blur-sm sm:items-center"
+    <Overlay
       role="dialog"
       aria-modal="true"
       aria-labelledby="composer-title"
     >
       <form
         onSubmit={handleSend}
-        className="nova-fade-in flex max-h-[90vh] w-full max-w-3xl flex-col rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]"
+        className="nova-fade-in flex max-h-full min-h-0 w-full max-w-3xl flex-col overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]"
       >
         <header className="flex items-center justify-between border-b border-[var(--nova-border)] px-5 py-4">
           <h2
@@ -347,7 +346,7 @@ export function Composer({
           </Button>
         </header>
 
-        <div className="grid gap-3 overflow-y-auto px-5 py-4">
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-5 py-4">
           <label className="grid gap-1 text-sm">
             <span>{t("from")}</span>
             <Select
@@ -501,7 +500,7 @@ export function Composer({
           ) : null}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
+        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--nova-border)] px-5 py-4">
           <label className="mr-auto flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -573,6 +572,6 @@ export function Composer({
           </Button>
         </footer>
       </form>
-    </div>
+    </Overlay>
   );
 }

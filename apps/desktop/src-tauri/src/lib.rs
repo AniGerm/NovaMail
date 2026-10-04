@@ -29,6 +29,14 @@ struct TrayBaseIcon(Mutex<Option<Image<'static>>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before GTK/WebKit start. The DMA-BUF renderer paints only part of the
+    // webview (often about half) or leaves it black after a dialog layer is
+    // created and destroyed. The view stays black until the process restarts.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     // Localize WebKit/GTK spellcheck context menus (Learn / Ignore / …).
     shell_prefs::apply_process_locale();
 
