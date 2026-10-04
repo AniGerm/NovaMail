@@ -5,17 +5,21 @@ NovaMail PCs.
 
 ## When the listeners start
 
-Open the address book, then the gear menu, **Betriebsmodus → Server (Hauptrechner)**.
-That persists `contacts.share_mode=server` and binds:
+Open **Settings → Address book** (or the gear in the address book, which jumps
+there), then set **Operating mode → Server (main PC)**. That persists
+`contacts.share_mode=server` and binds:
 
 - LDAP on `0.0.0.0:1389` (and `0.0.0.0:389` when the process may use that port)
 - CardDAV on `0.0.0.0:8765`
 
 The mode is stored in the database. Listeners exist only while this process is
-running, so NovaMail binds them again on every launch and whenever the address
-book reads share status. The address book shows **LDAP läuft** plus the listen
-URL (`ldap://<lan-ip>:1389`) only while the socket is actually open. If the bind
-fails, the same panel shows **LDAP läuft nicht**, the error, and **Dienste neu starten**.
+running, so NovaMail binds them again on every launch and whenever share status
+is read. The address book shows a small green/red status dot; the Settings tab
+shows **LDAP is running** plus the listen URL (`ldap://<lan-ip>:1389`) while the
+socket is open, or the bind error and **Restart services** if it is not.
+
+Authenticated LDAP/CardDAV clients (the password shown in Settings) can add,
+change, and delete contacts. Anonymous LDAP, when enabled, stays read-only.
 
 ## LDAP (default)
 

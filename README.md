@@ -4,7 +4,7 @@ Modern open-source email for Ubuntu Linux.
 
 NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, **React**, and **SQLite**. It aims for Thunderbird-class capability, Spark-class UX, and Outlook-class productivity — without cloud lock-in.
 
-**Status:** early / MVP. Core mail, contacts, calendar, OpenPGP, and local AI are usable day-to-day; test coverage is still thin relative to the codebase, and some areas (WASM plugins, full-text search depth) are scaffolds. Expect rough edges — feedback welcome.
+**Status:** early / shipping. Core mail, contacts (with LAN LDAP/CardDAV hub), calendar, OpenPGP, and local AI are usable day-to-day on Ubuntu. Releases are tagged on GitHub (`v0.1.x` with `.deb` + AppImage). Test coverage is still thin relative to the codebase, and some areas (WASM plugins, full-text search depth) are scaffolds. Expect rough edges — feedback welcome.
 
 ## Product features
 
@@ -14,10 +14,11 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Provider presets: **Gmail**, **Microsoft 365**, **Yahoo**, **iCloud**, **Proton Bridge**, **generic IMAP/SMTP**
 - Password auth via OS keyring (Secret Service); iCloud app-specific password hint
 - OAuth2 browser sign-in (localhost callback, token exchange, automatic refresh)
-- Background sync scheduler (≈ every 5 minutes) + manual sync
+- Background IMAP sync (short poll cycle) + manual sync
 - IMAP flag / archive / delete / move sync to the server
 - Drafts synced to the IMAP Drafts folder
 - POP3 connectivity test (settings)
+- Close-to-tray, optional autostart, unread tray badge
 
 ### Inbox & reading
 
@@ -26,7 +27,10 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Filters: unread, starred, attachments, account, mailbox
 - Sort by date, subject, from, attachments (asc/desc)
 - Virtualized message list for large mailboxes
+- Fixed window shell (main layout does not page-scroll; dialogs stay window-filling)
 - Reading pane with HTML sanitization (safe rendering)
+- After delete, the next message loads in the preview (or the previous at the end of the list)
+- Double-click / fullscreen focus view with a slim header (subject + one control row)
 - Favorites (star), archive, delete, **snooze**
 - Dedicated **Drafts**, **Spam**, **Offline**, **Planned**, and **Calendar** views in the sidebar
 - **Snooze**: hide a message until later today / tomorrow morning / next Monday; it returns via a local job tick
@@ -41,7 +45,7 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 - Attach files when sending; open downloaded attachments locally
 - Signatures (per account / default)
 - Recipient autocomplete from address book **and** mail history
-- Add a recipient to contacts from the composer
+- Add a recipient to contacts from the composer (prefill)
 
 ### Search & productivity
 
@@ -52,7 +56,7 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
   - Filters: unread / starred / clear; jump to any account
   - People: compose-to from address book + recent recipients
 - Keyboard shortcuts: `c` compose, `r` reply, `f` forward, `e` archive, `#` delete, `h` snooze later today, `t` Quick Sort, `j`/`k` navigate, `/` search, and more
-- **Quick Sort** triage: Keep / Delete / Preview (hotkeys)
+- **Quick Sort** triage: unread first (shown as new), then the rest of the mailbox; non-blocking hint when older mail follows; Keep / Delete / Preview (hotkeys `B` / `L` / `V`)
 - Labels (create, assign, manage — also from the palette)
 - Mail rules engine: predicates (from / to / subject / body / always) and actions (read/unread, star, label, move, spam, delete)
 - Rules run automatically after sync
@@ -80,12 +84,16 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 ### Address book & sharing
 
 - Full local address book (name, emails, phones, fax, addresses, photo, notes, custom fields)
-- Name display order and sort options
-- Embedded **CardDAV** server for phones / MFPs (**LAN / trusted network only**, HTTP Basic auth — not for the public internet)
-- Embedded **LDAP** hub for office sharing on the same trusted network
+- Name display / sort options and share settings live under **Settings → Address book** (the address-book window keeps a small green/red LDAP status dot)
+- While creating a contact, suggestions from the address book **and** mail history fill the form (same idea as composer recipient autocomplete)
 - Share modes: **Local only**, **Server (main PC)**, **Client (workstation)**
-- Client sync from the hub; LDAP search / import
-- Fuzzy contact search
+- **Server** mode starts an embedded hub on the LAN (NovaMail must stay running):
+  - **LDAP** on `0.0.0.0:1389` (and `0.0.0.0:389` when the process may bind it) — Bind DN `cn=novamail,dc=novamail`, Base DN `ou=people,dc=novamail`
+  - **CardDAV** on `0.0.0.0:8765` (`http://<lan-ip>:8765/addressbooks/novamail/`, user `novamail`)
+  - Listeners resume automatically on every launch when the mode is still Server
+  - Authenticated clients (password from Settings) can **add, change, and delete** contacts; anonymous LDAP stays read-only when enabled
+- Client sync from the hub; optional LDAP import of an external directory
+- Details for Ricoh / MFP: [`docs/ldap-mfp.md`](docs/ldap-mfp.md)
 
 ### Local AI (optional)
 
@@ -157,9 +165,9 @@ NovaMail is a **local-first** desktop client built with **Tauri 2**, **Rust**, *
 
 ![Address book contact editor](docs/screenshots/contacts-carddav.png)
 
-![Address book settings (CardDAV Basic auth, LDAP)](docs/screenshots/contacts-settings.png)
+![Address book settings (share mode, CardDAV, LDAP)](docs/screenshots/contacts-settings.png)
 
-More captures: [`docs/screenshots/`](docs/screenshots/).
+More captures: [`docs/screenshots/`](docs/screenshots/). (Settings for the address book now live on the **Address book** tab in the main Settings dialog; the address-book window itself focuses on contacts plus the LDAP status dot.)
 
 ## Quick start
 
@@ -172,7 +180,7 @@ More captures: [`docs/screenshots/`](docs/screenshots/).
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
-  libayatana-appindicator3-dev libssl-dev
+  libayatana-appindicator3-dev libssl-dev pkg-config libdbus-1-dev nettle-dev
 ```
 
 ### Install & run
@@ -180,20 +188,22 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
 ```bash
 pnpm install
 cargo test --workspace
+pnpm typecheck
 pnpm dev
 ```
 
 `pnpm dev` launches the Tauri shell with Vite HMR on port `1420`.
 
-### Ubuntu `.deb` release
+### Ubuntu `.deb` / AppImage release
 
-Push a version tag matching `package.json` / `Cargo.toml` / `tauri.conf.json` (e.g. `v0.1.1`). GitHub Actions builds `.deb` + AppImage and publishes a [GitHub Release](https://github.com/AniGerm/NovaMail/releases).
+Push a version tag matching `package.json` / `Cargo.toml` / `tauri.conf.json` (e.g. `v0.1.26`). GitHub Actions builds `.deb` + AppImage and publishes a [GitHub Release](https://github.com/AniGerm/NovaMail/releases).
 
 ```bash
-sudo apt install ./novamail_*.deb
+sudo apt install ./NovaMail_*_amd64.deb
+# or run the AppImage from the same release
 ```
 
-In **Settings → Updates**, NovaMail checks GitHub for newer releases and can download + install the `.deb` with a password prompt (same flow as Fax Inbox).
+In **Settings → Updates**, NovaMail checks GitHub for newer releases and can download + install the `.deb` with a password prompt.
 
 ### Frontend-only Vite (no mail engine)
 
@@ -234,6 +244,7 @@ See [`.env.example`](.env.example).
 - [Engineering standards](docs/ENGINEERING.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
+- [LDAP / CardDAV hub (MFP, LAN clients)](docs/ldap-mfp.md)
 - [ADR 0001 Architecture](docs/adr/0001-architecture.md)
 - [ADR 0002 Security](docs/adr/0002-security.md)
 - [ADR 0003 No mock mail data](docs/adr/0003-no-mock-mail-data.md)
