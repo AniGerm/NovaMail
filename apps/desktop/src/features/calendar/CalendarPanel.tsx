@@ -461,7 +461,7 @@ export function CalendarPanel({ onAttentionChange }: CalendarPanelProps = {}) {
       : "px-3 py-1.5 text-sm text-[var(--nova-ink-muted)] hover:text-[var(--nova-ink)]";
 
   return (
-    <section className="relative flex h-full flex-col overflow-hidden">
+    <section className="relative flex h-full min-h-0 flex-col overflow-hidden">
       {/* Hero header — period name is the brand signal, not a second "Kalender" */}
       <header className="nova-fade-in border-b border-[var(--nova-border)] px-6 pb-4 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-4">

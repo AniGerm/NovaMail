@@ -240,7 +240,7 @@ export function TimedEventGrid({
   return (
     <div
       ref={gridRef}
-      className="relative max-h-[min(70vh,900px)] overflow-y-auto"
+      className="relative max-h-[min(70dvh,900px)] overflow-y-auto"
       onPointerMove={onPointerMove}
       onPointerUp={() => void finishDrag()}
       onPointerCancel={() => {

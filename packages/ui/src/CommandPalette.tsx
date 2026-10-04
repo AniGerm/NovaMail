@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "./utils";
 import { Input } from "./Input";
+import { Overlay } from "./Overlay";
 
 export type CommandItem = {
   id: string;
@@ -100,8 +101,8 @@ export function CommandPalette({
   let lastGroup: string | undefined;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(14,17,20,0.35)] p-6 pt-[12vh] backdrop-blur-sm"
+    <Overlay
+      align="start"
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
@@ -109,7 +110,7 @@ export function CommandPalette({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="nova-fade-in w-full max-w-xl overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]">
+      <div className="nova-fade-in max-h-full w-full max-w-xl overflow-hidden rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] shadow-[var(--nova-shadow)]">
         <div className="border-b border-[var(--nova-border)] p-3">
           <Input
             autoFocus
@@ -166,6 +167,6 @@ export function CommandPalette({
           )}
         </ul>
       </div>
-    </div>
+    </Overlay>
   );
 }

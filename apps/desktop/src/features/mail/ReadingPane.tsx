@@ -510,7 +510,7 @@ export function ReadingPane({
   return (
     <article
       aria-label={t("readingPane")}
-      className="nova-fade-in flex h-full min-w-0 flex-col"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       onPointerDownCapture={() => notePreviewEngaged()}
       onDoubleClick={(event) => {
         // Ignore double-clicks on interactive controls (buttons, links, inputs).
@@ -532,7 +532,7 @@ export function ReadingPane({
         }
       }}
     >
-      <header className="border-b border-[var(--nova-border)] px-8 py-5">
+      <header className="shrink-0 border-b border-[var(--nova-border)] px-8 py-5">
         <div className="mb-3 flex items-start justify-between gap-4">
           {focusMode ? (
             <div className="min-w-0 flex-1" />

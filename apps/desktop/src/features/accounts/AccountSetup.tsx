@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button, Input, Select } from "@novamail/ui";
+import { Button, Input, Overlay, Select } from "@novamail/ui";
 
 import { api } from "@/shared/api/client";
 import { addAccountPasswordSchema } from "@/shared/api/schemas";
@@ -154,15 +154,14 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(14,17,20,0.45)] p-4 backdrop-blur-sm"
+    <Overlay
       role="dialog"
       aria-modal="true"
       aria-labelledby="account-setup-title"
     >
       <form
         onSubmit={handleSubmit}
-        className="nova-fade-in w-full max-w-xl rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]"
+        className="nova-fade-in max-h-full w-full max-w-xl overflow-y-auto rounded-[var(--nova-radius-lg)] border border-[var(--nova-border)] bg-[var(--nova-surface)] p-6 shadow-[var(--nova-shadow)]"
       >
         <h2
           id="account-setup-title"
@@ -322,6 +321,6 @@ export function AccountSetup({ open, onClose, onCreated }: AccountSetupProps) {
           )}
         </div>
       </form>
-    </div>
+    </Overlay>
   );
 }

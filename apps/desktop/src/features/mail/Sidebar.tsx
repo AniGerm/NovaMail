@@ -194,10 +194,10 @@ export function Sidebar({
   return (
     <aside
       aria-label={t("navigation")}
-      className="nova-slide-in flex h-full shrink-0 flex-col border-r border-[var(--nova-border)] bg-[color-mix(in_srgb,var(--nova-surface)_70%,transparent)] backdrop-blur-[var(--nova-blur)]"
+      className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-[var(--nova-border)] bg-[var(--nova-surface)]"
       style={{ width: width ?? 240 }}
     >
-      <div className="px-4 pb-2 pt-5">
+      <div className="shrink-0 px-4 pb-2 pt-5">
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <img
@@ -224,7 +224,7 @@ export function Sidebar({
         </Button>
       </div>
 
-      <nav className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2">
+      <nav className="mt-4 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2">
         <button
           type="button"
           onClick={onSelectUnified}
@@ -424,7 +424,7 @@ export function Sidebar({
         </div>
       </nav>
 
-      <div className="space-y-2 border-t border-[var(--nova-border)] p-3">
+      <div className="shrink-0 space-y-2 border-t border-[var(--nova-border)] p-3">
         {syncStatus ? (
           <p className="px-1 text-xs text-[var(--nova-ink-muted)]" role="status">
             {syncStatus}

@@ -1221,13 +1221,14 @@ export function AppShell() {
 
   return (
     <div
-      className="flex h-full flex-col"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden"
+      data-app-shell=""
       data-density={density}
     >
       <VisuallyHidden>
         <h1>{t("unifiedInbox")}</h1>
       </VisuallyHidden>
-      <div className="flex items-center gap-3 border-b border-[var(--nova-border)] px-4 py-3">
+      <div className="flex shrink-0 items-center gap-3 border-b border-[var(--nova-border)] px-4 py-3">
         <label className="sr-only" htmlFor="global-search">
           {t("searchPlaceholder")}
         </label>
@@ -1247,7 +1248,7 @@ export function AppShell() {
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           accounts={accounts}
           mailboxes={mailboxes}
@@ -1291,7 +1292,7 @@ export function AppShell() {
         />
 
         {calendarOpen ? (
-          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+          <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
             <CalendarPanel
               onAttentionChange={(count) => {
                 setCalendarAttention(count);
@@ -1299,7 +1300,7 @@ export function AppShell() {
             />
           </div>
         ) : plannedOpen ? (
-          <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+          <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
             <PlannedPanel
               onOpenMessage={(id) => {
                 setPlannedOpen(false);
@@ -1316,7 +1317,7 @@ export function AppShell() {
             />
           </div>
         ) : accounts.length === 0 ? (
-          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+          <div className="flex h-full min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
             <EmptyState
               className="w-full"
               title={t("welcomeTitle")}
@@ -1334,7 +1335,10 @@ export function AppShell() {
           </div>
         ) : (
           <>
-            <div className="min-w-0 shrink-0" style={{ width: listWidth }}>
+            <div
+              className="h-full min-h-0 min-w-0 shrink-0 overflow-hidden"
+              style={{ width: listWidth }}
+            >
               <MessageList
                 messages={messages}
                 threads={threads}
@@ -1369,7 +1373,7 @@ export function AppShell() {
               onChange={setListWidth}
               label={t("resizeMessageList")}
             />
-            <div className="min-w-0 flex-1 bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
+            <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[color-mix(in_srgb,var(--nova-surface)_92%,transparent)]">
               <ReadingPane
                 message={messageQuery.data}
                 aiEnabled={aiReplyEnabled}

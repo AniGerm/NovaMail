@@ -504,7 +504,7 @@ export function SettingsDialog({
       onClose={onClose}
       title={t("settingsTitle")}
       description={t("settingsDescription")}
-      className="h-[min(80vh,720px)] max-w-5xl w-[min(960px,96vw)]"
+      className="h-[min(100%,720px)] w-[min(960px,100%)] max-w-5xl"
     >
       <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap gap-1 border-b border-[var(--nova-border)] pb-2">

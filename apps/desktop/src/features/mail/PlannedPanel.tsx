@@ -43,7 +43,7 @@ export function PlannedPanel({
   }, []);
 
   return (
-    <section className="flex h-full flex-col overflow-y-auto px-6 py-5">
+    <section className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-5">
       <h2 className="mb-1 font-[family-name:var(--nova-font-display)] text-2xl">
         {t("planned")}
       </h2>
