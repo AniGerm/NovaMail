@@ -334,6 +334,15 @@ export function ContactsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query]);
 
+  useEffect(() => {
+    if (!open) return;
+    setSuggestField(null);
+    setSuggestQuery("");
+    setSuggestions([]);
+    setSuggestOpen(false);
+    setSuggestIndex(0);
+  }, [open]);
+
   // Poll while sharing so remote LDAP/CardDAV edits show up here too.
   useEffect(() => {
     if (!open || share?.mode === "local") return;
@@ -357,6 +366,8 @@ export function ContactsDialog({
 
   useEffect(() => {
     if (!open || !isDesktopShell()) return;
+    // Match known recipients only while creating a contact or actively typing
+    // in the editor — not when merely viewing a selected contact.
     const q = suggestQueryToken(suggestQuery);
     if (!suggestField || q.length < 2) {
       setSuggestions([]);
@@ -404,6 +415,14 @@ export function ContactsDialog({
     return items;
   }, [bookSettings.sortAscending, bookSettings.sortBy, contacts]);
 
+  function clearSuggest() {
+    setSuggestField(null);
+    setSuggestQuery("");
+    setSuggestions([]);
+    setSuggestOpen(false);
+    setSuggestIndex(0);
+  }
+
   function startNew() {
     setSelectedId(null);
     setDraft({
@@ -412,7 +431,7 @@ export function ContactsDialog({
     });
     setError(null);
     setStatusInfo(null);
-    setSuggestOpen(false);
+    clearSuggest();
   }
 
   function selectContact(contact: ContactDto) {
@@ -424,7 +443,8 @@ export function ContactsDialog({
     setDraft(next);
     setError(null);
     setStatusInfo(null);
-    setSuggestOpen(false);
+    // Viewing an existing contact must not open the known-recipient dropdown.
+    clearSuggest();
   }
 
   async function handleSave(event: React.FormEvent) {
@@ -470,6 +490,15 @@ export function ContactsDialog({
     setSuggestQuery(value);
   }
 
+  /** Focus-driven suggest only for new contacts; editing uses onChange. */
+  function trackSuggestOnFocus(
+    field: "given" | "family" | "email",
+    value: string,
+  ) {
+    if (draft.id) return;
+    trackSuggest(field, value);
+  }
+
   function suggestKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (!suggestOpen || suggestions.length === 0) return;
     if (event.key === "ArrowDown") {
@@ -489,8 +518,7 @@ export function ContactsDialog({
   }
 
   async function applySuggestion(item: RecipientSuggestion) {
-    setSuggestOpen(false);
-    setSuggestions([]);
+    clearSuggest();
     if (item.contactId || item.inContacts) {
       try {
         const list = await api.contactsList(item.email || item.name || null);
@@ -738,7 +766,7 @@ export function ContactsDialog({
                         role="combobox"
                         aria-expanded={suggestOpen && suggestField === "family"}
                         aria-autocomplete="list"
-                        onFocus={() => trackSuggest("family", draft.familyName)}
+                        onFocus={() => trackSuggestOnFocus("family", draft.familyName)}
                         onBlur={() => {
                           window.setTimeout(() => setSuggestOpen(false), 120);
                         }}
@@ -758,7 +786,7 @@ export function ContactsDialog({
                         role="combobox"
                         aria-expanded={suggestOpen && suggestField === "given"}
                         aria-autocomplete="list"
-                        onFocus={() => trackSuggest("given", draft.givenName)}
+                        onFocus={() => trackSuggestOnFocus("given", draft.givenName)}
                         onBlur={() => {
                           window.setTimeout(() => setSuggestOpen(false), 120);
                         }}
@@ -781,7 +809,7 @@ export function ContactsDialog({
                         role="combobox"
                         aria-expanded={suggestOpen && suggestField === "given"}
                         aria-autocomplete="list"
-                        onFocus={() => trackSuggest("given", draft.givenName)}
+                        onFocus={() => trackSuggestOnFocus("given", draft.givenName)}
                         onBlur={() => {
                           window.setTimeout(() => setSuggestOpen(false), 120);
                         }}
@@ -801,7 +829,7 @@ export function ContactsDialog({
                         role="combobox"
                         aria-expanded={suggestOpen && suggestField === "family"}
                         aria-autocomplete="list"
-                        onFocus={() => trackSuggest("family", draft.familyName)}
+                        onFocus={() => trackSuggestOnFocus("family", draft.familyName)}
                         onBlur={() => {
                           window.setTimeout(() => setSuggestOpen(false), 120);
                         }}
@@ -840,7 +868,7 @@ export function ContactsDialog({
                     role="combobox"
                     aria-expanded={suggestOpen && suggestField === "email"}
                     aria-autocomplete="list"
-                    onFocus={() => trackSuggest("email", draft.emails)}
+                    onFocus={() => trackSuggestOnFocus("email", draft.emails)}
                     onBlur={() => {
                       window.setTimeout(() => setSuggestOpen(false), 120);
                     }}

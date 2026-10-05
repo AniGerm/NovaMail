@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
-  ChevronDown,
   Eye,
   EyeOff,
   Inbox,
@@ -18,6 +17,7 @@ import type { AppError, MessageDetailDto, MessageSummaryDto } from "@/shared/api
 import { useT } from "@/shared/i18n/useT";
 import { displayName, formatRelative } from "@/shared/lib/format";
 import { useUiStore } from "@/shared/store/uiStore";
+import { HtmlMailBody } from "@/features/mail/HtmlMailBody";
 import { orderTriageQueue, triageNewCount } from "@/features/mail/triageQueue";
 
 interface QuickTriageProps {
@@ -175,6 +175,12 @@ export function QuickTriage({
     };
   }, [open, current, previewOpen]);
 
+  useEffect(() => {
+    if (!showOlderHint) return;
+    const timer = window.setTimeout(() => setHintDismissed(true), 4200);
+    return () => window.clearTimeout(timer);
+  }, [showOlderHint, index, newCount]);
+
   const advance = useCallback(() => {
     setPreviewOpen(false);
     setPreview(null);
@@ -242,9 +248,6 @@ export function QuickTriage({
   if (!open) return null;
 
   const done = !current;
-  const previewText = preview
-    ? plainPreview(preview.bodyText || preview.bodyHtml || current?.snippet || "")
-    : "";
   const shown = Math.min(index + (done ? 0 : 1), queue.length);
 
   return (
@@ -290,19 +293,16 @@ export function QuickTriage({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-2">
           {showOlderHint ? (
-            <div className="mb-3 flex items-start gap-2 rounded-[var(--nova-radius-md)] border border-[var(--nova-border)] bg-[var(--nova-surface)] px-3 py-2 text-sm">
-              <details className="min-w-0 flex-1" open>
-                <summary className="flex cursor-pointer list-none items-center gap-1.5 font-medium text-[var(--nova-ink)]">
-                  <ChevronDown size={14} className="shrink-0 text-[var(--nova-ink-muted)]" />
-                  {t("triageOlderHintShort")}
-                </summary>
-                <p className="mt-1 pl-5 text-[var(--nova-ink-muted)]">
-                  {t("triageOlderHint")}
-                </p>
-              </details>
+            <div
+              className="nova-toast-in mb-3 flex items-start gap-2 rounded-[var(--nova-radius-md)] border border-[color-mix(in_srgb,var(--nova-success)_35%,var(--nova-border))] bg-[color-mix(in_srgb,var(--nova-success)_14%,var(--nova-surface))] px-3 py-2 text-sm text-[var(--nova-success)]"
+              role="status"
+            >
+              <p className="min-w-0 flex-1 font-medium leading-5">
+                {t("triageOlderHint")}
+              </p>
               <button
                 type="button"
-                className="shrink-0 px-1 text-[var(--nova-ink-muted)]"
+                className="shrink-0 px-1 text-[var(--nova-success)]"
                 aria-label={t("triageDismissHint")}
                 onClick={() => setHintDismissed(true)}
               >
@@ -373,19 +373,26 @@ export function QuickTriage({
                 </div>
 
                 {previewOpen ? (
-                  <div className="mt-4 max-h-64 overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/30 bg-[var(--nova-accent-soft)]/35 px-4 py-4">
+                  <div className="mt-4 max-h-72 overflow-y-auto rounded-[var(--nova-radius-md)] border border-[var(--nova-accent)]/30 bg-[var(--nova-surface)] px-4 py-4">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--nova-accent)]">
                       {t("preview")}
                     </p>
-                    {aiSummary ? (
-                      <p className="mb-3 text-sm font-medium leading-6 text-[var(--nova-ink)]">
-                        {aiSummary}
-                      </p>
-                    ) : null}
                     {preview ? (
-                      <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
-                        {previewText || plainPreview(current.snippet)}
-                      </div>
+                      preview.bodyHtml?.trim() ? (
+                        <HtmlMailBody
+                          html={preview.bodyHtml}
+                          textFallback={
+                            preview.bodyText ||
+                            plainPreview(current.snippet)
+                          }
+                        />
+                      ) : (
+                        <div className="whitespace-pre-wrap text-[14px] leading-6 text-[var(--nova-ink)]">
+                          {plainPreview(
+                            preview.bodyText || current.snippet || "",
+                          )}
+                        </div>
+                      )
                     ) : (
                       <p className="text-sm text-[var(--nova-ink-muted)]">
                         {t("loadingPreview")}
