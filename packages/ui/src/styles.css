@@ -237,6 +237,43 @@ input[type="radio"]:focus-visible {
   animation: nova-slide-in 200ms ease-out;
 }
 
+@keyframes nova-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nova-toast-in {
+  animation: nova-toast-in 280ms ease-out;
+}
+
+/* Hide underlay scrollbars while a modal overlay is open (scrim is translucent). */
+html[data-nova-overlay-count] #root * {
+  scrollbar-width: none;
+}
+
+html[data-nova-overlay-count] #root *::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+html[data-nova-overlay-count] #root .nova-overlay,
+html[data-nova-overlay-count] #root .nova-overlay * {
+  scrollbar-width: thin;
+}
+
+html[data-nova-overlay-count] #root .nova-overlay *::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+  display: block !important;
+}
+
 /* Composer rich-text surface */
 .nova-rich-editor {
   line-height: 1.55;
